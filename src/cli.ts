@@ -4,15 +4,24 @@ import { envCookies, envSession } from "./session/env.ts";
 import { reparse, runImport, summarize } from "./core/import.ts";
 import type { ImportSummary } from "./core/import.ts";
 import { resolveEndpoint } from "./adapters/x/endpoint.ts";
+import { recordRun, startIngestServer } from "./ingest/server.ts";
+import { reparse as reparseFromDisk } from "./core/import.ts";
 import { loadCheckpoint } from "./store/checkpoint.ts";
 import { readJsonl } from "./store/files.ts";
 import type { NormalizedItem } from "./core/item.ts";
 
 const USAGE = `anansi — day 1: the importer
 
+  anansi ingest [--port N]
+      THE capture path. Starts a loopback receiver and prints a snippet to
+      paste into a logged-in x.com tab. The browser pages your bookmarks
+      using the session it already has; you never handle a credential.
+
+
   anansi import x [--since] [--pages N] [--resume] [--dry-run]
-      Page the bookmarks timeline, write every raw payload to disk, and
-      normalize into data/items-x.jsonl. Idempotent on (source, external_id).
+      Headless capture for YOUR OWN machine, using cookies in .env. Useful
+      for a cron job you run against your own account; never something to
+      ask another person to set up. Prefer 'ingest'.
 
         --since     incremental: stop at the first page holding a known id
         --pages N   stop after N pages (use --pages 1 for a smoke test)
@@ -49,6 +58,39 @@ function report(summary: ImportSummary): void {
   }
 }
 
+async function ingest(port?: number): Promise<void> {
+  const startedAt = Date.now();
+  const adapter = createXAdapter({});   // parse only; no session, by design
+
+  const server = await startIngestServer({
+    source: "x",
+    port,
+    onDone: async (stats) => {
+      console.log(`\n  page reported ${stats.pages} pages, ${stats.items} items. Parsing…`);
+      const summary = await reparseFromDisk(adapter);
+      const alarm = await recordRun("x", { pages: stats.pages, items: summary.itemsTotal }, startedAt);
+      report({ ...summary, zeroItemAlarm: alarm });
+    },
+  });
+
+  const template = await Bun.file(new URL("../snippets/import.js", import.meta.url)).text();
+  const snippet = template
+    .replaceAll("__ANANSI_ENDPOINT__", server.url)
+    .replaceAll("__ANANSI_TOKEN__", server.token);
+
+  console.log(`  listening on ${server.url}\n`);
+  console.log("  1. open https://x.com/i/bookmarks in a logged-in tab");
+  console.log("  2. open DevTools > Console");
+  console.log("  3. paste everything between the lines below, press enter\n");
+  console.log("  " + "-".repeat(72));
+  console.log(snippet);
+  console.log("  " + "-".repeat(72) + "\n");
+  console.log("  waiting… ctrl-c to stop.\n");
+
+  await server.finished;
+  server.stop();
+}
+
 async function doctor(): Promise<void> {
   console.log("  session provider  env (.env cookies)");
   const hasCookies = !!process.env.X_AUTH_TOKEN?.trim() && !!process.env.X_CSRF_TOKEN?.trim();
@@ -77,6 +119,7 @@ async function main(): Promise<void> {
       resume: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       pages: { type: "string" },
+      port: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -87,6 +130,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "ingest") return ingest(values.port ? Number(values.port) : undefined);
   if (command === "doctor") return doctor();
 
   if (command !== "import" && command !== "reparse" && command !== "stats") {

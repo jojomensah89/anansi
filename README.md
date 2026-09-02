@@ -11,22 +11,21 @@ normalizes them into a file you can re-run against.
 
 ```bash
 bun install
-cp .env.example .env      # paste auth_token and ct0 from a logged-in x.com tab
-bun run anansi doctor     # check the session and the endpoint resolution
-bun run anansi import x --pages 1   # smoke test
-bun run anansi import x   # the real thing
+bun run anansi ingest
 ```
+
+Then paste the printed snippet into the console of a logged-in x.com tab with
+Bookmarks open. That is the whole setup. **You never handle a credential.**
 
 ## Commands
 
 | command | what it does |
 |---|---|
-| `anansi doctor` | session, queryId, bearer, last run, saved cursor |
-| `anansi import x` | full backfill; raw pages to disk, normalized to `data/items-x.jsonl` |
-| `anansi import x --since` | incremental; stops at the first page holding a known id |
-| `anansi import x --resume` | continue from the saved cursor |
+| `anansi ingest` | the capture path: loopback receiver + a snippet for the browser |
 | `anansi reparse x` | re-run the parser over raw pages already on disk. No network. |
 | `anansi stats x` | authors, media, date range, top ten |
+| `anansi doctor` | endpoint resolution, last run, saved cursor |
+| `anansi import x` | headless capture for your own machine only — see below |
 
 ## How it is put together
 
@@ -45,23 +44,41 @@ not a redesign.
 from `.env`. Later: a cookie-reading CLI, then the extension. Nothing above
 that interface knows which one it got.
 
-### Why cookies in `.env`, not a cookie-store reader
+### Why the browser makes the request
 
-The spec flags it and this machine is the case that hits it: Chrome's
-app-bound encryption on Windows makes reading the live cookie jar a project of
-its own. Pasting two values takes ten seconds. The reader can arrive behind
-the same interface whenever it earns its keep.
+Because that is where the session already is. `credentials: "include"` makes
+the browser attach its own cookie jar; ct0 is read in-page for the CSRF header
+exactly as x.com's own code does, and never leaves the tab. What crosses to
+the loopback server is the untouched bookmark payload and nothing else.
+
+The alternative — reading `auth_token` out of DevTools into a `.env` — asks a
+person to handle a live credential for their entire account, to do a thing
+their browser is already authorised to do. It is not a setup step anyone
+should be given.
+
+This is also the extension's design, arriving early: browser fetches with the
+user's session, POSTs raw, server parses. When the extension replaces the
+snippet, only the sender changes.
 
 ### The queryId
 
-Not in the main bundle — in a lazily-loaded chunk. In a page you reach it
-through `window.webpackChunk_twitter_responsive_web`; a CLI has no page, so
-`endpoint.ts` fetches and scans the same public assets, one level deep, and
-caches the result for 12 hours. Four tiers, most-trusted first: `.env`
-override, disk cache, network scan, then a pinned value that logs loudly.
+Not in the main bundle — it lives in a lazily loaded chunk, reachable through
+`window.webpackChunk_twitter_responsive_web`. In the page that walk is two
+lines and always current, which is another reason capture belongs there.
 
-If a run comes back empty, `snippets/resolve.js` prints the current values
-from a logged-in tab.
+Measured, not assumed: fetching x.com from a CLI without cookies returns the
+**logged-out shell**, whose chunk graph is `LoggedOutShell` and never
+references Bookmarks. The bearer is reachable that way; the queryId is not and
+cannot be. `endpoint.ts` still exists for the headless path below, with four
+tiers (env, disk cache, network scan, pinned) and loud logging when it falls
+back.
+
+### The headless path, and who it is for
+
+`anansi import x` reads cookies from `.env` and makes the requests itself. It
+exists for one case: a cron job on your own machine, against your own account,
+where no browser is open to paste into. It is not documented for users, it is
+not in the quickstart, and `.env.example` says so.
 
 ### Raw first, always
 

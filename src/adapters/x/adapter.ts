@@ -6,7 +6,12 @@ import { resolveEndpoint } from "./endpoint.ts";
 import { parseBookmarksPage } from "./parse.ts";
 
 export interface XAdapterOptions {
-  session: SessionProvider;
+  /**
+   * Only needed by `pages()`. The parse-only paths — reparse, and the
+   * ingest server handling payloads the browser captured — construct the
+   * adapter without one, and must never be made to invent a credential.
+   */
+  session?: SessionProvider;
   /** 100 is what the timeline serves; the spike's 1,273 came back in 14 pages. */
   pageSize?: number;
 }
@@ -18,6 +23,12 @@ export function createXAdapter(opts: XAdapterOptions): CaptureAdapter {
     source: "x",
 
     async *pages(options: CaptureOptions): AsyncIterable<CapturePage> {
+      if (!opts.session) {
+        throw new Error(
+          "This adapter was built without a session, so it can only parse. " +
+            "Capture runs in the browser: `anansi ingest`.",
+        );
+      }
       const session = await opts.session.get();
       const { bookmarksQueryId } = await resolveEndpoint({
         cookies: { authToken: session.authToken, csrf: session.csrf },
