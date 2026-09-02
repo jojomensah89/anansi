@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.local
+
+# Your library. Raw payloads carry your session's view of your account —
+# never commit them.
+data/
+
+# Fixtures ARE committed (they are the regression suite), but only after
+# being scrubbed. See fixtures/README.md.

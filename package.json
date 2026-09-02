@@ -1,0 +1,16 @@
+{
+  "name": "anansi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A memory layer over everything you save, built so your coding agent can query it.",
+  "license": "MIT",
+  "scripts": {
+    "anansi": "bun run src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}
