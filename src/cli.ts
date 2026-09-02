@@ -7,7 +7,7 @@ import { resolveEndpoint } from "./adapters/x/endpoint.ts";
 import { recordRun, startIngestServer } from "./ingest/server.ts";
 import { reparse as reparseFromDisk } from "./core/import.ts";
 import { loadCheckpoint } from "./store/checkpoint.ts";
-import { readJsonl } from "./store/files.ts";
+import { dataPath, ensureDir, readJsonl } from "./store/files.ts";
 import type { NormalizedItem } from "./core/item.ts";
 
 const USAGE = `anansi — day 1: the importer
@@ -16,6 +16,10 @@ const USAGE = `anansi — day 1: the importer
       THE capture path. Starts a loopback receiver and prints a snippet to
       paste into a logged-in x.com tab. The browser pages your bookmarks
       using the session it already has; you never handle a credential.
+
+  anansi ingest --file <path>
+      Read a JSON file the snippet downloaded, for when the bridge popup
+      was blocked. Same destination, different courier.
 
 
   anansi import x [--since] [--pages N] [--resume] [--dry-run]
@@ -91,6 +95,42 @@ async function ingest(port?: number): Promise<void> {
   server.stop();
 }
 
+/**
+ * The popup-blocked path: one JSON file the page downloaded, holding every
+ * raw page. Same destination as the bridge, different courier.
+ */
+async function ingestFile(path: string): Promise<void> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) {
+    console.error(`  no such file: ${path}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const startedAt = Date.now();
+  const doc = (await file.json()) as { source?: string; pages?: { page: number; raw: unknown }[] };
+  const pages = doc.pages ?? [];
+  if (pages.length === 0) {
+    console.error("  that file holds no pages.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const dir = dataPath("raw", "x");
+  await ensureDir(dir);
+  for (const { page, raw } of pages) {
+    await Bun.write(
+      `${dir}/page-${startedAt}-${String(page).padStart(4, "0")}.json`,
+      JSON.stringify(raw),
+    );
+  }
+  console.log(`  wrote ${pages.length} raw pages. Parsing…`);
+
+  const summary = await reparseFromDisk(createXAdapter({}));
+  const alarm = await recordRun("x", { pages: pages.length, items: summary.itemsTotal }, startedAt);
+  report({ ...summary, zeroItemAlarm: alarm });
+}
+
 async function doctor(): Promise<void> {
   console.log("  session provider  env (.env cookies)");
   const hasCookies = !!process.env.X_AUTH_TOKEN?.trim() && !!process.env.X_CSRF_TOKEN?.trim();
@@ -120,6 +160,7 @@ async function main(): Promise<void> {
       "dry-run": { type: "boolean", default: false },
       pages: { type: "string" },
       port: { type: "string" },
+      file: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -130,7 +171,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "ingest") return ingest(values.port ? Number(values.port) : undefined);
+  if (command === "ingest") {
+    return values.file
+      ? ingestFile(values.file)
+      : ingest(values.port ? Number(values.port) : undefined);
+  }
   if (command === "doctor") return doctor();
 
   if (command !== "import" && command !== "reparse" && command !== "stats") {

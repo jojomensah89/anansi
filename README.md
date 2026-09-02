@@ -17,6 +17,30 @@ bun run anansi ingest
 Then paste the printed snippet into the console of a logged-in x.com tab with
 Bookmarks open. That is the whole setup. **You never handle a credential.**
 
+A small bridge window opens; keep it open until the import finishes. If your
+popup blocker eats it, the snippet saves `anansi-bookmarks.json` to your
+downloads instead — then `anansi ingest --file <path>`.
+
+### Why a bridge window
+
+x.com's CSP `connect-src` has no `127.0.0.1`, and console-evaluated code runs
+in page context under the page's CSP, so the snippet cannot POST here
+directly:
+
+```
+Connecting to 'http://127.0.0.1:8787/ingest' violates the following
+Content Security Policy directive: "connect-src 'self' blob: ..."
+```
+
+That rules out the bookmarklet-POSTs-to-localhost shape the build spec
+assumed. CSP governs *connections*, not *windows* — so the snippet opens
+`/bridge` on Anansi's own origin, and the payload crosses by `postMessage`,
+which is not a connection. The bridge, being same-origin with the server,
+POSTs freely. It only accepts messages whose origin is `https://x.com`.
+
+The extension will need none of this: a content script's fetches are bound by
+the extension's CSP, not the page's. This is the zero-install path until then.
+
 ## Commands
 
 | command | what it does |
