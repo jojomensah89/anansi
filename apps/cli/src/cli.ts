@@ -9,6 +9,8 @@ import { reparse as reparseFromDisk } from "./core/import.ts";
 import { loadCheckpoint } from "./store/checkpoint.ts";
 import { dataPath, ensureDir, readJsonl } from "./store/files.ts";
 import type { NormalizedItem } from "./core/item.ts";
+import { countItems, creators } from "@anansi/db";
+import { db, dbPath, ensureMigrated } from "./store/db.ts";
 
 const USAGE = `anansi — day 1: the importer
 
@@ -38,6 +40,12 @@ const USAGE = `anansi — day 1: the importer
   anansi stats x
       What is currently in the library.
 
+  anansi db migrate
+      Create or update the local SQLite library at data/anansi.db.
+
+  anansi db creators
+      Top authors, straight out of the database as a group-by.
+
   anansi doctor
       Check the session and the endpoint resolution before a real run.
 `;
@@ -48,6 +56,12 @@ function report(summary: ImportSummary): void {
     `\n  ${summary.pagesFetched} pages · ${summary.itemsParsed} parsed · ` +
       `${summary.itemsNew} new · ${summary.itemsTotal} in library · ${seconds}s`,
   );
+  if (summary.db) {
+    console.log(
+      `  db: ${summary.db.inserted} inserted · ${summary.db.updated} updated · ` +
+        `${summary.db.mediaRows} media rows`,
+    );
+  }
   if (summary.itemsParsed === 0) {
     console.error(
       "\n  ZERO ITEMS. This is the failure the build spec names as the one that\n" +
@@ -131,6 +145,23 @@ async function ingestFile(path: string): Promise<void> {
   report({ ...summary, zeroItemAlarm: alarm });
 }
 
+async function dbCommand(sub: string | undefined): Promise<void> {
+  if (sub === "migrate" || sub === undefined) {
+    ensureMigrated();
+    console.log(`  migrated ${dbPath()}`);
+    console.log(`  ${await countItems(db())} items`);
+    return;
+  }
+  if (sub === "creators") {
+    for (const row of await creators(db(), 15)) {
+      console.log(`  ${String(row.saves).padStart(4)}  @${row.authorHandle}`);
+    }
+    return;
+  }
+  console.error(`Unknown db subcommand: ${sub}`);
+  process.exitCode = 1;
+}
+
 async function doctor(): Promise<void> {
   console.log("  session provider  env (.env cookies)");
   const hasCookies = !!process.env.X_AUTH_TOKEN?.trim() && !!process.env.X_CSRF_TOKEN?.trim();
@@ -176,6 +207,7 @@ async function main(): Promise<void> {
       ? ingestFile(values.file)
       : ingest(values.port ? Number(values.port) : undefined);
   }
+  if (command === "db") return dbCommand(target);
   if (command === "doctor") return doctor();
 
   if (command !== "import" && command !== "reparse" && command !== "stats") {

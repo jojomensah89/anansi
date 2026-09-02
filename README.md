@@ -3,9 +3,20 @@
 A memory layer over everything you save — built so your coding agent can query
 it, not just so you can scroll it.
 
-Day 1 of the build spec: **the importer**. No database, no cloud account, no
-dependencies. It pages your X bookmarks, writes every raw payload to disk, and
-normalizes them into a file you can re-run against.
+Days 1–2 of the build spec: **the importer and the local library**. No cloud
+account, no server. It pages your X bookmarks in your own browser, writes
+every raw payload to disk, and normalizes them into a local SQLite file with
+FTS5 already indexed.
+
+```
+apps/cli/        the importer, adapters, ingest receiver
+packages/db/     schema, migrations, the driver-taking db module
+```
+
+Bun workspaces, laid out the way Better-T-Stack does, so day 8-9 adds
+`apps/web` as a merge rather than a migration. No `apps/server`: the MCP tools
+and the HTTP routes must call the same functions, and that is an import, not
+a network hop.
 
 ## Quickstart
 
@@ -48,6 +59,8 @@ the extension's CSP, not the page's. This is the zero-install path until then.
 | `anansi ingest` | the capture path: loopback receiver + a snippet for the browser |
 | `anansi reparse x` | re-run the parser over raw pages already on disk. No network. |
 | `anansi stats x` | authors, media, date range, top ten |
+| `anansi db migrate` | create or update `data/anansi.db` |
+| `anansi db creators` | top authors, as a group-by |
 | `anansi doctor` | endpoint resolution, last run, saved cursor |
 | `anansi import x` | headless capture for your own machine only — see below |
 
@@ -116,10 +129,26 @@ Every run appends to a ledger in `data/checkpoint-x.json`. A run that returns
 zero items after a run that didn't exits non-zero and says so. That single
 check is the difference between a tool and a tool you trust.
 
+### The database
+
+One `items` table for every source, with the platform payload kept in `raw`,
+so a new adapter is a parser rather than a migration. No `user_id` column —
+this is a single-tenant library, and that column arrives when there is a
+second user.
+
+FTS5 is external-content (`content='items'`), so the index stores no second
+copy of the text. That makes its three sync triggers mandatory rather than
+decorative, and it is why **`db:push` is unsafe here** — push diffs the
+Drizzle DSL and knows nothing about a virtual table. Generate and migrate.
+
+Upserts are idempotent on `(source, external_id)`. A row's `id` is generated
+once and never overwritten, and `saved_at` may only move backwards or toward
+being exact, so re-importing does not march every item's saved date forward.
+
 ## What is deliberately not here yet
 
-SQLite (day 2), FTS5 search (day 3), the MCP server (day 4), GitHub (day 5),
-media to R2 (day 6–7). `src/adapters/github/` is an empty directory waiting.
+Search over the CLI (day 3), the MCP server (day 4), GitHub (day 5), media to
+R2 (day 6-7). `apps/cli/src/adapters/github/` is an empty directory waiting.
 
 ## Terms
 

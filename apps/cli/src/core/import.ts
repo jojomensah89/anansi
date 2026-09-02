@@ -5,6 +5,8 @@ import { loadCheckpoint, saveCheckpoint, zeroItemRegression } from "../store/che
 import type { RunRecord } from "../store/checkpoint.ts";
 import { dataPath, ensureDir, readJsonl, writeJson, writeJsonl } from "../store/files.ts";
 import { readdir } from "node:fs/promises";
+import { upsertItems } from "@anansi/db";
+import { db, ensureMigrated } from "../store/db.ts";
 
 export interface ImportOptions extends CaptureOptions {
   /** Stop at the first page containing an id already on disk. */
@@ -21,6 +23,7 @@ export interface ImportSummary {
   itemsTotal: number;
   durationMs: number;
   zeroItemAlarm: boolean;
+  db?: { inserted: number; updated: number; mediaRows: number };
 }
 
 function rawDir(source: Source): string {
@@ -112,10 +115,7 @@ export async function runImport(
   }
 
   const all = [...byKey.values()].sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0));
-  if (!options.dryRun) {
-    await writeJsonl(itemsFile(source), all);
-    await writeJson(`stats-${source}.json`, summarize(all));
-  }
+  const written = options.dryRun ? undefined : await persist(source, all);
 
   return {
     source,
@@ -125,6 +125,7 @@ export async function runImport(
     itemsTotal: all.length,
     durationMs: Date.now() - startedAt,
     zeroItemAlarm: zeroItemRegression(checkpoint),
+    db: written,
   };
 }
 
@@ -151,8 +152,7 @@ export async function reparse(adapter: CaptureAdapter): Promise<ImportSummary> {
   }
 
   const all = [...byKey.values()].sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0));
-  await writeJsonl(itemsFile(source), all);
-  await writeJson(`stats-${source}.json`, summarize(all));
+  const written = await persist(source, all);
 
   return {
     source,
@@ -162,7 +162,21 @@ export async function reparse(adapter: CaptureAdapter): Promise<ImportSummary> {
     itemsTotal: all.length,
     durationMs: Date.now() - started,
     zeroItemAlarm: false,
+    db: written,
   };
+}
+
+/**
+ * jsonl stays as the durable, diffable record of what the parser produced;
+ * the database is what everything queries. Both are written from the same
+ * in-memory list so they can never disagree.
+ */
+async function persist(source: Source, all: NormalizedItem[]) {
+  await writeJsonl(itemsFile(source), all);
+  await writeJson(`stats-${source}.json`, summarize(all));
+
+  ensureMigrated();
+  return upsertItems(db(), all);
 }
 
 export function summarize(items: NormalizedItem[]) {

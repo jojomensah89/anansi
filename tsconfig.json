@@ -15,7 +15,7 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
 
-    "types": ["bun-types"]
+    "types": ["bun"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts", "packages/*/*.config.ts"]
 }

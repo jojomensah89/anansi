@@ -5,9 +5,12 @@
   "type": "module",
   "description": "A memory layer over everything you save, built so your coding agent can query it.",
   "license": "MIT",
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "anansi": "bun run src/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "anansi": "bun run apps/cli/src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "bun run --filter @anansi/db db:generate",
+    "db:studio": "bun run --filter @anansi/db db:studio"
   },
   "devDependencies": {
     "@types/bun": "latest",

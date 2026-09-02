@@ -1,0 +1,183 @@
+import { inArray, sql } from "drizzle-orm";
+import { items, media } from "./schema.ts";
+import type { AnansiDb, NewDbItem } from "./types.ts";
+
+/**
+ * The shape the adapters produce. Structurally identical to the CLI's
+ * NormalizedItem, restated here so packages/db does not depend on apps/cli —
+ * the dependency runs one way, and later the Worker will import this too.
+ */
+export interface IngestItem {
+  source: string;
+  externalId: string;
+  url: string;
+  kind: string;
+  authorHandle?: string;
+  authorName?: string;
+  title?: string;
+  body: string;
+  lang?: string;
+  postedAt?: number;
+  savedAt: number;
+  savedAtIsExact: boolean;
+  metrics: Record<string, number>;
+  media: { kind: string; originUrl: string; width?: number; height?: number }[];
+  raw: unknown;
+}
+
+export interface UpsertResult {
+  inserted: number;
+  updated: number;
+  mediaRows: number;
+}
+
+/**
+ * Idempotent on (source, external_id), because imports will run twice.
+ *
+ * Two details that matter on a re-run. The row's `id` is generated once and
+ * never overwritten, so anything that referenced it still resolves. And
+ * `saved_at` is only allowed to move backwards, or toward being exact: a
+ * backfill stamps import time, so letting a later backfill overwrite an
+ * earlier one would march every item's saved date forward every time you
+ * re-import.
+ */
+/**
+ * Idempotent on (source, external_id), because imports will run twice.
+ *
+ * Shape matters here. The obvious loop — select, insert, delete media, insert
+ * media, per item — is ~5,000 statements for this library and took 18s, and a
+ * transaction did not help because the cost is per-statement ORM overhead, not
+ * fsync. So: one read of the existing keys, all the decisions made in memory,
+ * then chunked bulk writes.
+ *
+ * Two details that matter on a re-run. A row's `id` is generated once and
+ * never overwritten, so anything already referencing it still resolves. And
+ * `saved_at` may only move backwards, or toward being exact — a backfill
+ * stamps import time, so letting each re-import overwrite the last would march
+ * every item's saved date forward forever.
+ */
+export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<UpsertResult> {
+  if (batch.length === 0) return { inserted: 0, updated: 0, mediaRows: 0 };
+
+  const existing = await db
+    .select({
+      id: items.id,
+      source: items.source,
+      externalId: items.externalId,
+      savedAt: items.savedAt,
+      savedAtExact: items.savedAtExact,
+    })
+    .from(items);
+
+  const prior = new Map(existing.map((r) => [`${r.source}:${r.externalId}`, r]));
+
+  let inserted = 0;
+  let updated = 0;
+  const rows: NewDbItem[] = [];
+  const mediaRows: (typeof media.$inferInsert)[] = [];
+
+  for (const item of batch) {
+    const was = prior.get(`${item.source}:${item.externalId}`);
+    const id = was?.id ?? crypto.randomUUID();
+    was ? updated++ : inserted++;
+
+    const savedAt = was
+      ? was.savedAtExact === 1
+        ? was.savedAt
+        : item.savedAtIsExact
+          ? item.savedAt
+          : Math.min(was.savedAt, item.savedAt)
+      : item.savedAt;
+
+    rows.push({
+      id,
+      source: item.source,
+      externalId: item.externalId,
+      url: item.url,
+      kind: item.kind,
+      authorHandle: item.authorHandle ?? null,
+      authorName: item.authorName ?? null,
+      title: item.title ?? null,
+      body: item.body,
+      lang: item.lang ?? null,
+      postedAt: item.postedAt ?? null,
+      savedAt,
+      savedAtExact: item.savedAtIsExact || was?.savedAtExact === 1 ? 1 : 0,
+      metrics: JSON.stringify(item.metrics),
+      raw: JSON.stringify(item.raw),
+    });
+
+    for (const m of item.media) {
+      if (!m.originUrl) continue;
+      mediaRows.push({
+        id: crypto.randomUUID(),
+        itemId: id,
+        kind: m.kind,
+        originUrl: m.originUrl,
+        width: m.width ?? null,
+        height: m.height ?? null,
+      });
+    }
+  }
+
+  // 15 columns per row; 200 rows is 3,000 bound parameters, well inside
+  // SQLite's limit and few enough statements that the overhead disappears.
+  const CHUNK = 200;
+
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      await tx
+        .insert(items)
+        .values(rows.slice(i, i + CHUNK))
+        .onConflictDoUpdate({
+          target: [items.source, items.externalId],
+          set: {
+            url: sql`excluded.url`,
+            kind: sql`excluded.kind`,
+            authorHandle: sql`excluded.author_handle`,
+            authorName: sql`excluded.author_name`,
+            title: sql`excluded.title`,
+            body: sql`excluded.body`,
+            lang: sql`excluded.lang`,
+            postedAt: sql`excluded.posted_at`,
+            savedAt: sql`excluded.saved_at`,
+            savedAtExact: sql`excluded.saved_at_exact`,
+            metrics: sql`excluded.metrics`,
+            raw: sql`excluded.raw`,
+          },
+        });
+    }
+
+    // Media is replaced wholesale per item: cheap at this size, and it means
+    // a post that lost an image does not keep a phantom row forever.
+    const ids = rows.map((r) => r.id);
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      await tx.delete(media).where(inArray(media.itemId, ids.slice(i, i + CHUNK)));
+    }
+    for (let i = 0; i < mediaRows.length; i += CHUNK) {
+      await tx.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoNothing();
+    }
+  });
+
+  return { inserted, updated, mediaRows: mediaRows.length };
+}
+
+export async function countItems(db: AnansiDb): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`count(*)` }).from(items);
+  return row?.n ?? 0;
+}
+
+/** Creators is a group-by, not a table. */
+export async function creators(db: AnansiDb, limit = 20) {
+  return db
+    .select({
+      authorHandle: items.authorHandle,
+      saves: sql<number>`count(*)`,
+      lastPosted: sql<number>`max(${items.postedAt})`,
+    })
+    .from(items)
+    .where(sql`${items.authorHandle} is not null`)
+    .groupBy(items.authorHandle)
+    .orderBy(sql`count(*) desc`)
+    .limit(limit);
+}
