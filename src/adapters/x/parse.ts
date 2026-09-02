@@ -65,11 +65,65 @@ function unwrapUser(user: Any | undefined): Any | undefined {
   return user.__typename === "UserUnavailable" ? undefined : user;
 }
 
+/**
+ * X rewrites every link in the text as a t.co shortener and ships the real
+ * target in an entity. A body full of `https://t.co/COLryoAtwK` is useless to
+ * the agent that is supposed to answer questions from it, so the text gets
+ * the expanded URL substituted back in.
+ *
+ * Media links are a special case: X appends a t.co pointing at the photo or
+ * video, which is already captured as a MediaRef. Those are dropped rather
+ * than expanded — the text should not end in a bare pic URL.
+ */
+function urlEntitiesOf(tweet: Any): { expand: Map<string, string>; drop: Set<string> } {
+  const expand = new Map<string, string>();
+  const drop = new Set<string>();
+
+  const urlSets: Any[][] = [
+    tweet?.legacy?.entities?.urls ?? [],
+    tweet?.note_tweet?.note_tweet_results?.result?.entity_set?.urls ?? [],
+  ];
+  for (const set of urlSets) {
+    for (const u of set) {
+      if (typeof u?.url === "string" && typeof u?.expanded_url === "string") {
+        expand.set(u.url, u.expanded_url);
+      }
+    }
+  }
+
+  const mediaSets: Any[][] = [
+    tweet?.legacy?.entities?.media ?? [],
+    tweet?.legacy?.extended_entities?.media ?? [],
+  ];
+  for (const set of mediaSets) {
+    for (const m of set) if (typeof m?.url === "string") drop.add(m.url);
+  }
+
+  return { expand, drop };
+}
+
+function expandUrls(text: string, tweet: Any): string {
+  const { expand, drop } = urlEntitiesOf(tweet);
+  if (expand.size === 0 && drop.size === 0) return text;
+
+  let out = text;
+  for (const url of drop) out = out.split(url).join("");
+  for (const [short, full] of expand) {
+    if (!drop.has(short)) out = out.split(short).join(full);
+  }
+  return out.replace(/[ \t]+\n/g, "\n").trim();
+}
+
 /** Long posts carry their real text on note_tweet; full_text is truncated. */
 function textOf(tweet: Any): string {
   const note = tweet?.note_tweet?.note_tweet_results?.result?.text;
-  if (typeof note === "string" && note.length > 0) return note;
-  return typeof tweet?.legacy?.full_text === "string" ? tweet.legacy.full_text : "";
+  const raw =
+    typeof note === "string" && note.length > 0
+      ? note
+      : typeof tweet?.legacy?.full_text === "string"
+        ? tweet.legacy.full_text
+        : "";
+  return expandUrls(raw, tweet);
 }
 
 function mediaOf(tweet: Any): MediaRef[] {
