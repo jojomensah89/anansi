@@ -9,7 +9,8 @@ import { reparse as reparseFromDisk } from "./core/import.ts";
 import { loadCheckpoint } from "./store/checkpoint.ts";
 import { dataPath, ensureDir, readJsonl } from "./store/files.ts";
 import type { NormalizedItem } from "./core/item.ts";
-import { countItems, creators } from "@anansi/db";
+import { countItems, creators, findByAuthor, recentSaves, searchItems } from "@anansi/db";
+import { HIT, OFF, parseSince, printHits } from "./format.ts";
 import { db, dbPath, ensureMigrated } from "./store/db.ts";
 
 const USAGE = `anansi — day 1: the importer
@@ -24,12 +25,12 @@ const USAGE = `anansi — day 1: the importer
       was blocked. Same destination, different courier.
 
 
-  anansi import x [--since] [--pages N] [--resume] [--dry-run]
+  anansi import x [--incremental] [--pages N] [--resume] [--dry-run]
       Headless capture for YOUR OWN machine, using cookies in .env. Useful
       for a cron job you run against your own account; never something to
       ask another person to set up. Prefer 'ingest'.
 
-        --since     incremental: stop at the first page holding a known id
+        --incremental  stop at the first page holding a known id
         --pages N   stop after N pages (use --pages 1 for a smoke test)
         --resume    continue from the saved cursor
         --dry-run   fetch and store raw pages, leave items.jsonl untouched
@@ -39,6 +40,13 @@ const USAGE = `anansi — day 1: the importer
 
   anansi stats x
       What is currently in the library.
+
+  anansi search "<query>" [--author h] [--source x] [--since 2026-08] [--limit N]
+      Keyword search. bm25 ranked, snippet highlighted.
+      --author alone lists everything from that handle.
+
+  anansi recent [--limit N]
+      Newest saves first.
 
   anansi db migrate
       Create or update the local SQLite library at data/anansi.db.
@@ -162,6 +170,33 @@ async function dbCommand(sub: string | undefined): Promise<void> {
   process.exitCode = 1;
 }
 
+async function search(
+  query: string | undefined,
+  opts: { author?: string; source?: string; since?: string; limit?: string },
+): Promise<void> {
+  // --author with no query is the whole of that author, newest first. It is
+  // the same question find_by_author answers for an agent.
+  if (opts.author && !query) {
+    return printHits(await findByAuthor(db(), opts.author, Number(opts.limit ?? 20)), false);
+  }
+  if (!query) {
+    console.error('  what are you looking for?  anansi search "ai sdk artifacts"');
+    process.exitCode = 1;
+    return;
+  }
+
+  printHits(
+    await searchItems(db(), {
+      query,
+      author: opts.author,
+      source: opts.source,
+      since: parseSince(opts.since),
+      limit: Number(opts.limit ?? 10),
+      mark: [HIT, OFF],
+    }),
+  );
+}
+
 async function doctor(): Promise<void> {
   console.log("  session provider  env (.env cookies)");
   const hasCookies = !!process.env.X_AUTH_TOKEN?.trim() && !!process.env.X_CSRF_TOKEN?.trim();
@@ -186,12 +221,16 @@ async function main(): Promise<void> {
     args: Bun.argv.slice(2),
     allowPositionals: true,
     options: {
-      since: { type: "boolean", default: false },
       resume: { type: "boolean", default: false },
+      incremental: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       pages: { type: "string" },
+      limit: { type: "string" },
       port: { type: "string" },
       file: { type: "string" },
+      author: { type: "string" },
+      source: { type: "string" },
+      since: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -206,6 +245,17 @@ async function main(): Promise<void> {
     return values.file
       ? ingestFile(values.file)
       : ingest(values.port ? Number(values.port) : undefined);
+  }
+  if (command === "search") {
+    return search(positionals.slice(1).join(" ") || undefined, {
+      author: values.author,
+      source: values.source,
+      since: values.since,
+      limit: values.limit,
+    });
+  }
+  if (command === "recent") {
+    return printHits(await recentSaves(db(), values.source, Number(values.limit ?? 20)), false);
   }
   if (command === "db") return dbCommand(target);
   if (command === "doctor") return doctor();
@@ -238,10 +288,10 @@ async function main(): Promise<void> {
   }
 
   const checkpoint = await loadCheckpoint("x");
-  console.log(`  importing x bookmarks${values.since ? " (incremental)" : ""}…`);
+  console.log(`  importing x bookmarks${values.incremental ? " (incremental)" : ""}…`);
   report(
     await runImport(adapter, {
-      incremental: values.since,
+      incremental: values.incremental,
       cursor: values.resume ? checkpoint.cursor : null,
       maxPages: values.pages ? Number(values.pages) : undefined,
       dryRun: values["dry-run"],

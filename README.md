@@ -59,6 +59,8 @@ the extension's CSP, not the page's. This is the zero-install path until then.
 | `anansi ingest` | the capture path: loopback receiver + a snippet for the browser |
 | `anansi reparse x` | re-run the parser over raw pages already on disk. No network. |
 | `anansi stats x` | authors, media, date range, top ten |
+| `anansi search "<q>"` | bm25-ranked keyword search, snippet highlighted |
+| `anansi recent` | newest saves first |
 | `anansi db migrate` | create or update `data/anansi.db` |
 | `anansi db creators` | top authors, as a group-by |
 | `anansi doctor` | endpoint resolution, last run, saved cursor |
@@ -145,10 +147,33 @@ Upserts are idempotent on `(source, external_id)`. A row's `id` is generated
 once and never overwritten, and `saved_at` may only move backwards or toward
 being exact, so re-importing does not march every item's saved date forward.
 
+### Search, and where it stops working
+
+FTS5 with BM25 and `snippet()`. Porter stemming works — searching *streaming*
+finds *Stream*. Every term is quoted before binding, because `match` throws on
+an apostrophe, a bare `*`, an unbalanced quote or the bare word `AND`, and a
+thrown query inside an MCP call looks to an agent like the library is broken.
+`search.test.ts` holds those inputs; a trailing `*` and an explicit "phrase"
+are kept as real affordances.
+
+**It does not work for CJK.** `unicode61` splits on non-alphanumeric
+characters, and Japanese has no spaces, so a whole run becomes one token:
+
+```
+query            FTS  LIKE
+デザイン           0     1   <- invisible to search
+UIデザイン          0     1   <- invisible to search
+```
+
+That is 496 items, 39% of this library. `scripts/probe-cjk.ts` measures it.
+The fix is either a second FTS table using the `trigram` tokenizer, or the
+vectors the spec defers to phase 2 — this is the "keyword search visibly
+fails" trigger it describes, arriving earlier than expected.
+
 ## What is deliberately not here yet
 
-Search over the CLI (day 3), the MCP server (day 4), GitHub (day 5), media to
-R2 (day 6-7). `apps/cli/src/adapters/github/` is an empty directory waiting.
+The MCP server (day 4), GitHub (day 5), media to R2 (day 6-7).
+`apps/cli/src/adapters/github/` is an empty directory waiting.
 
 ## Terms
 
