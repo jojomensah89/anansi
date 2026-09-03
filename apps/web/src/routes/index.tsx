@@ -6,6 +6,8 @@ import { Palette } from "../components/palette.tsx";
 import { Detail } from "../components/detail.tsx";
 import { FilterBar, type Filters } from "../components/filters.tsx";
 import { SelectBar } from "../components/selectbar.tsx";
+import { MosaicView, RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
+import { useMasonry } from "../components/masonry.tsx";
 import { api, type ItemRow } from "../lib/api.ts";
 
 export const Route = createFileRoute("/")({ component: Library });
@@ -32,9 +34,11 @@ function Library() {
   const [authors, setAuthors] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>("grid");
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const sentinel = useRef<HTMLDivElement>(null);
+  const masonry = useMasonry(items);
 
   const refreshStats = useCallback(() => {
     api
@@ -142,6 +146,9 @@ function Library() {
             {total.toLocaleString()} items · {authors} authors
           </span>
 
+          <span style={{ width: 1, height: 18, background: "var(--line)", margin: "0 4px" }} />
+          <ViewTabs value={view} onChange={setView} />
+
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
             <button
               type="button"
@@ -238,30 +245,33 @@ function Library() {
             </div>
           )}
 
-          {/*
-            alignItems: start keeps every card its natural height. Rows end
-            unevenly, which is the honest result of a library that mixes
-            media-heavy saves with text ones.
-          */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-              gap: 14,
-              alignItems: "start",
-            }}
-          >
-            {items.map((item) => (
-              <Card
-                key={item.id}
-                item={item}
-                selectable={selecting}
-                selected={picked.has(item.id)}
-                onOpen={(i) => setOpenId(i.id)}
-                onToggle={toggle}
-              />
-            ))}
-          </div>
+          {view === "grid" && (
+            /*
+              Columns packed shortest-first rather than a CSS grid. Grid rows
+              are as tall as their tallest member, so a 137px card beside a
+              535px one leaves 400px of hole.
+            */
+            <div ref={masonry.ref} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+              {masonry.buckets.map((bucket, column) => (
+                <div key={column} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+                  {bucket.map((item) => (
+                    <Card
+                      key={item.id}
+                      item={item}
+                      selectable={selecting}
+                      selected={picked.has(item.id)}
+                      onOpen={(i) => setOpenId(i.id)}
+                      onToggle={toggle}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {view === "row" && <RowView items={items} onOpen={(i) => setOpenId(i.id)} />}
+          {view === "timeline" && <TimelineView items={items} onOpen={(i) => setOpenId(i.id)} />}
+          {view === "mosaic" && <MosaicView items={items} onOpen={(i) => setOpenId(i.id)} />}
           <div ref={sentinel} style={{ height: 40 }} />
           {loading && (
             <div className="mono" style={{ fontSize: 11, color: "var(--faint)", padding: 8 }}>
