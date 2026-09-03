@@ -73,6 +73,27 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
 
   const prior = new Map(existing.map((r) => [`${r.source}:${r.externalId}`, r]));
 
+  /**
+   * Media is replaced wholesale below, which is right for staleness — a post
+   * that lost an image should not keep a phantom row. But a fresh uuid and a
+   * null stored_key on every re-import would orphan every uploaded thumbnail
+   * and re-download the library each time. So the identity and the upload
+   * state are carried across, keyed by what actually identifies a media item:
+   * its item and its origin url.
+   */
+  const priorMedia = new Map(
+    (
+      await db
+        .select({
+          id: media.id,
+          itemId: media.itemId,
+          originUrl: media.originUrl,
+          storedKey: media.storedKey,
+        })
+        .from(media)
+    ).map((m) => [`${m.itemId}|${m.originUrl}`, m]),
+  );
+
   let inserted = 0;
   let updated = 0;
   const rows: NewDbItem[] = [];
@@ -120,11 +141,13 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
 
     for (const m of item.media) {
       if (!m.originUrl) continue;
+      const seen = priorMedia.get(`${id}|${m.originUrl}`);
       mediaRows.push({
-        id: crypto.randomUUID(),
+        id: seen?.id ?? crypto.randomUUID(),
         itemId: id,
         kind: m.kind,
         originUrl: m.originUrl,
+        storedKey: seen?.storedKey ?? null,
         width: m.width ?? null,
         height: m.height ?? null,
       });

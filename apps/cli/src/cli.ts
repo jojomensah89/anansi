@@ -16,6 +16,9 @@ import { HIT, OFF, parseSince, printHits } from "./format.ts";
 import { createAnansiServer } from "@anansi/mcp";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { db, dbPath, ensureMigrated } from "./store/db.ts";
+import { localSink, r2Config, r2Sink } from "./media/sink.ts";
+import { syncMedia } from "./media/sync.ts";
+import type { MediaSize } from "./media/sync.ts";
 
 const USAGE = `anansi — day 1: the importer
 
@@ -59,6 +62,10 @@ const USAGE = `anansi — day 1: the importer
   anansi serve --mcp
       Serve the four MCP tools over stdio, for your own agent. Speaks
       JSON-RPC on stdout; point Claude Code at it, do not run it by hand.
+
+  anansi media sync [--limit N] [--size small|medium] [--r2]
+      Fetch thumbnails for every media row that has none. Local by default;
+      --r2 uploads instead. Video is stored as its poster, never the MP4.
 
   anansi db migrate
       Create or update the local SQLite library at data/anansi.db.
@@ -236,6 +243,56 @@ async function serveMcp(): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
+async function mediaCommand(sub: string | undefined, values: Record<string, unknown>): Promise<void> {
+  if (sub !== "sync" && sub !== undefined) {
+    console.error(`Unknown media subcommand: ${sub}`);
+    process.exitCode = 1;
+    return;
+  }
+  ensureMigrated();
+
+  const wantR2 = values.r2 === true;
+  const config = r2Config();
+  if (wantR2 && !config) {
+    console.error(
+      "  --r2 needs R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET in .env.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const sink = wantR2 && config ? r2Sink(config) : localSink();
+
+  console.log(`  storing to ${sink.name}`);
+  const result = await syncMedia(db(), {
+    sink,
+    size: (values.size as MediaSize) ?? "small",
+    limit: values.limit ? Number(values.limit) : undefined,
+    // Carriage return only overwrites on a terminal; piped or redirected
+    // line per item, which is how you get a 1,200-line log for a progress bar.
+    onProgress: (done, total) => {
+      if (process.stdout.isTTY)
+        process.stdout.write(`  ${done}/${total}\r`);
+      else if (done % 200 === 0 || done === total) console.log(`  ${done}/${total}`);
+    },
+  });
+  if (process.stdout.isTTY) process.stdout.write("\n");
+
+  const mb = (result.bytes / 1024 / 1024).toFixed(1);
+  const secs = (result.durationMs / 1000).toFixed(1);
+  console.log(
+    `  ${result.stored} stored · ${result.skipped} already present · ` +
+      `${result.failed.length} failed · ${mb} MB · ${secs}s`,
+  );
+  console.log(`  ${result.storedOverall}/${result.total} media rows now stored`);
+
+  if (result.failed.length) {
+    console.log("\n  failures (first 5):");
+    for (const f of result.failed.slice(0, 5)) {
+      console.log(`    ${f.reason}  ${f.url}`);
+    }
+  }
+}
+
 async function doctor(): Promise<void> {
   console.log("  session provider  env (.env cookies)");
   const hasCookies = !!process.env.X_AUTH_TOKEN?.trim() && !!process.env.X_CSRF_TOKEN?.trim();
@@ -271,6 +328,8 @@ async function main(): Promise<void> {
       source: { type: "string" },
       since: { type: "string" },
       mcp: { type: "boolean", default: false },
+      r2: { type: "boolean", default: false },
+      size: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -298,6 +357,7 @@ async function main(): Promise<void> {
     return printHits(await recentSaves(db(), values.source, Number(values.limit ?? 20)), false);
   }
   if (command === "serve") return serveMcp();
+  if (command === "media") return mediaCommand(target, values);
   if (command === "db") return dbCommand(target);
   if (command === "doctor") return doctor();
 

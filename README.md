@@ -62,6 +62,7 @@ the extension's CSP, not the page's. This is the zero-install path until then.
 | `anansi search "<q>"` | bm25-ranked keyword search, snippet highlighted |
 | `anansi recent` | newest saves first |
 | `anansi import github` | your starred repos, with a real `starred_at` |
+| `anansi media sync` | fetch thumbnails; `--r2` uploads instead of `data/media/` |
 | `anansi serve --mcp` | the four MCP tools over stdio, for your agent |
 | `anansi db migrate` | create or update `data/anansi.db` |
 | `anansi db creators` | top authors, as a group-by |
@@ -228,9 +229,41 @@ timestamps — backfilled X items are stamped with import time, so they outrank
 stars you added months ago. Within a source the ordering is correct, and
 `recent_saves(source: "github")` is exact.
 
+### Media
+
+`anansi media sync` fetches a thumbnail for every media row that has none.
+Local by default, `--r2` to upload; one `MediaSink` interface, the same driver
+seam the database uses.
+
+The spec says "fetch and convert locally". There is nothing to convert —
+`pbs.twimg.com` does it:
+
+```
+original                 75.5 KB  image/jpeg
+?format=webp&name=small  18.9 KB  image/webp
+```
+
+So no `sharp`, no native module, no local CPU, and nothing in this path that
+could not also run inside a Worker. The fetch *is* the conversion.
+
+Measured on the real library: **1,246 thumbnails, 31.6 MB, zero failures, 101
+seconds.** The spec estimated 150-200 MB for fewer items; the real figure is
+about a fifth of that, and 0.3% of R2's 10 GB free tier.
+
+Video is stored as its poster frame and never as the MP4 — that is the one
+line in the cost section that could actually start a bill.
+
+`stored_key` survives a reparse. Media rows are replaced wholesale on import,
+which is right for staleness, but a fresh uuid each time would orphan every
+uploaded file and re-download the library; identity and upload state are
+carried across on `(item_id, origin_url)`.
+
+The R2 path is wired but **unverified against a live bucket** — that needs a
+Cloudflare account, which days 1-7 deliberately do not require.
+
 ## What is deliberately not here yet
 
-Media to R2 (day 6-7), the edge deploy (day 8-9).
+The edge deploy (day 8-9).
 
 ## Terms
 

@@ -4,3 +4,5 @@ export type { AnansiDb, DbItem, NewDbItem } from "./types.ts";
 export { upsertItems, countItems, creators } from "./queries.ts";
 export { searchItems, recentSaves, findByAuthor, getItem, toFtsQuery } from "./search.ts";
 export type { SearchHit, SearchOptions, ItemDetail } from "./search.ts";
+export { pendingMedia, markMediaStored, mediaStats } from "./media.ts";
+export type { PendingMedia } from "./media.ts";
