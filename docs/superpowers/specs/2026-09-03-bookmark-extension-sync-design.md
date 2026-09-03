@@ -96,7 +96,7 @@ The chosen flow is:
 Platform action / toolbar / Chrome bookmark
                     |
                     v
-       Source adapter normalizes capture
+       Source adapter emits versioned capture
                     |
                     v
         Durable IndexedDB capture queue
@@ -114,7 +114,7 @@ Platform action / toolbar / Chrome bookmark
                  Web library
 ```
 
-The queue is a deep module: platform adapters learn only how to submit a normalized capture. Persistence, retry scheduling, backoff, server receipts, dead-letter handling, and cleanup remain behind one small interface.
+The queue is a deep module: platform adapters learn only how to submit a validated, versioned capture. Persistence, retry scheduling, backoff, server receipts, dead-letter handling, and cleanup remain behind one small interface.
 
 ```ts
 interface CaptureQueue {
@@ -136,16 +136,13 @@ The only long-lived extension credential is the user's Anansi ingestion token. I
 
 ## 6. Capture contract
 
-All source adapters produce the same versioned envelope:
+All source adapters produce a versioned envelope. The payload is a discriminated union so historical imports can preserve Anansi's existing server-side parsing advantage while precise save/unsave and web actions carry one normalized item:
 
 ```ts
-interface BookmarkCapture {
+interface CaptureBase {
   schemaVersion: 1;
   eventId: string;
   source: "x" | "reddit" | "tiktok" | "web";
-  action: "save" | "unsave";
-  externalId: string;
-  canonicalUrl: string;
   observedAt: number;
   captureMethod:
     | "platform_event"
@@ -153,22 +150,42 @@ interface BookmarkCapture {
     | "toolbar"
     | "context_menu"
     | "chrome_bookmark";
-  normalizedItem: NormalizedItem;
+}
+
+interface RawPageCapture extends CaptureBase {
+  payloadType: "raw_page";
+  action: "snapshot";
+  runId: string;
+  page: number;
+  cursor?: string;
+  raw: unknown;
+  rawPayloadVersion?: string;
+}
+
+interface ItemEventCapture extends CaptureBase {
+  payloadType: "item_event";
+  action: "save" | "unsave";
+  externalId: string;
+  canonicalUrl: string;
+  normalizedItem?: NormalizedItem;
   rawPayloadVersion?: string;
   sourceLink?: {
     kind: "chrome_bookmark";
     externalId: string;
   };
 }
+
+type BookmarkCapture = RawPageCapture | ItemEventCapture;
 ```
 
 Invariants:
 
 - `eventId` is generated once before persistence and remains stable across retries.
-- `externalId` is the platform object identifier for social sources.
+- Item-event `externalId` is the platform object identifier for social sources.
 - Generic web items use a deterministic identifier derived from the canonical URL.
 - `observedAt` represents when the source action was observed, not when the server imported it.
-- Raw payloads are optional, bounded, stripped of credentials, and retained only long enough to diagnose or reparse a failed capture.
+- Raw-page captures are bounded and stripped of credentials. They remain durable until acknowledged, then are removed from the outbox; the server may retain only the normalized item data and bounded diagnostic shape information.
+- Existing server-side source parsers continue to handle raw import pages, so a parser correction does not require duplicating parsing logic in the extension.
 - An unsave never deletes the canonical item. It changes source state to not currently saved.
 
 ## 7. Platform adapters
@@ -312,6 +329,7 @@ Content-Type: application/json
 ```json
 {
   "schemaVersion": 1,
+  "payloadType": "item_event",
   "eventId": "...",
   "source": "x",
   "action": "save",
