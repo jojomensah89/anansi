@@ -13,8 +13,8 @@ import { serverEnv } from "../server/env.ts";
 export const Route = createFileRoute("/api/$")({
   server: {
     handlers: {
-      GET: ({ request }) => handleApi(serverEnv(), request),
-      POST: ({ request }) => handleApi(serverEnv(), request),
+      GET: async ({ request }) => handleApi(await serverEnv(), request),
+      POST: async ({ request }) => handleApi(await serverEnv(), request),
     },
   },
 });

@@ -290,6 +290,29 @@ Both `/api/ingest` and `/mcp` are **closed unless a token is configured**. An
 open ingest on a public URL is an invitation to have someone else's library
 merged into yours.
 
+### Testing it before deploying
+
+Vite's dev SSR runs under Node, which cannot load `bun:sqlite`, so the
+TanStack dev server cannot reach the local library. That is a dev-runtime
+limitation, not a problem with the code — `handleApi` and `handleMcp` are
+plain `Request -> Response`, so they mount on Bun directly:
+
+```bash
+INGEST_TOKEN=dev-ingest MCP_TOKEN=dev-mcp bun run apps/web/scripts/serve-local.ts
+bun run apps/web/scripts/mcp-http-smoke.ts
+```
+
+Verified locally against the real 1,274-item library: every read endpoint,
+keyset pagination with no overlap between pages, bearer auth on ingest
+(401 without, 401 wrong, idempotent with), and the full MCP handshake over
+HTTP — `initialize`, `tools/list`, `search_memory`, `get_item` — using the
+same `createAnansiServer` the stdio CLI calls. The FTS index and all 1,246
+`stored_key`s survive an HTTP ingest.
+
+**What is still untested:** the three-line TanStack route wrapper and the D1
+binding. Those are the only two layers a deploy would exercise for the first
+time.
+
 **Not yet deployed.** `bun run deploy` needs a Cloudflare account, which
 nothing before this point required.
 

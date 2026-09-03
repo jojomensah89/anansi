@@ -10,12 +10,12 @@ import { serverEnv } from "../server/env.ts";
 export const Route = createFileRoute("/mcp")({
   server: {
     handlers: {
-      POST: ({ request }) => {
-        const { db, mcpToken } = serverEnv();
+      POST: async ({ request }) => {
+        const { db, mcpToken } = await serverEnv();
         return handleMcp({ db, token: mcpToken }, request);
       },
-      GET: ({ request }) => {
-        const { db, mcpToken } = serverEnv();
+      GET: async ({ request }) => {
+        const { db, mcpToken } = await serverEnv();
         return handleMcp({ db, token: mcpToken }, request);
       },
     },

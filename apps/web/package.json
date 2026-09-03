@@ -5,7 +5,8 @@
   "scripts": {
     "build": "vite build",
     "serve": "vite preview",
-    "dev:bare": "vite dev"
+    "dev:bare": "vite dev",
+    "serve:local": "bun run scripts/serve-local.ts"
   },
   "dependencies": {
     "@anansi/db": "workspace:*",
@@ -24,7 +25,9 @@
     "react-dom": "catalog:",
     "sonner": "catalog:",
     "tailwindcss": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "evlog": "^2.27.1",
+    "nitro": "^3.0.260610-beta"
   },
   "devDependencies": {
     "@anansi/config": "workspace:*",

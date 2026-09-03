@@ -10,7 +10,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       // resolved by workerd at runtime; node builds cannot bundle it
-      external: ["cloudflare:workers"],
+      // Neither resolves in the other runtime; env.ts imports both dynamically.
+      external: ["cloudflare:workers", "bun:sqlite"],
     },
   },
   resolve: {
