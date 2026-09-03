@@ -15,10 +15,12 @@
  * after the app has cached its own reference patches nothing.
  */
 
+import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
+
 type Outbound =
-  | { anansi: "observed"; source: "tiktok"; operation: string; raw: unknown; items: number }
-  | { anansi: "scanned"; source: "tiktok" }
-  | { anansi: "error"; source: "tiktok"; message: string };
+  | { action: "observed"; operation: string; raw: unknown; items: number }
+  | { action: "scanned" }
+  | { action: "error"; errorCode: "capture_failed" };
 
 export default defineContentScript({
   matches: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
@@ -26,7 +28,20 @@ export default defineContentScript({
   runAt: "document_start",
 
   main() {
-    const send = (msg: Outbound) => window.postMessage(msg, window.location.origin);
+    let nonce: string | null = null;
+    const send = (msg: Outbound) => {
+      if (!nonce) return;
+      window.postMessage(
+        {
+          ...msg,
+          anansi: "page-event",
+          messageVersion: MESSAGE_PROTOCOL_VERSION,
+          source: "tiktok",
+          nonce,
+        },
+        window.location.origin,
+      );
+    };
 
     let watched: string[] = [];
     let scanning = false;
@@ -37,7 +52,7 @@ export default defineContentScript({
       const list = (raw as { itemList?: unknown[]; items?: unknown[] })?.itemList
         ?? (raw as { items?: unknown[] })?.items;
       if (!Array.isArray(list) || list.length === 0) return;
-      send({ anansi: "observed", source: "tiktok", operation, raw, items: list.length });
+      send({ action: "observed", operation, raw, items: list.length });
     };
 
     const nativeFetch = window.fetch;
@@ -85,8 +100,21 @@ export default defineContentScript({
 
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
-      const msg = event.data as { anansi?: string; config?: { watchUrls?: string[]; source?: string } };
-      if (msg?.anansi === "configure" && msg.config?.source === "tiktok") {
+      const msg = event.data as {
+        anansi?: string;
+        action?: string;
+        config?: { watchUrls?: string[]; source?: string };
+        messageVersion?: number;
+        nonce?: string;
+      };
+      if (
+        msg?.anansi === "page-command" &&
+        msg.action === "configure" &&
+        msg.messageVersion === MESSAGE_PROTOCOL_VERSION &&
+        typeof msg.nonce === "string" &&
+        msg.config?.source === "tiktok"
+      ) {
+        nonce = msg.nonce;
         watched = msg.config.watchUrls ?? [];
       }
       /**
@@ -99,7 +127,13 @@ export default defineContentScript({
        * It stops when the page stops growing twice in a row, which is what
        * "no more to load" looks like from out here.
        */
-      if ((msg?.anansi === "scan" || msg?.anansi === "backfill") && msg.config?.source === "tiktok") {
+      if (
+        msg?.anansi === "page-command" &&
+        msg.action === "scan" &&
+        msg.messageVersion === MESSAGE_PROTOCOL_VERSION &&
+        msg.nonce === nonce &&
+        msg.config?.source === "tiktok"
+      ) {
         if (scanning) return;
         scanning = true;
         void (async () => {
@@ -111,7 +145,7 @@ export default defineContentScript({
             stalled = document.body.scrollHeight > before ? 0 : stalled + 1;
           }
           scanning = false;
-          send({ anansi: "scanned", source: "tiktok" });
+          send({ action: "scanned" });
         })();
       }
     });

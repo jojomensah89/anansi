@@ -11,6 +11,12 @@
  * no token, no server url and no configuration secret is ever sent into that
  * world, and nothing coming out of it is acted on beyond being forwarded.
  */
+import {
+  MESSAGE_PROTOCOL_VERSION,
+  parseExtensionMessage,
+  type PlatformSource,
+} from "../lib/messages.ts";
+
 export default defineContentScript({
   matches: [
     "https://x.com/*",
@@ -24,19 +30,42 @@ export default defineContentScript({
   runAt: "document_start",
 
   main() {
+    // Correlation only. MAIN-world code can observe this value, so it is not
+    // an authentication secret against code already executing in the page.
+    const nonce = crypto.randomUUID();
+
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
-      const msg = event.data as { anansi?: string } | undefined;
-      // Commands travel the other way; do not echo them back.
-      if (!msg?.anansi || ["configure", "backfill", "scan"].includes(msg.anansi)) return;
-      void browser.runtime.sendMessage(msg).catch(() => {});
+      const parsed = parseExtensionMessage(event.data, {
+        path: "page-to-relay",
+        pageUrl: window.location.href,
+        expectedNonce: nonce,
+      });
+      if (!parsed.ok) return;
+      void browser.runtime.sendMessage(parsed.message).catch(() => {});
     });
 
     browser.runtime.onMessage.addListener((message: unknown) => {
-      const msg = message as { anansi?: string } | undefined;
-      if (msg?.anansi && ["configure", "backfill", "scan"].includes(msg.anansi)) {
-        window.postMessage(msg, window.location.origin);
-      }
+      const incoming = message as {
+        anansi?: unknown;
+        action?: unknown;
+        source?: unknown;
+        config?: unknown;
+      };
+      const candidate = {
+        anansi: incoming?.anansi,
+        messageVersion: MESSAGE_PROTOCOL_VERSION,
+        source: incoming?.source as PlatformSource,
+        nonce,
+        action: incoming?.action,
+        config: incoming?.config,
+      };
+      const parsed = parseExtensionMessage(candidate, {
+        path: "relay-to-page",
+        pageUrl: window.location.href,
+        expectedNonce: nonce,
+      });
+      if (parsed.ok) window.postMessage(parsed.message, window.location.origin);
       return undefined;
     });
   },

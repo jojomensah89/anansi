@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RemoteConfig, SourceConfig, Status } from "../background.ts";
+import { MESSAGE_PROTOCOL_VERSION } from "../../lib/messages.ts";
 
 /**
  * The popup.
@@ -71,14 +72,28 @@ const MARK_PROPS = {
 } as const;
 
 const run = (source: string) =>
-  void browser.runtime.sendMessage({ anansi: "start", source });
+  void browser.runtime.sendMessage({
+    anansi: "popup-command",
+    messageVersion: MESSAGE_PROTOCOL_VERSION,
+    action: "start",
+    source,
+  });
 
 /** Stop persists through the background run coordinator before the UI changes. */
 const stop = (source: string) =>
-  void browser.runtime.sendMessage({ anansi: "stop", source });
+  void browser.runtime.sendMessage({
+    anansi: "popup-command",
+    messageVersion: MESSAGE_PROTOCOL_VERSION,
+    action: "stop",
+    source,
+  });
 
 const retryQueue = () =>
-  void browser.runtime.sendMessage({ anansi: "retry-queue" });
+  void browser.runtime.sendMessage({
+    anansi: "popup-command",
+    messageVersion: MESSAGE_PROTOCOL_VERSION,
+    action: "retry-queue",
+  });
 
 export default function App() {
   const [server, setServer] = useState("");
@@ -128,7 +143,11 @@ export default function App() {
     const load = () => {
       fetch(`${base}/api/extension/config`).then((r) => (r.ok ? r.json() : null)).then(setConfig).catch(() => setConfig(null));
       fetch(`${base}/api/stats`).then((r) => (r.ok ? r.json() : null)).then(setStats).catch(() => setStats(null));
-      void browser.runtime.sendMessage({ anansi: "queue-status" }).then((response) => {
+      void browser.runtime.sendMessage({
+        anansi: "popup-command",
+        messageVersion: MESSAGE_PROTOCOL_VERSION,
+        action: "queue-status",
+      }).then((response) => {
         const snapshot = (response as { ok?: boolean; snapshot?: DurableSnapshot } | undefined)?.snapshot;
         if (!snapshot) return;
         setQueueStatus(snapshot.queue);
@@ -152,7 +171,11 @@ export default function App() {
 
   const save = async () => {
     await browser.storage.local.set({ server: base, token, syncEvery });
-    await browser.runtime.sendMessage({ anansi: "reschedule" });
+    await browser.runtime.sendMessage({
+      anansi: "popup-command",
+      messageVersion: MESSAGE_PROTOCOL_VERSION,
+      action: "reschedule",
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };

@@ -10,6 +10,8 @@
  * It still parses nothing. Raw listings go up exactly as Reddit returned them.
  */
 
+import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
+
 interface RedditConfig {
   source: string;
   url: string;
@@ -23,6 +25,7 @@ export default defineContentScript({
   runAt: "document_idle",
 
   main() {
+    let nonce: string | null = null;
     const dig = (obj: unknown, path: string): unknown =>
       path.split(".").reduce<unknown>((acc, key) => (acc as Record<string, unknown>)?.[key], obj);
 
@@ -41,8 +44,17 @@ export default defineContentScript({
     };
 
     const backfill = async (config: RedditConfig) => {
-      const send = (msg: Record<string, unknown>) =>
-        browser.runtime.sendMessage({ anansi: msg.anansi, source: config.source, ...msg });
+      const send = (action: string, payload: Record<string, unknown> = {}) => {
+        if (!nonce) return;
+        window.postMessage({
+          anansi: "page-event",
+          action,
+          source: "reddit",
+          messageVersion: MESSAGE_PROTOCOL_VERSION,
+          nonce,
+          ...payload,
+        }, window.location.origin);
+      };
 
       try {
         const base = await resolveUrl(config.url);
@@ -66,7 +78,7 @@ export default defineContentScript({
             continue;
           }
           if (!res.ok) {
-            await send({ anansi: "error", message: `reddit returned ${res.status}` });
+            await send("error", { errorCode: "platform_request_failed" });
             return;
           }
 
@@ -75,25 +87,39 @@ export default defineContentScript({
           page++;
           total += children.length;
 
-          await send({ anansi: "page", raw, page, items: children.length });
+          await send("page", { raw, page, items: children.length });
 
           const next = dig(raw, config.cursorPath) as string | null;
           if (children.length === 0 || !next || next === after || page >= config.pageLimit) break;
           after = next;
         }
 
-        await send({ anansi: "done", pages: page, items: total });
+        await send("done", { pages: page, items: total });
       } catch (err) {
-        await send({ anansi: "error", message: (err as Error).message });
+        void err;
+        await send("error", { errorCode: "capture_failed" });
       }
     };
 
-    browser.runtime.onMessage.addListener((message: unknown) => {
-      const msg = message as { anansi?: string; config?: RedditConfig } | undefined;
-      if (msg?.anansi === "backfill" && msg.config?.source === "reddit") {
+    window.addEventListener("message", (event) => {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      const msg = event.data as {
+        anansi?: string;
+        action?: string;
+        config?: RedditConfig;
+        messageVersion?: number;
+        nonce?: string;
+      } | undefined;
+      if (
+        msg?.anansi === "page-command" &&
+        msg.action === "backfill" &&
+        msg.messageVersion === MESSAGE_PROTOCOL_VERSION &&
+        typeof msg.nonce === "string" &&
+        msg.config?.source === "reddit"
+      ) {
+        nonce = msg.nonce;
         void backfill(msg.config);
       }
-      return undefined;
     });
   },
 });

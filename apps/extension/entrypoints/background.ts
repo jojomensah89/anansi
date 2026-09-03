@@ -25,6 +25,13 @@ import {
 } from "../lib/idb-outbox.ts";
 import { createIngestTransport } from "../lib/ingest-transport.ts";
 import {
+  MESSAGE_PROTOCOL_VERSION,
+  parseExtensionMessage,
+  type PageEventMessage,
+  type PlatformSource,
+  type PopupCommandMessage,
+} from "../lib/messages.ts";
+import {
   captureDeliveryMode,
   createSourceRuns,
   isExpectedImportTab,
@@ -95,6 +102,7 @@ const CONFIG_TTL_MS = 60 * 60 * 1000;
 const ALARM = "anansi-sync";
 const OUTBOX_ALARM = "anansi-outbox";
 const CAPTURE_SOURCES = ["x", "reddit", "tiktok"] as const;
+const tabNonces = new Map<number, string>();
 
 let cached: ServerCache<RemoteConfig> | null = null;
 let persistent: { outbox: IndexedDbOutbox; runs: SourceRuns } | null = null;
@@ -400,7 +408,13 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   if (target.ours) await runs.setOwnedTab(source, tab.id);
 
   if (entry.mode === "observe") {
-    const armed = await talk(tab.id, { anansi: "configure", config: entry });
+    const armed = await talk(tab.id, {
+      anansi: "page-command",
+      messageVersion: MESSAGE_PROTOCOL_VERSION,
+      source,
+      action: "configure",
+      config: entry,
+    });
     if (!armed) {
       await finishRun(source);
       await patchStatus(source, {
@@ -418,7 +432,13 @@ async function startCapture(source: string, quiet = false, live = false): Promis
       failed: 0,
       message: "scanning…",
     });
-    const scanning = await talk(tab.id, { anansi: "scan", config: entry });
+    const scanning = await talk(tab.id, {
+      anansi: "page-command",
+      messageVersion: MESSAGE_PROTOCOL_VERSION,
+      source,
+      action: "scan",
+      config: entry,
+    });
     if (!scanning) {
       await finishRun(source);
       await patchStatus(source, {
@@ -450,8 +470,20 @@ async function startCapture(source: string, quiet = false, live = false): Promis
     message: "running…",
   });
   const reached =
-    (await talk(tab.id, { anansi: "configure", config: job })) &&
-    (await talk(tab.id, { anansi: "backfill", config: job }));
+    (await talk(tab.id, {
+      anansi: "page-command",
+      messageVersion: MESSAGE_PROTOCOL_VERSION,
+      source,
+      action: "configure",
+      config: job,
+    })) &&
+    (await talk(tab.id, {
+      anansi: "page-command",
+      messageVersion: MESSAGE_PROTOCOL_VERSION,
+      source,
+      action: "backfill",
+      config: job,
+    }));
 
   if (!reached) {
     await finishRun(source);
@@ -539,114 +571,170 @@ type BackgroundResult =
   | { ok: true; snapshot?: Awaited<ReturnType<typeof durableSnapshot>> }
   | { ok: false; error: string };
 
-async function handleRuntimeMessage(message: unknown): Promise<BackgroundResult> {
-  const msg = message as Record<string, unknown> | undefined;
-  if (!msg?.anansi) return { ok: false, error: "unknown message" };
+interface RuntimeMessageSender {
+  url?: string;
+  tab?: { id?: number; url?: string };
+}
 
-  try {
-    if (msg.anansi === "queue-status") {
+function claimedNonce(value: unknown): string {
+  if (typeof value !== "object" || value === null) return "";
+  const descriptor = Object.getOwnPropertyDescriptor(value, "nonce");
+  return typeof descriptor?.value === "string" ? descriptor.value : "";
+}
+
+function validateRuntimeMessage(message: unknown, sender: RuntimeMessageSender) {
+  if (!sender.tab) {
+    return parseExtensionMessage(message, {
+      path: "runtime-to-background",
+      sender: { kind: "extension" },
+    });
+  }
+
+  const tabId = sender.tab.id;
+  const senderUrl = sender.url ?? sender.tab.url ?? "";
+  if (!Number.isSafeInteger(tabId)) {
+    return parseExtensionMessage(message, {
+      path: "runtime-to-background",
+      sender: { kind: "tab", url: senderUrl },
+      expectedNonce: "",
+    });
+  }
+
+  // On a service-worker restart the map is empty. The first event can seed it
+  // because only our isolated-world relay can call runtime.sendMessage; the
+  // page itself can only reach that relay, which already checked the nonce.
+  const expectedNonce = tabNonces.get(tabId as number) ?? claimedNonce(message);
+  const parsed = parseExtensionMessage(message, {
+    path: "runtime-to-background",
+    sender: { kind: "tab", url: senderUrl },
+    expectedNonce,
+  });
+  if (parsed.ok) tabNonces.set(tabId as number, expectedNonce);
+  return parsed;
+}
+
+type PlatformErrorCode = Extract<PageEventMessage, { action: "error" }>["errorCode"];
+
+const SAFE_PLATFORM_ERRORS: Record<PlatformErrorCode, string> = {
+  platform_request_failed: "the platform request failed; retry after checking the signed-in tab",
+  not_signed_in: "the platform tab is not signed in",
+  query_unavailable: "the bookmark query is unavailable; open the bookmarks page and retry",
+  capture_failed: "capture failed inside the platform tab",
+};
+
+async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundResult> {
+  switch (msg.action) {
+    case "queue-status":
       return { ok: true, snapshot: await durableSnapshot() };
-    }
-    if (msg.anansi === "reschedule") {
+    case "reschedule":
       await rescheduleAlarm();
       return { ok: true };
-    }
-    if (msg.anansi === "retry-queue") {
+    case "retry-queue":
       await wakeDurableQueue(true);
       return { ok: true, snapshot: await durableSnapshot() };
+    case "start": {
+      const creds = await settings();
+      if (!creds) {
+        await patchStatus(msg.source, {
+          message: "enter the server and token, then press Save",
+        });
+        return { ok: false, error: "extension is not configured" };
+      }
+      await startCapture(msg.source);
+      return { ok: true };
     }
-
-    const source = String(msg.source ?? "x");
-    if (!isCaptureSource(source)) return { ok: false, error: "unknown capture source" };
-
-    switch (msg.anansi) {
-      case "page":
-        await deliverRaw(source, msg.raw, Number(msg.page ?? 0));
-        await patchStatus(source, {
-          pages: Number(msg.page ?? 0),
-          items: Number(msg.items ?? 0),
-        });
-        return { ok: true };
-
-      case "saved":
-        await persistentState().runs.requestRefresh(source);
-        browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
-        return { ok: true };
-
-      case "observed": {
-        await deliverRaw(source, msg.raw);
-        const current = await readStatus(source);
-        await patchStatus(source, {
-          lastRun: Date.now(),
-          items: current.items + Number(msg.items ?? 1),
-        });
-        return { ok: true };
-      }
-
-      case "done":
-        await finishRun(source);
-        await patchStatus(source, {
-          startedAt: null,
-          lastRun: Date.now(),
-          pages: Number(msg.pages ?? 0),
-          items: Number(msg.items ?? 0),
-          message: Number(msg.items ?? 0) === 0 ? "run returned zero items" : null,
-        });
-        await processPendingRefreshes();
-        return { ok: true };
-
-      case "scanned": {
-        const current = await readStatus(source);
-        await finishRun(source);
-        await patchStatus(source, {
-          startedAt: null,
-          lastRun: Date.now(),
-          message: current.items > 0 ? null : "nothing loaded on that page",
-        });
-        await processPendingRefreshes();
-        return { ok: true };
-      }
-
-      case "error":
-        await finishRun(source);
-        await patchStatus(source, {
-          startedAt: null,
-          message: String(msg.message ?? "unknown error").slice(0, 180),
-        });
-        await processPendingRefreshes();
-        return { ok: true };
-
-      case "start": {
-        const creds = await settings();
-        if (!creds) {
-          await patchStatus(source, {
-            message: "enter the server and token, then press Save",
-          });
-          return { ok: false, error: "extension is not configured" };
-        }
-        await startCapture(source);
-        return { ok: true };
-      }
-
-      case "stop": {
-        const tabId = await persistentState().runs.stop(source);
-        if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
-        await patchStatus(source, { startedAt: null, message: "stopped" });
-        return { ok: true };
-      }
-
-      default:
-        return { ok: false, error: "unknown message" };
+    case "stop": {
+      const tabId = await persistentState().runs.stop(msg.source);
+      if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
+      await patchStatus(msg.source, { startedAt: null, message: "stopped" });
+      return { ok: true };
     }
+  }
+}
+
+async function handlePageEvent(
+  msg: PageEventMessage,
+  source: PlatformSource,
+): Promise<BackgroundResult> {
+  switch (msg.action) {
+    case "ready":
+      return { ok: true };
+    case "page":
+      await deliverRaw(source, msg.raw, msg.page);
+      await patchStatus(source, { pages: msg.page, items: msg.items });
+      return { ok: true };
+    case "saved":
+      await persistentState().runs.requestRefresh(source);
+      browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
+      return { ok: true };
+    case "observed": {
+      await deliverRaw(source, msg.raw);
+      const current = await readStatus(source);
+      await patchStatus(source, {
+        lastRun: Date.now(),
+        items: current.items + msg.items,
+      });
+      return { ok: true };
+    }
+    case "done":
+      await finishRun(source);
+      await patchStatus(source, {
+        startedAt: null,
+        lastRun: Date.now(),
+        pages: msg.pages,
+        items: msg.items,
+        message: msg.items === 0 ? "run returned zero items" : null,
+      });
+      await processPendingRefreshes();
+      return { ok: true };
+    case "scanned": {
+      const current = await readStatus(source);
+      await finishRun(source);
+      await patchStatus(source, {
+        startedAt: null,
+        lastRun: Date.now(),
+        message: current.items > 0 ? null : "nothing loaded on that page",
+      });
+      await processPendingRefreshes();
+      return { ok: true };
+    }
+    case "error":
+      await finishRun(source);
+      await patchStatus(source, {
+        startedAt: null,
+        message: SAFE_PLATFORM_ERRORS[msg.errorCode],
+      });
+      await processPendingRefreshes();
+      return { ok: true };
+  }
+}
+
+async function handleRuntimeMessage(
+  message: unknown,
+  sender: RuntimeMessageSender,
+): Promise<BackgroundResult> {
+  const parsed = validateRuntimeMessage(message, sender);
+  if (!parsed.ok) return { ok: false, error: parsed.error.message };
+
+  try {
+    if (parsed.message.anansi === "popup-command") {
+      return await handlePopupCommand(parsed.message);
+    }
+    if (parsed.message.anansi === "page-event" && parsed.source) {
+      return await handlePageEvent(parsed.message, parsed.source);
+    }
+    return { ok: false, error: "message family is not allowed on this path" };
   } catch {
-    const source = String(msg.source ?? "_");
+    const source = parsed.source ?? "_";
     await patchStatus(source, { startedAt: null, message: "background action failed" });
     return { ok: false, error: "background action failed" };
   }
 }
 
 export default defineBackground(() => {
-  browser.runtime.onMessage.addListener((message: unknown) => handleRuntimeMessage(message));
+  browser.runtime.onMessage.addListener((message: unknown, sender: RuntimeMessageSender) =>
+    handleRuntimeMessage(message, sender),
+  );
 
   /**
    * Automatic sync. Incremental by nature rather than by flag: every capture
@@ -688,7 +776,16 @@ export default defineBackground(() => {
         tab.url?.includes(candidate.host.replace("www.", "")),
       );
       if (entry) {
-        void browser.tabs.sendMessage(tabId, { anansi: "configure", config: entry }).catch(() => {});
+        void browser.tabs.sendMessage(
+          tabId,
+          {
+            anansi: "page-command",
+            messageVersion: MESSAGE_PROTOCOL_VERSION,
+            source: entry.source,
+            action: "configure",
+            config: entry,
+          },
+        ).catch(() => {});
       }
     });
   });

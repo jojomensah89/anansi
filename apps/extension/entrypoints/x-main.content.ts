@@ -20,6 +20,8 @@
  * build.
  */
 
+import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
+
 interface SourceConfig {
   operation: string;
   variables: Record<string, unknown>;
@@ -30,12 +32,14 @@ interface SourceConfig {
 }
 
 type Outbound =
-  | { anansi: "ready"; queryId: string | null }
-  | { anansi: "saved"; source: "x" }
-  | { anansi: "page"; raw: unknown; page: number; items: number }
-  | { anansi: "observed"; operation: string; raw: unknown }
-  | { anansi: "done"; pages: number; items: number }
-  | { anansi: "error"; message: string };
+  | { action: "ready"; queryId: string | null }
+  | { action: "saved" }
+  | { action: "page"; raw: unknown; page: number; items: number }
+  | { action: "done"; pages: number; items: number }
+  | {
+      action: "error";
+      errorCode: "platform_request_failed" | "query_unavailable";
+    };
 
 /** A public app constant, identical for every visitor — not a user credential. */
 const FALLBACK_BEARER =
@@ -47,7 +51,20 @@ export default defineContentScript({
   runAt: "document_start",
 
   main() {
-    const send = (msg: Outbound) => window.postMessage(msg, window.location.origin);
+    let nonce: string | null = null;
+    const send = (msg: Outbound) => {
+      if (!nonce) return;
+      window.postMessage(
+        {
+          ...msg,
+          anansi: "page-event",
+          messageVersion: MESSAGE_PROTOCOL_VERSION,
+          source: "x",
+          nonce,
+        },
+        window.location.origin,
+      );
+    };
 
     /** The line that keeps working after X rotates the hash. */
     const scanChunks = (re: RegExp): string | undefined => {
@@ -90,7 +107,7 @@ export default defineContentScript({
         // bookmarked and nothing about what, so uploading it would parse to
         // zero items and 422 on every save. The background pulls the top of
         // the timeline instead, which arrives with the whole post.
-        if (matchOp(url) && res.ok) send({ anansi: "saved", source: "x" });
+        if (matchOp(url) && res.ok) send({ action: "saved" });
       } catch {
         // Observation must never break the page.
       }
@@ -109,7 +126,7 @@ export default defineContentScript({
       try {
         if (matchOp(String(url))) {
           this.addEventListener("load", () => {
-            if (this.status >= 200 && this.status < 300) send({ anansi: "saved", source: "x" });
+            if (this.status >= 200 && this.status < 300) send({ action: "saved" });
           });
         }
       } catch {
@@ -137,8 +154,8 @@ export default defineContentScript({
       const queryId = resolveQueryId(cfg.operation);
       if (!queryId) {
         send({
-          anansi: "error",
-          message: `Could not find the ${cfg.operation} queryId. Open x.com/i/bookmarks so the chunk loads, then try again.`,
+          action: "error",
+          errorCode: "query_unavailable",
         });
         return;
       }
@@ -171,7 +188,7 @@ export default defineContentScript({
           continue;
         }
         if (!res.ok) {
-          send({ anansi: "error", message: `x returned ${res.status}` });
+          send({ action: "error", errorCode: "platform_request_failed" });
           return;
         }
 
@@ -182,26 +199,38 @@ export default defineContentScript({
 
         // Raw and untouched. The server parses it, which is what lets a stale
         // install be repaired without anyone reinstalling anything.
-        send({ anansi: "page", raw, page, items });
+        send({ action: "page", raw, page, items });
 
         if (items === 0 || !next || next === cursor || page >= cfg.pageLimit) break;
         cursor = next;
       }
 
-      send({ anansi: "done", pages: page, items: total });
+      send({ action: "done", pages: page, items: total });
     };
 
     // ---- commands from the relay ------------------------------------------
 
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
-      const msg = event.data as { anansi?: string; config?: SourceConfig } | undefined;
-      if (!msg?.config) return;
-      if (msg.anansi === "configure") {
+      const msg = event.data as {
+        anansi?: string;
+        action?: string;
+        config?: SourceConfig;
+        messageVersion?: number;
+        nonce?: string;
+      } | undefined;
+      if (
+        msg?.messageVersion !== 1 ||
+        typeof msg.nonce !== "string" ||
+        !msg.config
+      ) return;
+      if (msg.anansi !== "page-command") return;
+      if (msg.action === "configure") {
+        nonce = msg.nonce;
         watched = msg.config.watchOperations ?? [];
-        send({ anansi: "ready", queryId: resolveQueryId(msg.config.operation) ?? null });
+        send({ action: "ready", queryId: resolveQueryId(msg.config.operation) ?? null });
       }
-      if (msg.anansi === "backfill") {
+      if (msg.action === "backfill" && msg.nonce === nonce) {
         void backfill(msg.config);
       }
     });

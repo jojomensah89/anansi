@@ -14,17 +14,31 @@
  * MAIN world at document_start, because an isolated content script's
  * window.fetch is a different object from the one Reddit's page calls.
  */
+import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
+
 export default defineContentScript({
   matches: ["https://www.reddit.com/*", "https://old.reddit.com/*", "https://reddit.com/*"],
   world: "MAIN",
   runAt: "document_start",
 
   main() {
+    let nonce: string | null = null;
     let watched: string[] = [];
     const matchUrl = (url: string) => watched.some((fragment) => url.includes(fragment));
 
-    const signal = () =>
-      window.postMessage({ anansi: "saved", source: "reddit" }, window.location.origin);
+    const signal = () => {
+      if (!nonce) return;
+      window.postMessage(
+        {
+          anansi: "page-event",
+          messageVersion: MESSAGE_PROTOCOL_VERSION,
+          source: "reddit",
+          nonce,
+          action: "saved",
+        },
+        window.location.origin,
+      );
+    };
 
     const nativeFetch = window.fetch;
     const patched = async function (this: unknown, ...args: Parameters<typeof fetch>) {
@@ -64,8 +78,21 @@ export default defineContentScript({
 
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
-      const msg = event.data as { anansi?: string; config?: { source?: string; watchUrls?: string[] } };
-      if (msg?.anansi === "configure" && msg.config?.source === "reddit") {
+      const msg = event.data as {
+        anansi?: string;
+        action?: string;
+        config?: { source?: string; watchUrls?: string[] };
+        messageVersion?: number;
+        nonce?: string;
+      };
+      if (
+        msg?.anansi === "page-command" &&
+        msg.action === "configure" &&
+        msg.messageVersion === MESSAGE_PROTOCOL_VERSION &&
+        typeof msg.nonce === "string" &&
+        msg.config?.source === "reddit"
+      ) {
+        nonce = msg.nonce;
         watched = msg.config.watchUrls ?? [];
       }
     });
