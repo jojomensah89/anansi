@@ -1,0 +1,29 @@
+{
+  "current": {
+    "__DEFAULT_SCOPE__": {
+      "webapp.app-context": {
+        "appId": 1988,
+        "user": {
+          "uniqueId": "example_viewer",
+          "secUid": "SANITIZED",
+          "nickName": "Example Viewer"
+        }
+      }
+    }
+  },
+  "legacy": {
+    "AppContext": {
+      "user": {
+        "uniqueId": "legacy_viewer"
+      }
+    }
+  },
+  "signedOut": {
+    "__DEFAULT_SCOPE__": {
+      "webapp.app-context": {
+        "appId": 1988,
+        "user": {}
+      }
+    }
+  }
+}

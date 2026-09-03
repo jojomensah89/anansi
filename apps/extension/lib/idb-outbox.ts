@@ -16,6 +16,7 @@ export interface SyncStateRecord {
 	pendingRefresh?: boolean;
 	createdTabId?: number;
 	pendingSaves?: string[];
+	handle?: string;
 }
 
 export interface IndexedDbOutbox extends OutboxStore {

@@ -1,0 +1,55 @@
+{
+  "statusCode": 0,
+  "hasMore": true,
+  "cursor": "1756684800000",
+  "itemList": [
+    {
+      "id": "7400000000000000001",
+      "desc": "A sanitized favourited video caption #example",
+      "createTime": 1756684800,
+      "author": {
+        "id": "6700000000000000001",
+        "uniqueId": "example_creator",
+        "nickname": "Example Creator",
+        "avatarThumb": "https://p16-sign.tiktokcdn-us.com/example-avatar~c5_100x100.jpeg"
+      },
+      "video": {
+        "id": "7400000000000000001",
+        "duration": 32,
+        "cover": "https://p16-sign.tiktokcdn-us.com/example-cover~tplv-photomode.jpeg",
+        "originCover": "https://p16-sign.tiktokcdn-us.com/example-origin~tplv-photomode.jpeg",
+        "dynamicCover": "https://p16-sign.tiktokcdn-us.com/example-dynamic~tplv-photomode.webp"
+      },
+      "music": { "id": "70000001", "title": "original sound - example" },
+      "challenges": [{ "id": "1", "title": "example" }],
+      "stats": {
+        "diggCount": 1200,
+        "shareCount": 34,
+        "commentCount": 56,
+        "playCount": 78900
+      }
+    },
+    {
+      "id": "7400000000000000002",
+      "desc": "A second sanitized favourite.",
+      "createTime": 1756688400,
+      "author": {
+        "id": "6700000000000000002",
+        "uniqueId": "second_creator",
+        "nickname": "Second Creator",
+        "avatarThumb": "https://p16-sign.tiktokcdn-us.com/second-avatar~c5_100x100.jpeg"
+      },
+      "video": {
+        "id": "7400000000000000002",
+        "duration": 15,
+        "cover": "https://p16-sign.tiktokcdn-us.com/second-cover~tplv-photomode.jpeg"
+      },
+      "stats": {
+        "diggCount": 8,
+        "shareCount": 0,
+        "commentCount": 1,
+        "playCount": 240
+      }
+    }
+  ]
+}

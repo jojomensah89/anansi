@@ -98,6 +98,7 @@ export type PageEventMessage = PageTrafficBase &
 		  }
 		| { anansi: "page-event"; action: "done"; pages: number; items: number }
 		| { anansi: "page-event"; action: "scanned" }
+		| { anansi: "page-event"; action: "identified"; handle: string }
 		| {
 				anansi: "page-event";
 				action: "error";
@@ -124,7 +125,7 @@ export type PopupCommandMessage = MessageBase &
 
 export type PageCommandMessage = PageTrafficBase & {
 	anansi: "page-command";
-	action: "configure" | "backfill" | "scan";
+	action: "configure" | "backfill" | "identify" | "scan";
 	config: Record<string, unknown>;
 };
 
@@ -173,13 +174,19 @@ const SOURCE_HOSTS: Record<PlatformSource, ReadonlySet<string>> = {
 const PAGE_EVENT_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
 	reddit: new Set(["saved", "bookmark", "page", "done", "error"]),
-	tiktok: new Set(["observed", "scanned", "error"]),
+	tiktok: new Set([
+		"observed",
+		"scanned",
+		"identified",
+		"bookmark",
+		"error",
+	]),
 };
 
 const PAGE_COMMAND_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["configure", "backfill"]),
 	reddit: new Set(["configure", "backfill"]),
-	tiktok: new Set(["configure", "scan"]),
+	tiktok: new Set(["configure", "identify", "scan"]),
 };
 
 const ERROR_CODES = new Set([
@@ -352,6 +359,11 @@ function isSourceUrl(value: unknown, source: PlatformSource): boolean {
 	}
 }
 
+/** A platform handle, which becomes part of a URL the background opens. */
+function isHandle(value: unknown): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9_.]{1,32}$/.test(value);
+}
+
 function isExternalId(value: unknown): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }
@@ -423,6 +435,10 @@ function validatePageEventShape(
 				value.operation.length <= 1_000 &&
 				Object.hasOwn(value, "raw") &&
 				isNonNegativeInteger(value.items)
+			);
+		case "identified":
+			return (
+				hasOnlyKeys(value, [...base, "handle"]) && isHandle(value.handle)
 			);
 		case "done":
 			return (

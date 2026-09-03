@@ -38,6 +38,7 @@ import {
   type CaptureSource,
   type SourceRuns,
 } from "../lib/source-runs.ts";
+import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
 import { tweetUrl } from "../lib/platforms/x.ts";
 import type {
   CaptureQueueStatus,
@@ -404,7 +405,13 @@ async function findTab(source: string) {
  * and closed again afterwards if we were the ones who opened it.
  */
 async function openTab(source: string): Promise<{ id: number; ours: boolean } | null> {
-  const url = ENTRY_URLS[source];
+  // Once TikTok has told us who you are, later runs skip the front page and
+  // open your own profile, which is where favourites live.
+  const known =
+    source === "tiktok"
+      ? (await persistentState().runs.current("tiktok")).handle
+      : undefined;
+  const url = (known ? profileUrl(known) : null) ?? ENTRY_URLS[source];
   if (!url) return null;
   const tab = await browser.tabs.create({ url, active: false });
   if (!tab.id) return null;
@@ -425,6 +432,46 @@ async function openTab(source: string): Promise<{ id: number; ours: boolean } | 
   });
 
   return { id, ours: true };
+}
+
+/**
+ * Wait for the page to say who is signed in.
+ *
+ * The answer arrives as an ordinary page event rather than a reply, because
+ * MAIN-world code reaches the background only through the relay. So this polls
+ * the durable state the handler writes, which has the useful side effect of
+ * working even if the worker was restarted in between.
+ */
+async function waitForHandle(
+  source: CaptureSource,
+  timeoutMs: number,
+): Promise<string | null> {
+  const runs = persistentState().runs;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const state = await runs.current(source);
+    if (state.handle) return state.handle;
+    if (Date.now() >= deadline) return null;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
+/** Send a tab somewhere and wait for it to finish arriving. */
+async function navigateTab(tabId: number, url: string): Promise<void> {
+  await browser.tabs.update(tabId, { url }).catch(() => {});
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(finish, 25_000);
+    function finish() {
+      clearTimeout(timer);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+      // document_idle scripts land a beat after "complete".
+      setTimeout(resolve, 900);
+    }
+    function onUpdated(updatedId: number, info: { status?: string }) {
+      if (updatedId === tabId && info.status === "complete") finish();
+    }
+    browser.tabs.onUpdated.addListener(onUpdated);
+  });
 }
 
 async function closeOwnedTab(source: CaptureSource, expectedTabId?: number): Promise<void> {
@@ -498,20 +545,65 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   if (target.ours) await runs.setOwnedTab(source, tab.id);
 
   if (entry.mode === "observe") {
-    const armed = await talk(tab.id, {
-      anansi: "page-command",
-      messageVersion: MESSAGE_PROTOCOL_VERSION,
-      source,
-      action: "configure",
-      config: entry,
-    });
-    if (!armed) {
+    const configure = () =>
+      talk(tab.id, {
+        anansi: "page-command",
+        messageVersion: MESSAGE_PROTOCOL_VERSION,
+        source,
+        action: "configure",
+        config: entry,
+      });
+
+    if (!(await configure())) {
       await finishRun(source);
       await patchStatus(source, {
         startedAt: null,
         message: `could not reach the ${entry.host} tab`,
       });
       return;
+    }
+
+    /**
+     * Find the favourites, rather than asking you to.
+     *
+     * The page reports the signed-in handle, and the tab goes to that
+     * profile — which is the difference between "press Import" and "press
+     * Import, then scroll your favourites yourself". The handle is
+     * remembered, so every later run opens the right place immediately.
+     */
+    if (source === "tiktok") {
+      await patchStatus(source, { message: "finding your favourites…" });
+      await talk(tab.id, {
+        anansi: "page-command",
+        messageVersion: MESSAGE_PROTOCOL_VERSION,
+        source,
+        action: "identify",
+        config: entry,
+      });
+
+      const handle = await waitForHandle(source, 12_000);
+      if (!handle) {
+        await finishRun(source);
+        await patchStatus(source, {
+          startedAt: null,
+          message: `sign in to ${entry.host}, then press Import`,
+        });
+        return;
+      }
+
+      const current = await browser.tabs.get(tab.id).catch(() => null);
+      const destination = profileUrl(handle);
+      if (destination && !(current?.url && isProfileView(current.url, handle))) {
+        await navigateTab(tab.id, destination);
+        if (!(await configure())) {
+          await finishRun(source);
+          await patchStatus(source, {
+            startedAt: null,
+            message: `could not reach the ${entry.host} tab`,
+          });
+          return;
+        }
+      }
     }
     // Nothing to request, so the capture is a scroll: the app fetches its own
     // item lists as the page grows, and those are what get kept.
@@ -790,6 +882,9 @@ async function handlePageEvent(
         message: msg.items === 0 ? "run returned zero items" : null,
       });
       await processPendingRefreshes();
+      return { ok: true };
+    case "identified":
+      await persistentState().runs.setHandle(source, msg.handle);
       return { ok: true };
     case "scanned": {
       const current = await readStatus(source);

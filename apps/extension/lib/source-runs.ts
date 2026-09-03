@@ -19,6 +19,8 @@ export interface SourceRunState extends SyncStateRecord {
 	 * the server has never seen is a permanent failure, not a retry.
 	 */
 	pendingSaves: string[];
+	/** The signed-in handle, once a page has told us one. */
+	handle?: string;
 }
 
 export interface ActiveSourceRunState extends SourceRunState {
@@ -50,6 +52,8 @@ export interface SourceRuns {
 	takePendingSaves(source: CaptureSource): Promise<string[]>;
 	/** Advance the resume point. Only ever called after a page is queued. */
 	setCursor(source: CaptureSource, cursor: string | null): Promise<void>;
+	/** Remember whose profile to open, so the next Import goes straight there. */
+	setHandle(source: CaptureSource, handle: string): Promise<void>;
 	setOwnedTab(source: CaptureSource, tabId: number): Promise<void>;
 	takeOwnedTab(
 		source: CaptureSource,
@@ -233,6 +237,14 @@ export function createSourceRuns(
 			});
 		},
 
+		setHandle(source, handle) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				if (current.handle === handle) return;
+				await write({ ...current, handle, updatedAt: now() });
+			});
+		},
+
 		setCursor(source, cursor) {
 			return serialize(source, async () => {
 				const current = await read(source);
@@ -297,7 +309,10 @@ export function isExpectedImportTab(
 				/^\/user\/[^/]+\/saved\/?$/.test(url.pathname)
 			);
 		}
-		// Phase 6 discovers and verifies TikTok's current Favorites route.
+		// TikTok has no favourites route to match: which profile counts depends
+		// on who is signed in, and the tab has to be driven to the Favourites
+		// tab once it is there. So a run always opens and closes its own tab
+		// rather than taking over one you are using.
 		return false;
 	} catch {
 		return false;

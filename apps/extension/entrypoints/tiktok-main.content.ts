@@ -4,23 +4,40 @@
  * There is no backfill to write. TikTok publishes no favourites endpoint and
  * signs its web requests — X-Bogus and msToken are computed by its own
  * bundle — so nothing outside the app can forge one. What can be done is
- * watch the requests the app makes for itself while you scroll your
- * favourites, and keep the responses.
+ * watch the requests the app makes for itself while your favourites load, and
+ * keep the responses.
  *
- * That is the whole capture strategy, and it has an honest consequence worth
- * saying out loud in the UI: your history arrives the first time you scroll
- * it, not at the press of a button.
+ * What has changed is that you no longer have to do the loading. This reports
+ * the signed-in handle so the extension can send the tab to your own profile,
+ * opens the Favourites tab, and scrolls it. Pressing Import is the whole
+ * interaction; "scroll your favourites to capture them" was never an
+ * instruction anyone should have been given.
+ *
+ * Favourites and Likes are different actions and are kept apart deliberately:
+ * only the collected-item listing is a bookmark here.
  *
  * MAIN world at document_start for the same reason as x-main: patching fetch
  * after the app has cached its own reference patches nothing.
  */
 
 import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
+import {
+  FAVOURITES_TAB_SELECTORS,
+  isFavouritesRequest,
+  readHandle,
+  readItemList,
+} from "../lib/platforms/tiktok.ts";
 
 type Outbound =
   | { action: "observed"; operation: string; raw: unknown; items: number }
+  | { action: "identified"; handle: string }
   | { action: "scanned" }
-  | { action: "error"; errorCode: "capture_failed" };
+  | { action: "error"; errorCode: "capture_failed" | "not_signed_in" };
+
+interface ScanConfig {
+  source: string;
+  watchUrls?: string[];
+}
 
 export default defineContentScript({
   matches: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
@@ -45,15 +62,21 @@ export default defineContentScript({
 
     let watched: string[] = [];
     let scanning = false;
-    const matchUrl = (url: string) => watched.find((fragment) => url.includes(fragment));
+    /** Set by any observed Favourites page that said there is more. */
+    let moreToLoad = true;
 
-    /** Only pass on a payload that actually carries items. */
+    /** Only pass on a Favourites payload that actually carries items. */
     const forward = (operation: string, raw: unknown) => {
-      const list = (raw as { itemList?: unknown[]; items?: unknown[] })?.itemList
-        ?? (raw as { items?: unknown[] })?.items;
-      if (!Array.isArray(list) || list.length === 0) return;
-      send({ action: "observed", operation, raw, items: list.length });
+      const page = readItemList(raw);
+      moreToLoad = page.hasMore;
+      if (page.count === 0) return;
+      send({ action: "observed", operation, raw, items: page.count });
     };
+
+    const matchUrl = (url: string) =>
+      isFavouritesRequest(url, { watchUrls: watched })
+        ? (watched.find((fragment) => url.includes(fragment)) ?? "favourites")
+        : null;
 
     const nativeFetch = window.fetch;
     const patched = async function (this: unknown, ...args: Parameters<typeof fetch>) {
@@ -98,52 +121,107 @@ export default defineContentScript({
       return nativeOpen.call(this, method, url, ...rest);
     };
 
+    // ---- who is signed in --------------------------------------------------
+
+    /**
+     * The handle, from the blob TikTok rehydrates its app with.
+     *
+     * It is written into the document by the server, so at document_start it
+     * may not be there yet; this waits for it rather than reporting a
+     * signed-out state that is only early.
+     */
+    const identify = async (): Promise<string | null> => {
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const scope =
+          (window as unknown as { __UNIVERSAL_DATA_FOR_REHYDRATION__?: unknown })
+            .__UNIVERSAL_DATA_FOR_REHYDRATION__ ??
+          (window as unknown as { SIGI_STATE?: unknown }).SIGI_STATE;
+        const handle = readHandle(scope);
+        if (handle) return handle;
+        if (Date.now() >= deadline) return null;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    };
+
+    // ---- the scan ----------------------------------------------------------
+
+    const clickFavouritesTab = async (): Promise<boolean> => {
+      const deadline = Date.now() + 8_000;
+      for (;;) {
+        for (const selector of FAVOURITES_TAB_SELECTORS) {
+          const tab = document.querySelector<HTMLElement>(selector);
+          if (tab) {
+            tab.click();
+            // Let the tab swap its list before anything scrolls it.
+            await new Promise((r) => setTimeout(r, 1_200));
+            return true;
+          }
+        }
+        if (Date.now() >= deadline) return false;
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    };
+
+    /**
+     * Load the rest of the list.
+     *
+     * TikTok fetches as the page grows, and the patch above keeps what comes
+     * back, so scrolling is the whole import. It ends when a Favourites
+     * response says there is no more — a real answer — and falls back to the
+     * page having stopped growing, which is what "no more" looks like from out
+     * here when nothing said so.
+     */
+    const scan = async () => {
+      let stalled = 0;
+      for (let step = 0; step < 400 && stalled < 4 && moreToLoad; step++) {
+        const before = document.body.scrollHeight;
+        window.scrollTo({ top: before, behavior: "auto" });
+        await new Promise((r) => setTimeout(r, 1_200));
+        stalled = document.body.scrollHeight > before ? 0 : stalled + 1;
+      }
+    };
+
+    // ---- commands from the relay ------------------------------------------
+
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
       const msg = event.data as {
         anansi?: string;
         action?: string;
-        config?: { watchUrls?: string[]; source?: string };
+        config?: ScanConfig;
         messageVersion?: number;
         nonce?: string;
       };
       if (
-        msg?.anansi === "page-command" &&
-        msg.action === "configure" &&
-        msg.messageVersion === MESSAGE_PROTOCOL_VERSION &&
-        typeof msg.nonce === "string" &&
-        msg.config?.source === "tiktok"
+        msg?.anansi !== "page-command" ||
+        msg.messageVersion !== MESSAGE_PROTOCOL_VERSION ||
+        typeof msg.nonce !== "string" ||
+        msg.config?.source !== "tiktok"
       ) {
+        return;
+      }
+
+      if (msg.action === "configure") {
         nonce = msg.nonce;
         watched = msg.config.watchUrls ?? [];
       }
-      /**
-       * The scan.
-       *
-       * There is no request to make, so capture is a scroll: TikTok fetches
-       * its own item lists as the page grows, and the fetch patch above keeps
-       * what comes back. Scrolling on your behalf is the whole import.
-       *
-       * It stops when the page stops growing twice in a row, which is what
-       * "no more to load" looks like from out here.
-       */
-      if (
-        msg?.anansi === "page-command" &&
-        msg.action === "scan" &&
-        msg.messageVersion === MESSAGE_PROTOCOL_VERSION &&
-        msg.nonce === nonce &&
-        msg.config?.source === "tiktok"
-      ) {
+
+      if (msg.action === "identify" && msg.nonce === nonce) {
+        void (async () => {
+          const handle = await identify();
+          if (handle) send({ action: "identified", handle });
+          else send({ action: "error", errorCode: "not_signed_in" });
+        })();
+      }
+
+      if (msg.action === "scan" && msg.nonce === nonce) {
         if (scanning) return;
         scanning = true;
+        moreToLoad = true;
         void (async () => {
-          let stalled = 0;
-          for (let step = 0; step < 60 && stalled < 3; step++) {
-            const before = document.body.scrollHeight;
-            window.scrollTo({ top: before, behavior: "auto" });
-            await new Promise((r) => setTimeout(r, 1200));
-            stalled = document.body.scrollHeight > before ? 0 : stalled + 1;
-          }
+          await clickFavouritesTab();
+          await scan();
           scanning = false;
           send({ action: "scanned" });
         })();
