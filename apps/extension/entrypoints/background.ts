@@ -65,14 +65,21 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
   if (!force && cached && Date.now() - cached.at < CONFIG_TTL_MS) return cached.config;
   const s = await settings();
   if (!s) return null;
+  const url = `${s.server}/api/extension/config`;
   try {
-    const res = await fetch(`${s.server}/api/extension/config`);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const res = await fetch(url);
+    if (res.status === 404) {
+      // Almost always an older server still running on the port, which is
+      // worth saying outright rather than reporting as a generic failure.
+      throw new Error(`404 at ${url} — is an older Anansi server still on that port?`);
+    }
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} from ${url}`);
     const config = (await res.json()) as RemoteConfig;
+    if (!Array.isArray(config.sources)) throw new Error(`unexpected config shape from ${url}`);
     cached = { at: Date.now(), config };
     return config;
   } catch (err) {
-    await setStatus({ message: `config: ${(err as Error).message}` });
+    await setStatus({ message: (err as Error).message });
     return cached?.config ?? null;
   }
 }
@@ -140,9 +147,20 @@ export default defineBackground(() => {
         case "start": {
           // Popup asked for a backfill. Find the x.com tab and tell its MAIN
           // world script to go, with the config it should follow.
+          //
+          // Each failure gets its own message. An earlier version reported
+          // every one of these as "not configured", which sent you looking at
+          // the settings when the actual problem was a stale server.
+          const creds = await settings();
+          if (!creds) {
+            await setStatus({ message: "enter the server and token, then press Save" });
+            return;
+          }
+          await setStatus({ message: "checking server…" });
           const config = await loadConfig(true);
-          if (!config?.enabled) {
-            await setStatus({ message: config ? "disabled by server" : "not configured" });
+          if (!config) return; // loadConfig already said why
+          if (!config.enabled) {
+            await setStatus({ message: "disabled by server config" });
             return;
           }
           const source = config.sources[0];

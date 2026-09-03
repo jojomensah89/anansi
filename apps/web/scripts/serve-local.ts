@@ -23,33 +23,58 @@ const mcpToken = process.env.MCP_TOKEN;
 
 const db = openLocalDb(dbPath) as unknown as AnansiDb;
 
-const server = Bun.serve({
-  port,
-  hostname: "127.0.0.1",
-  async fetch(request) {
-    const { pathname } = new URL(request.url);
+/**
+ * A stale server on this port answers with whatever code it was started
+ * with, which presents as a 404 on a route you just added. Bun's EADDRINUSE
+ * message does not say that, so say it here.
+ */
+let server: ReturnType<typeof Bun.serve>;
+try {
+  server = Bun.serve({
+    port,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const { pathname } = new URL(request.url);
 
-    // Dev-only CORS. In production the UI is served by the same Worker as the
-    // API and none of this exists; here the Vite dev server is on another
-    // port, so the browser treats it as cross-origin.
-    const cors = {
-      "access-control-allow-origin": request.headers.get("origin") ?? "*",
-      "access-control-allow-headers": "content-type, authorization",
-      "access-control-allow-methods": "GET, POST, OPTIONS",
-    };
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+      // Dev-only CORS. In production the UI is served by the same Worker as the
+      // API and none of this exists; here the Vite dev server is on another
+      // port, so the browser treats it as cross-origin.
+      const cors = {
+        "access-control-allow-origin": request.headers.get("origin") ?? "*",
+        "access-control-allow-headers": "content-type, authorization",
+        "access-control-allow-methods": "GET, POST, OPTIONS",
+      };
+      if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
 
-    const response =
-      pathname === "/mcp"
-        ? await handleMcp({ db, token: mcpToken }, request)
-        : pathname.startsWith("/api/")
-          ? await handleApi({ db, ingestToken }, request)
-          : new Response("anansi local: /api/* and /mcp", { status: 404 });
+      const response =
+        pathname === "/mcp"
+          ? await handleMcp({ db, token: mcpToken }, request)
+          : pathname.startsWith("/api/")
+            ? await handleApi({ db, ingestToken }, request)
+            : new Response("anansi local: /api/* and /mcp", { status: 404 });
 
-    for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);
-    return response;
-  },
-});
+      for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);
+      return response;
+    },
+  });
+
+} catch (err) {
+  if ((err as { code?: string }).code === "EADDRINUSE") {
+    console.error(
+      `
+  Port ${port} is already in use — an older anansi server is probably still
+` +
+        `  running there and will answer with its old routes.
+
+` +
+        `  Free it:  powershell -c "Get-NetTCPConnection -LocalPort ${port} -State Listen | ` +
+        `ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }"
+`,
+    );
+    process.exit(1);
+  }
+  throw err;
+}
 
 console.log(`anansi local  http://127.0.0.1:${server.port}`);
 console.log(`  db      ${dbPath}`);
