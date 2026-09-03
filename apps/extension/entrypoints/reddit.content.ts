@@ -11,6 +11,7 @@
  */
 
 import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
+import { retryAfterMs } from "../lib/platforms/reddit.ts";
 
 interface RedditConfig {
   source: string;
@@ -18,6 +19,8 @@ interface RedditConfig {
   cursorParam: string;
   cursorPath: string;
   pageLimit: number;
+  /** Where the last acknowledged run stopped, if it stopped part-way. */
+  resumeCursor?: string;
 }
 
 export default defineContentScript({
@@ -58,7 +61,7 @@ export default defineContentScript({
 
       try {
         const base = await resolveUrl(config.url);
-        let after: string | null = null;
+        let after: string | null = config.resumeCursor ?? null;
         let page = 0;
         let total = 0;
 
@@ -71,10 +74,10 @@ export default defineContentScript({
             headers: { accept: "application/json" },
           });
 
-          if (res.status === 429) {
-            // Reddit is stricter than X here and says so in a header.
-            const wait = Number(res.headers.get("retry-after")) * 1000 || 10_000;
-            await new Promise((r) => setTimeout(r, Math.min(wait, 120_000)));
+          // Reddit is stricter than X here and says so in a header.
+          const wait = retryAfterMs(res.status, res.headers.get("retry-after"));
+          if (wait !== null) {
+            await new Promise((r) => setTimeout(r, wait));
             continue;
           }
           if (!res.ok) {
@@ -87,9 +90,16 @@ export default defineContentScript({
           page++;
           total += children.length;
 
-          await send("page", { raw, page, items: children.length });
-
           const next = dig(raw, config.cursorPath) as string | null;
+          // The cursor rides with its own page, so it can only advance once
+          // that page is durable.
+          await send("page", {
+            raw,
+            page,
+            items: children.length,
+            ...(typeof next === "string" && next ? { cursor: next } : {}),
+          });
+
           if (children.length === 0 || !next || next === after || page >= config.pageLimit) break;
           after = next;
         }

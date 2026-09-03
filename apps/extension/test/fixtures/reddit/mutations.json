@@ -1,0 +1,63 @@
+{
+  "saveRequest": {
+    "url": "https://www.reddit.com/api/save",
+    "body": "id=t3_1abcdef&category=&uh=sanitized"
+  },
+  "unsaveRequest": {
+    "url": "https://www.reddit.com/api/unsave",
+    "body": "id=t3_1abcdef&uh=sanitized"
+  },
+  "saveCommentRequest": {
+    "url": "https://old.reddit.com/api/save/",
+    "body": "id=t1_9zyxwv&uh=sanitized"
+  },
+  "shredditSaveRequest": {
+    "url": "https://www.reddit.com/svc/shreddit/save",
+    "body": "{\"id\":\"t3_2ghijkl\"}"
+  },
+  "unrelatedRequest": {
+    "url": "https://www.reddit.com/api/vote",
+    "body": "id=t3_1abcdef&dir=1"
+  },
+  "infoListing": {
+    "kind": "Listing",
+    "data": {
+      "after": null,
+      "children": [
+        {
+          "kind": "t3",
+          "data": {
+            "name": "t3_1abcdef",
+            "id": "1abcdef",
+            "title": "A sanitized saved post",
+            "subreddit": "programming",
+            "permalink": "/r/programming/comments/1abcdef/a_sanitized_saved_post/",
+            "url": "https://example.com/an-article",
+            "created_utc": 1756684800,
+            "author": "example_author"
+          }
+        }
+      ]
+    }
+  },
+  "infoCommentListing": {
+    "kind": "Listing",
+    "data": {
+      "after": null,
+      "children": [
+        {
+          "kind": "t1",
+          "data": {
+            "name": "t1_9zyxwv",
+            "id": "9zyxwv",
+            "body": "A sanitized saved comment.",
+            "subreddit": "programming",
+            "permalink": "/r/programming/comments/1abcdef/a_sanitized_saved_post/9zyxwv/",
+            "created_utc": 1756688400,
+            "author": "example_commenter"
+          }
+        }
+      ]
+    }
+  }
+}

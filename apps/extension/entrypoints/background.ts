@@ -305,6 +305,7 @@ async function deliverItemEvent(
   source: CaptureSource,
   action: "save" | "unsave",
   externalId: string,
+  canonicalUrl?: string,
 ): Promise<void> {
   const config = await loadConfig();
   const delivery = captureDeliveryMode(
@@ -326,7 +327,7 @@ async function deliverItemEvent(
     observedAt,
     captureMethod: "platform_event",
     externalId,
-    canonicalUrl: tweetUrl(externalId),
+    canonicalUrl: canonicalUrl ?? tweetUrl(externalId),
   };
   await queue().enqueue(capture);
   await wakeDurableQueue();
@@ -343,10 +344,23 @@ async function handleBookmarkMutation(
   source: CaptureSource,
   action: "save" | "unsave",
   externalId: string,
+  canonicalUrl?: string,
+  raw?: unknown,
 ): Promise<void> {
   const runs = persistentState().runs;
+
+  // Reddit can look the object up and send it along, so content and event
+  // arrive together. The queue is serial per source, so enqueuing the page
+  // first is what guarantees the item exists before the event lands on it.
+  if (raw !== undefined) {
+    await deliverRaw(source, raw);
+    await deliverItemEvent(source, action, externalId, canonicalUrl);
+    await patchStatus(source, { lastRun: Date.now() });
+    return;
+  }
+
   if (action === "unsave") {
-    await deliverItemEvent(source, "unsave", externalId);
+    await deliverItemEvent(source, "unsave", externalId, canonicalUrl);
     await patchStatus(source, { lastRun: Date.now() });
     return;
   }
@@ -746,7 +760,13 @@ async function handlePageEvent(
       browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
       return { ok: true };
     case "bookmark":
-      await handleBookmarkMutation(source, msg.bookmarkAction, msg.externalId);
+      await handleBookmarkMutation(
+        source,
+        msg.bookmarkAction,
+        msg.externalId,
+        msg.canonicalUrl,
+        msg.raw,
+      );
       return { ok: true };
     case "observed": {
       await deliverRaw(source, msg.raw);

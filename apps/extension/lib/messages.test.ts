@@ -301,12 +301,12 @@ describe("parseExtensionMessage", () => {
 			}
 		});
 
-		test("rejects an unknown action, a bad id and extra fields", () => {
+		test("rejects an unknown action, a bad id and unknown fields", () => {
 			const rejected = [
 				bookmark({ bookmarkAction: "delete" }),
 				bookmark({ externalId: "../../etc/passwd" }),
 				bookmark({ externalId: "" }),
-				bookmark({ raw: { anything: true } }),
+				bookmark({ note: "anything" }),
 			];
 			for (const message of rejected) {
 				expect(
@@ -316,12 +316,35 @@ describe("parseExtensionMessage", () => {
 			}
 		});
 
-		test("is an X message only", () => {
+		test("Reddit carries the permalink its fullname cannot express", () => {
 			const result = parseExtensionMessage(
-				{ ...bookmark({}), source: "reddit" },
+				{
+					...pageEvent("reddit", "bookmark"),
+					bookmarkAction: "unsave",
+					externalId: "t1_9zyxwv",
+					canonicalUrl:
+						"https://www.reddit.com/r/programming/comments/1abcdef/x/9zyxwv/",
+					raw: { data: { children: [] } },
+				},
 				pageContext("https://www.reddit.com/user/example/saved"),
 			);
-			expect(result.ok).toBe(false);
+			expect(result.ok).toBe(true);
+		});
+
+		test("refuses a link that points off the platform it came from", () => {
+			const offPlatform = [
+				"https://evil.example/phish",
+				"http://x.com/i/status/1900000000000000001",
+				"https://www.reddit.com/r/programming/",
+			];
+			for (const canonicalUrl of offPlatform) {
+				expect(
+					parseExtensionMessage(
+						bookmark({ canonicalUrl }),
+						pageContext("https://x.com/i/bookmarks"),
+					).ok,
+				).toBe(false);
+			}
 		});
 	});
 });
