@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CreatorsRouteImport } from './routes/creators'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CreatorsRoute = CreatorsRouteImport.update({
+  id: '/creators',
+  path: '/creators',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpRoute = McpRouteImport.update({
@@ -31,30 +37,34 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
   '/api/$': typeof ApiSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
   '/api/$': typeof ApiSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
   '/api/$': typeof ApiSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/mcp' | '/api/$'
+  fullPaths: '/' | '/creators' | '/mcp' | '/api/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/mcp' | '/api/$'
-  id: '__root__' | '/' | '/mcp' | '/api/$'
+  to: '/' | '/creators' | '/mcp' | '/api/$'
+  id: '__root__' | '/' | '/creators' | '/mcp' | '/api/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CreatorsRoute: typeof CreatorsRoute
   McpRoute: typeof McpRoute
   ApiSplatRoute: typeof ApiSplatRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/creators': {
+      id: '/creators'
+      path: '/creators'
+      fullPath: '/creators'
+      preLoaderRoute: typeof CreatorsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp': {
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CreatorsRoute: CreatorsRoute,
   McpRoute: McpRoute,
   ApiSplatRoute: ApiSplatRoute,
 }

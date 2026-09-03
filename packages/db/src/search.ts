@@ -269,3 +269,29 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
   const page = hasMore ? rows.slice(0, limit) : rows;
   return { items: page, nextCursor: hasMore ? (page.at(-1)?.saveOrder ?? null) : null };
 }
+
+/**
+ * One round trip for everything the shell needs to render.
+ *
+ * Previously the sidebar asked four times — total, per source, and the author
+ * list — which is how a sidebar ends up disagreeing with the page beside it.
+ */
+export async function libraryStats(db: AnansiDb) {
+  const [totals] = await db.all<{ items: number; authors: number }>(sql`
+    select count(*) as items, count(distinct author_handle) as authors from items
+  `);
+  const bySource = await db.all<{ source: string; n: number }>(sql`
+    select source, count(*) as n from items group by source
+  `);
+  const media = await db.all<{ total: number; stored: number }>(sql`
+    select count(*) as total,
+           sum(case when stored_key is null then 0 else 1 end) as stored
+    from media
+  `);
+  return {
+    items: totals?.items ?? 0,
+    authors: totals?.authors ?? 0,
+    bySource: Object.fromEntries(bySource.map((r) => [r.source, r.n])) as Record<string, number>,
+    media: media[0] ?? { total: 0, stored: 0 },
+  };
+}

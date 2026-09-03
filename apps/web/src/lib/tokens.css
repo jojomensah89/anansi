@@ -1,0 +1,53 @@
+/*
+ * The palette from the Screens canvas, verbatim.
+ *
+ * These are the values the mockup was designed in, not an interpretation of
+ * them, so a screenshot of this app and a screenshot of an artboard should be
+ * the same colours. Kept as CSS variables rather than a theme system because
+ * the design is one dark theme and there is no light variant to switch to.
+ */
+:root {
+  --ink: #0b0e11;
+  --rail: #0e1216;
+  --card: #12161a;
+  --raised: #171d23;
+  --line: #1f262d;
+  --line-soft: #12171c;
+  --edge: #232a31;
+  --edge-strong: #2a333b;
+
+  --text: #e6ebef;
+  --text-dim: #d5dde4;
+  --muted: #8d9aa6;
+  --faint: #5d6874;
+  --fainter: #4a545e;
+  --faintest: #414a53;
+
+  --accent: #e4a33c;
+  --accent-soft: #e4a33c33;
+  --accent-text: #f5c97e;
+  --ok: #4fbf8b;
+
+  --sans: "Instrument Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+* { box-sizing: border-box; }
+a { color: inherit; text-decoration: none; }
+
+.scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--edge-strong) transparent; }
+.scroll::-webkit-scrollbar { width: 10px; }
+.scroll::-webkit-scrollbar-thumb { background: var(--edge-strong); border-radius: 6px; border: 3px solid var(--ink); }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+
+.mono { font-family: var(--mono); }
+
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }

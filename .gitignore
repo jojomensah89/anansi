@@ -8,3 +8,4 @@ data/
 
 # Fixtures ARE committed (they are the regression suite), but only after
 # being scrubbed. See fixtures/README.md.
+apps/web/.env.local

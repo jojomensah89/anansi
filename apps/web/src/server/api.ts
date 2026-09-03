@@ -3,6 +3,7 @@ import {
   creators,
   findByAuthor,
   getItem,
+  libraryStats,
   listItems,
   recentSaves,
   searchItems,
@@ -97,7 +98,7 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
   }
 
   if (request.method === "GET" && path === "/api/stats") {
-    return json({ items: await countItems(env.db) });
+    return json(await libraryStats(env.db));
   }
 
   /**

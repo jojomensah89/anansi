@@ -28,9 +28,26 @@ const server = Bun.serve({
   hostname: "127.0.0.1",
   async fetch(request) {
     const { pathname } = new URL(request.url);
-    if (pathname === "/mcp") return handleMcp({ db, token: mcpToken }, request);
-    if (pathname.startsWith("/api/")) return handleApi({ db, ingestToken }, request);
-    return new Response("anansi local: /api/* and /mcp", { status: 404 });
+
+    // Dev-only CORS. In production the UI is served by the same Worker as the
+    // API and none of this exists; here the Vite dev server is on another
+    // port, so the browser treats it as cross-origin.
+    const cors = {
+      "access-control-allow-origin": request.headers.get("origin") ?? "*",
+      "access-control-allow-headers": "content-type, authorization",
+      "access-control-allow-methods": "GET, POST, OPTIONS",
+    };
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+    const response =
+      pathname === "/mcp"
+        ? await handleMcp({ db, token: mcpToken }, request)
+        : pathname.startsWith("/api/")
+          ? await handleApi({ db, ingestToken }, request)
+          : new Response("anansi local: /api/* and /mcp", { status: 404 });
+
+    for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);
+    return response;
   },
 });
 

@@ -316,9 +316,38 @@ time.
 **Not yet deployed.** `bun run deploy` needs a Cloudflare account, which
 nothing before this point required.
 
+### The interface
+
+Two views, not four — Library and Creators. Search is an **overlay** and item
+detail is a **drawer**, because both are things you do *to* the library rather
+than places you go instead of it; opening a result should never cost you your
+scroll position or your query.
+
+The palette is the product surface, per the Screens canvas note. It debounces
+and aborts in flight, shows the real bm25 score (negative, lower is better)
+because that is the first thing that explains a wrong-looking result, and its
+empty state says what is actually wrong — keyword search has no notion of
+near, so a misspelling returns nothing.
+
+Grid pagination is keyset and infinite. Offset paging would silently drop or
+repeat items whenever an import ran underneath a scroll, which is a thing that
+will happen.
+
+Colours and type come straight from the Screens artboards rather than being
+reinterpreted, so a screenshot of the app and a screenshot of the mockup are
+the same design. Creators reproduces its numbers off the real library: 874
+authors, 1.46 saves per author, 695 saved exactly once.
+
+To run it, both halves:
+
+```bash
+INGEST_TOKEN=dev-ingest MCP_TOKEN=dev-mcp bun run apps/web/scripts/serve-local.ts
+bun run dev:web    # with VITE_API_BASE=http://127.0.0.1:8788 in apps/web/.env.local
+```
+
 ## What is deliberately not here yet
 
-The interface (day 10-11) and the extension (day 13).
+The extension (day 13).
 
 ## Terms
 
