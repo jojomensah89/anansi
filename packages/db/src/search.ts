@@ -170,6 +170,15 @@ export interface ItemDetail {
     height: number | null;
   }[];
   links: string[];
+  /** The post this one quotes, if it quotes one. */
+  quoted: {
+    handle: string | null;
+    name: string | null;
+    avatar: string | null;
+    text: string;
+    url: string | null;
+    media: { kind: string; originUrl: string; storedKey: string | null }[];
+  } | null;
   /** Other saved posts from the same conversation, if any. */
   thread: { id: string; url: string; author: string | null; excerpt: string }[];
 }
@@ -200,7 +209,15 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
   const row = rows[0];
   if (!row) return null;
 
-  let parsed: { links?: string[]; conversationId?: string } = {};
+  let parsed: {
+    links?: string[];
+    conversationId?: string;
+    ownText?: string;
+    quoted?: {
+      handle: string | null; name: string | null; avatar: string | null;
+      text: string; url: string | null; mediaUrls: string[];
+    } | null;
+  } = {};
   try {
     parsed = JSON.parse(row.raw) as typeof parsed;
   } catch {
@@ -215,6 +232,7 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     from media where item_id = ${id}
   `);
 
+  const quotedUrls = new Set(parsed.quoted?.mediaUrls ?? []);
   const conversationId = parsed.conversationId ?? null;
   const thread = conversationId
     ? await db.all<{ id: string; url: string; author: string | null; excerpt: string }>(sql`
@@ -241,13 +259,27 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     authorName: row.authorName,
     authorAvatar: row.authorAvatar,
     title: row.title,
-    fullText: row.body ?? "",
+    // The post's own words. `body` carries the folded quote for FTS, which
+    // would read as a run-on if it reached the screen.
+    fullText: parsed.ownText ?? row.body ?? "",
     postedAt: row.postedAt,
     savedAt: row.savedAt,
     savedAtExact: row.savedAtExact === 1,
     metrics,
-    media: mediaRows,
+    // A quote's images are stored on the parent row, so they are partitioned
+    // back out by origin url rather than duplicated.
+    media: mediaRows.filter((m) => !quotedUrls.has(m.originUrl)),
     links: parsed.links ?? [],
+    quoted: parsed.quoted
+      ? {
+          handle: parsed.quoted.handle,
+          name: parsed.quoted.name,
+          avatar: parsed.quoted.avatar,
+          text: parsed.quoted.text,
+          url: parsed.quoted.url,
+          media: mediaRows.filter((m) => quotedUrls.has(m.originUrl)),
+        }
+      : null,
     thread,
   };
 }
@@ -329,7 +361,8 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
            i.author_avatar as authorAvatar,
            i.title, i.posted_at as postedAt, i.saved_at as savedAt,
            i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
-           substr(coalesce(i.body, ''), 1, 300) as excerpt, 0 as score,
+           substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
+           0 as score,
            -- One representative thumbnail per card. A stored key only, so the
            -- grid never falls back to hot-linking the platform.
            (select m.stored_key from media m

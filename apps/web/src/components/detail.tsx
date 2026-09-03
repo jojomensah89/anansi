@@ -139,6 +139,78 @@ export function Detail({ id, onClose }: { id: string | null; onClose: () => void
               {item.fullText}
             </div>
 
+            {/*
+              A quote-tweet is two posts. Nesting it keeps whose words are
+              whose, which a single run of text cannot do — and the quoted
+              half is usually where the actual content is.
+            */}
+            {item.quoted && (
+              <a
+                href={item.quoted.url ?? item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "block",
+                  border: "1px solid var(--edge)",
+                  borderRadius: 10,
+                  padding: 13,
+                  marginBottom: 20,
+                  background: "var(--card)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
+                  {item.quoted.avatar ? (
+                    <img
+                      src={item.quoted.avatar}
+                      alt=""
+                      width={22}
+                      height={22}
+                      style={{ borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--edge-strong)" }}
+                    />
+                  ) : (
+                    <span style={{ width: 22, height: 22, borderRadius: "50%", background: "var(--edge-strong)", flexShrink: 0 }} />
+                  )}
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{item.quoted.name ?? item.quoted.handle}</span>
+                  <span className="mono" style={{ fontSize: 11.5, color: "var(--faint)" }}>
+                    @{item.quoted.handle ?? "unknown"}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: 13.5, lineHeight: 1.58, color: "var(--text-dim)", whiteSpace: "pre-wrap" }}>
+                  {item.quoted.text}
+                </div>
+
+                {item.quoted.media.length > 0 && (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: item.quoted.media.length === 1 ? "1fr" : "repeat(2, 1fr)",
+                      gap: 6,
+                      marginTop: 11,
+                    }}
+                  >
+                    {item.quoted.media.map((m) =>
+                      m.storedKey ? (
+                        <img
+                          key={m.originUrl}
+                          src={mediaUrl(m.storedKey)}
+                          alt=""
+                          loading="lazy"
+                          style={{
+                            width: "100%",
+                            display: "block",
+                            borderRadius: 7,
+                            border: "1px solid var(--line)",
+                            background: "var(--rail)",
+                          }}
+                        />
+                      ) : null,
+                    )}
+                  </div>
+                )}
+              </a>
+            )}
+
             {item.media.length > 0 && (
               <Section label={item.media.length === 1 ? "Media" : `Media · ${item.media.length}`}>
                 <div

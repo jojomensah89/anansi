@@ -196,12 +196,17 @@ function normalizeTweet(
   const quoted = unwrap(tweet.quoted_status_result?.result);
   const quotedAuthor = quoted ? userOf(quoted) : undefined;
 
-  let body = textOf(subject);
-  if (quoted) {
-    // Folded into body on purpose: the quote is usually the half of a
-    // quote-tweet you actually remember, and body is what FTS5 indexes.
-    body = `${body}\n\n— quoting @${quotedAuthor?.handle ?? "unknown"}: ${textOf(quoted)}`.trim();
-  }
+  const ownText = textOf(subject);
+  const quotedText = quoted ? textOf(quoted) : "";
+
+  // Body stays folded because body is what FTS5 indexes, and the quoted half
+  // is usually the part you actually remember. Display uses `ownText` and the
+  // structured `quoted` block in raw, so the fold never reaches the screen.
+  const body = quoted
+    ? [ownText, "— quoting @" + (quotedAuthor?.handle ?? "unknown") + ": " + quotedText]
+        .join("\n\n")
+        .trim()
+    : ownText;
 
   const links = [...new Set([...linksOf(subject), ...(quoted ? linksOf(quoted) : [])])];
   const subjectId = subject.rest_id ?? subject.legacy?.id_str ?? externalId;
@@ -229,6 +234,26 @@ function normalizeTweet(
       sortIndex,
       isRetweet: !!retweeted,
       retweetedBy: retweeted ? userOf(tweet).handle : undefined,
+      /** The post's own words, without the folded quote. */
+      ownText,
+      /**
+       * A quote-tweet is two posts, and rendering it as one run of text loses
+       * whose words are whose. Kept structured so the UI can nest it the way
+       * every client that shows quote-tweets does.
+       */
+      quoted: quoted
+        ? {
+            handle: quotedAuthor?.handle ?? null,
+            name: quotedAuthor?.name ?? null,
+            avatar: quotedAuthor?.avatar ?? null,
+            text: quotedText,
+            url: quotedAuthor?.handle
+              ? "https://x.com/" + quotedAuthor.handle + "/status/" + quoted.rest_id
+              : null,
+            // Matched back to stored media by origin url when the item is read.
+            mediaUrls: mediaOf(quoted).map((m) => m.originUrl),
+          }
+        : null,
       quotedId: quoted?.rest_id,
       inReplyToStatusId: tweet.legacy?.in_reply_to_status_id_str,
       conversationId: tweet.legacy?.conversation_id_str,
