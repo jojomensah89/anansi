@@ -6,8 +6,8 @@
  * doesn't fit here survives in `raw`.
  */
 
-export type Source = "x" | "github" | "reddit" | "tiktok";
-export type Kind = "post" | "repo";
+export type Source = "x" | "github" | "reddit" | "tiktok" | "web";
+export type Kind = "post" | "repo" | "comment" | "video" | "article";
 
 export interface MediaRef {
   kind: "image" | "video_poster" | "card";
