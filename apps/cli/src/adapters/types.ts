@@ -1,4 +1,4 @@
-import type { NormalizedItem, Source } from "../core/item.ts";
+import type { NormalizedItem, Source } from "@anansi/sources";
 
 /**
  * One raw page exactly as the platform returned it, plus the cursor that

@@ -10,7 +10,7 @@ import { recordRun, startIngestServer } from "./ingest/server.ts";
 import { reparse as reparseFromDisk } from "./core/import.ts";
 import { loadCheckpoint } from "./store/checkpoint.ts";
 import { dataPath, ensureDir, readJsonl } from "./store/files.ts";
-import type { NormalizedItem } from "./core/item.ts";
+import type { NormalizedItem } from "@anansi/sources";
 import { countItems, creators, findByAuthor, recentSaves, searchItems } from "@anansi/db";
 import { HIT, OFF, parseSince, printHits } from "./format.ts";
 import { createAnansiServer } from "@anansi/mcp";

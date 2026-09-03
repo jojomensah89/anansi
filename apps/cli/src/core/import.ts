@@ -1,6 +1,6 @@
 import type { CaptureAdapter, CaptureOptions } from "../adapters/types.ts";
-import type { NormalizedItem, Source } from "./item.ts";
-import { itemKey } from "./item.ts";
+import type { NormalizedItem, Source } from "@anansi/sources";
+import { itemKey } from "@anansi/sources";
 import { loadCheckpoint, saveCheckpoint, zeroItemRegression } from "../store/checkpoint.ts";
 import type { RunRecord } from "../store/checkpoint.ts";
 import { dataPath, ensureDir, readJsonl, writeJson, writeJsonl } from "../store/files.ts";

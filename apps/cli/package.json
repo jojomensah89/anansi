@@ -9,6 +9,7 @@
   "dependencies": {
     "@anansi/db": "workspace:*",
     "@anansi/mcp": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@anansi/sources": "workspace:*"
   }
 }

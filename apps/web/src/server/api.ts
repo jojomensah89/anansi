@@ -10,6 +10,7 @@ import {
   upsertItems,
 } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
+import { parseBookmarksPage, parseStarredPage } from "@anansi/sources";
 
 /**
  * The HTTP surface, as plain Request -> Response.
@@ -102,6 +103,38 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
   }
 
   /**
+   * The extension's instruction sheet.
+   *
+   * This is what makes shipping load-unpacked viable. The extension knows
+   * almost nothing: it fetches this, does what it says, and uploads the raw
+   * result. When X moves an endpoint you change this and the parser, and
+   * every install is fixed on its next run regardless of when it was
+   * installed. The extension's version stops mattering.
+   *
+   * It doubles as a kill switch: set enabled false and every install stops.
+   */
+  if (request.method === "GET" && path === "/api/extension/config") {
+    return json({
+      version: 1,
+      enabled: true,
+      ingest: new URL("/api/ingest", url.origin).toString(),
+      sources: [
+        {
+          host: "x.com",
+          operation: "Bookmarks",
+          variables: { count: 100, includePromotedContent: false },
+          cursorPrefix: "cursor-bottom",
+          entryPrefix: "tweet-",
+          pageLimit: 40,
+          // Watched for real-time capture; unlike the timeline query this
+          // operation IS in the main bundle.
+          watchOperations: ["CreateBookmark", "DeleteBookmark"],
+        },
+      ],
+    });
+  }
+
+  /**
    * The extension's endpoint. Bearer auth rather than open, because an open
    * ingest on a public URL is an invitation to have someone else's library
    * merged into yours.
@@ -111,17 +144,49 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
     const auth = request.headers.get("authorization") ?? "";
     if (auth !== `Bearer ${env.ingestToken}`) return json({ error: "unauthorized" }, 401);
 
-    let body: { items?: unknown[] };
+    let body: { items?: unknown[]; source?: string; raw?: unknown };
     try {
-      body = (await request.json()) as { items?: unknown[] };
+      body = (await request.json()) as typeof body;
     } catch {
       return json({ error: "invalid json" }, 400);
     }
-    if (!Array.isArray(body.items)) return json({ error: "expected { items: [...] }" }, 400);
+
+    /**
+     * Two shapes, and the raw one is the point.
+     *
+     * The extension uploads the untouched platform payload and this parses
+     * it. That is what makes shipping load-unpacked viable: when X reshapes a
+     * response you fix it here, once, and every install is repaired on its
+     * next run — whether it was installed yesterday or six months ago. The
+     * extension's version stops mattering.
+     *
+     * `{ items }` stays for callers that already hold normalized items, which
+     * is how the CLI and the tests speak.
+     */
+    let items: unknown[];
+    if (body.raw !== undefined) {
+      const importedAt = Math.floor(Date.now() / 1000);
+      if (body.source === "github") {
+        items = parseStarredPage(body.raw, { importedAt });
+      } else if (body.source === "x" || body.source === undefined) {
+        items = parseBookmarksPage(body.raw, { importedAt }).items;
+      } else {
+        return json({ error: `unknown source: ${body.source}` }, 400);
+      }
+      // A payload that parses to nothing is the failure the whole project
+      // exists to notice, so say so rather than reporting a cheerful zero.
+      if (items.length === 0) {
+        return json({ error: "payload parsed to zero items", parsed: 0 }, 422);
+      }
+    } else if (Array.isArray(body.items)) {
+      items = body.items;
+    } else {
+      return json({ error: "expected { source, raw } or { items: [...] }" }, 400);
+    }
 
     // Idempotent on (source, external_id), so a retried POST is free.
-    const result = await upsertItems(env.db, body.items as never[]);
-    return json(result);
+    const result = await upsertItems(env.db, items as never[]);
+    return json({ ...result, parsed: items.length });
   }
 
   return json({ error: "not found" }, 404);

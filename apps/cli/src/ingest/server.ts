@@ -1,4 +1,4 @@
-import type { Source } from "../core/item.ts";
+import type { Source } from "@anansi/sources";
 import { dataPath, ensureDir } from "../store/files.ts";
 import { loadCheckpoint, saveCheckpoint, zeroItemRegression } from "../store/checkpoint.ts";
 

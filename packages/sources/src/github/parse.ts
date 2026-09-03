@@ -1,5 +1,5 @@
-import type { NormalizedItem } from "../../core/item.ts";
-import type { ParseContext } from "../types.ts";
+import type { NormalizedItem } from "../item.ts";
+import type { ParseContext } from "../context.ts";
 
 type Any = Record<string, any>;
 

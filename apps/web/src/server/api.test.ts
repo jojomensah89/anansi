@@ -85,6 +85,33 @@ describe("handleApi", () => {
     expect(res.status).toBe(503);
   });
 
+  test("extension config is readable without a token, and names the ingest url", async () => {
+    const body = await readJson(get("/api/extension/config"));
+    expect(body.enabled).toBe(true);
+    expect(body.ingest).toEndWith("/api/ingest");
+    expect(body.sources[0].operation).toBe("Bookmarks");
+  });
+
+  test("ingest parses a raw payload server-side", async () => {
+    const raw = await Bun.file("data/raw/x/page-1788389226894-0001.json").json();
+    const res = await handleApi(env, new Request("https://anansi.test/api/ingest", {
+      method: "POST",
+      headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+      body: JSON.stringify({ source: "x", raw }),
+    }));
+    expect(res.status).toBe(200);
+    expect((await readJson(res)).parsed).toBeGreaterThan(50);
+  });
+
+  test("a raw payload that parses to nothing is an error, not a cheerful zero", async () => {
+    const res = await handleApi(env, new Request("https://anansi.test/api/ingest", {
+      method: "POST",
+      headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+      body: JSON.stringify({ source: "x", raw: { data: {} } }),
+    }));
+    expect(res.status).toBe(422);
+  });
+
   test("unknown routes 404", async () => {
     expect((await get("/api/nope")).status).toBe(404);
   });

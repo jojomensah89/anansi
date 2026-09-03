@@ -1,5 +1,5 @@
-import type { MediaRef, NormalizedItem } from "../../core/item.ts";
-import type { ParseContext } from "../types.ts";
+import type { MediaRef, NormalizedItem } from "../item.ts";
+import type { ParseContext } from "../context.ts";
 
 /**
  * Raw bookmark payload -> NormalizedItem[].

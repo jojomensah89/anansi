@@ -345,9 +345,57 @@ INGEST_TOKEN=dev-ingest MCP_TOKEN=dev-mcp bun run apps/web/scripts/serve-local.t
 bun run dev:web    # with VITE_API_BASE=http://127.0.0.1:8788 in apps/web/.env.local
 ```
 
-## What is deliberately not here yet
+## The extension
 
-The extension (day 13).
+`apps/extension`, WXT + React, MV3. The thing that finally makes capture
+automatic — and the thing that deletes the bridge window, because a content
+script's fetches are bound by the **extension's** CSP, not the page's.
+
+Two content scripts, and both halves are load-bearing:
+
+```
+x-main    MAIN world, document_start   — X's own JS context
+x-relay   isolated,   document_start   — extension APIs
+```
+
+`MAIN` because the isolated world cannot see
+`window.webpackChunk_twitter_responsive_web`, where the Bookmarks queryId
+lives, and because its `window.fetch` is a different object entirely.
+`document_start` because at `document_idle` X has already cached its own
+reference to `fetch`, so the patch lands on something nobody calls — which
+produces empty results that look exactly like X killing the API. Neither
+script can do the job alone, so they talk by `postMessage`.
+
+That split is also the trust boundary. `x-main` shares a context with x.com's
+own code, so it holds **no token and knows no server**; everything from it is
+treated as data by the relay and forwarded verbatim.
+
+### The thin pipe
+
+The extension parses nothing. It fetches `/api/extension/config`, follows it,
+and uploads the untouched payload; `/api/ingest` parses server-side. So when X
+reshapes a response you fix it in one place and every install is repaired on
+its next run, whether it was installed yesterday or six months ago — the
+extension's version stops mattering, which is what makes shipping it
+load-unpacked reasonable rather than a maintenance trap. The config endpoint
+doubles as a kill switch.
+
+A payload that parses to **zero items returns 422**, not a cheerful zero. That
+is the failure the whole project exists to notice.
+
+Permissions are `storage`, `tabs`, and three hosts. No `<all_urls>` — broad
+permissions are the biggest driver of review scrutiny, and this needs exactly
+what it asks for.
+
+### Load it
+
+```bash
+bun run --filter @anansi/extension build
+```
+
+Then `chrome://extensions` → Developer Mode → Load unpacked →
+`apps/extension/.output/chrome-mv3`. Set the server and ingest token in the
+popup. No store, no review, no gatekeeper.
 
 ## Terms
 

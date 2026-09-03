@@ -1,4 +1,4 @@
-import type { Source } from "../core/item.ts";
+import type { Source } from "@anansi/sources";
 import { readJson, writeJson } from "./files.ts";
 
 /**

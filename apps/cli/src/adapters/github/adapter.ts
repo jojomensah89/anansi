@@ -1,8 +1,8 @@
 import type { CaptureAdapter, CaptureOptions, CapturePage, ParseContext } from "../types.ts";
-import type { NormalizedItem } from "../../core/item.ts";
+import type { NormalizedItem } from "@anansi/sources";
 import { fetchReadme, fetchStarredPage, githubAuth } from "./client.ts";
-import { README_CHARS, parseStarredPage } from "./parse.ts";
-import type { StarredRawPage } from "./parse.ts";
+import { README_CHARS, parseStarredPage } from "@anansi/sources/github";
+import type { StarredRawPage } from "@anansi/sources/github";
 
 export interface GithubAdapterOptions {
   /** Parse-only construction, same as the X adapter. */
