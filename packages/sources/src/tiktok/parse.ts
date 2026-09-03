@@ -6,9 +6,10 @@ type Any = Record<string, any>;
 /**
  * TikTok favourites -> NormalizedItem[].
  *
- * UNVERIFIED against a real payload. Written to the documented shape of the
- * `item_list` responses the web app makes, but nobody has run it on a real
- * favourites page yet, and TikTok reshapes these more freely than X does.
+ * Covered by a sanitized fixture built to the shape of the `item_list`
+ * responses the web app makes, which is a contract test rather than a
+ * recording — TikTok reshapes these more freely than X does, so a live shape
+ * can still drift out from under it.
  *
  * That is survivable rather than reckless because of where it runs: the
  * extension uploads raw and the server parses, so a wrong guess here is a
