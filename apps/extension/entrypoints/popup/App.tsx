@@ -1,20 +1,33 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { RemoteConfig, SourceConfig, Status } from "../background.ts";
 import { MESSAGE_PROTOCOL_VERSION } from "../../lib/messages.ts";
+import {
+  describeQueue,
+  describeSource,
+  redactError,
+  type SourceSnapshot,
+  type Tone,
+} from "../../lib/popup-state.ts";
+import "./App.css";
 
 /**
  * The popup.
  *
  * Shaped after [removed]'s, which gets one thing right that a row of counters
  * does not: the question you open this for is "is it working", and a number
- * only answers that if you remember what it was last time. So each source
- * says its state in words — up to date, never imported, watching, or what
- * went wrong — and the raw counts sit underneath for when the words are not
- * enough.
+ * only answers that if you remember what it was last time.
  *
- * The source list comes from the server's config, so a source switched off in
- * the web app disappears from here too. There is one list and the server owns
- * it.
+ * So each source says its state in words — but the words are derived, here,
+ * from durable run records and durable outbox counts, and never read out of a
+ * message the background left in storage. That distinction is the whole point
+ * of this file: "running…" used to be a string that outlived the run that
+ * wrote it, survived reloads and browser restarts, and made the only question
+ * worth asking unanswerable. A source can no longer claim to be synced while
+ * anything is still queued, retrying or failed for it.
+ *
+ * The source list comes from the server's config — one list, server-owned.
+ * A source switched off there keeps its row and says it is off, because a row
+ * that silently vanishes reads as a bug rather than as a setting.
  */
 const S = {
   ink: "#0b0e11",
@@ -29,6 +42,14 @@ const S = {
   ok: "#4fbf8b",
   warn: "#e0714f",
   mono: "ui-monospace, 'IBM Plex Mono', monospace",
+};
+
+const TONES: Record<Tone, string> = {
+  accent: S.accent,
+  ok: S.ok,
+  warn: S.warn,
+  muted: S.muted,
+  faint: S.faint,
 };
 
 const INTERVALS = [
@@ -52,10 +73,28 @@ interface QueueStatus {
   failed: number;
 }
 
+interface RunRecord {
+  phase: "idle" | "running";
+  startedAt?: number;
+  paused?: boolean;
+  lastErrorCode?: string;
+}
+
 interface DurableSnapshot {
   queue: QueueStatus;
-  runs: Record<string, { phase: "idle" | "running"; startedAt?: number }>;
+  bySource: Record<string, QueueStatus>;
+  runs: Record<string, RunRecord>;
 }
+
+const EMPTY_QUEUE: QueueStatus = {
+  queued: 0,
+  uploading: 0,
+  retrying: 0,
+  failed: 0,
+};
+
+/** What the server can offer. Anything missing from its config is switched off. */
+const KNOWN_SOURCES = ["x", "reddit", "tiktok"];
 
 const NAMES: Record<string, string> = {
   x: "Twitter / X",
@@ -71,29 +110,27 @@ const MARK_PROPS = {
   fill: "currentColor",
 } as const;
 
-const run = (source: string) =>
-  void browser.runtime.sendMessage({
-    anansi: "popup-command",
-    messageVersion: MESSAGE_PROTOCOL_VERSION,
-    action: "start",
-    source,
-  });
+const command = (message: Record<string, unknown>) =>
+  browser.runtime
+    .sendMessage({
+      anansi: "popup-command",
+      messageVersion: MESSAGE_PROTOCOL_VERSION,
+      ...message,
+    })
+    .catch(() => undefined);
 
-/** Stop persists through the background run coordinator before the UI changes. */
-const stop = (source: string) =>
-  void browser.runtime.sendMessage({
-    anansi: "popup-command",
-    messageVersion: MESSAGE_PROTOCOL_VERSION,
-    action: "stop",
-    source,
-  });
+const start = (source: string) => command({ action: "start", source });
 
-const retryQueue = () =>
-  void browser.runtime.sendMessage({
-    anansi: "popup-command",
-    messageVersion: MESSAGE_PROTOCOL_VERSION,
-    action: "retry-queue",
-  });
+/**
+ * Pause, not stop.
+ *
+ * Progress and everything already queued survive; only the run in flight ends.
+ * Calling it Stop implied it threw work away, which it never did.
+ */
+const pause = (source: string) => command({ action: "stop", source });
+
+const retry = (source?: string) =>
+  command(source ? { action: "retry-queue", source } : { action: "retry-queue" });
 
 export default function App() {
   const [server, setServer] = useState("");
@@ -102,125 +139,119 @@ export default function App() {
   const [status, setStatus] = useState<Status>({});
   const [config, setConfig] = useState<RemoteConfig | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [queueStatus, setQueueStatus] = useState<QueueStatus>({
-    queued: 0,
-    uploading: 0,
-    retrying: 0,
-    failed: 0,
-  });
+  const [snapshot, setSnapshot] = useState<DurableSnapshot | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    void browser.storage.local.get(["server", "token", "syncEvery", "status", "queueStatus"]).then((s) => {
+    void browser.storage.local.get(["server", "token", "syncEvery", "status"]).then((s) => {
       const hasServer = !!String(s.server ?? "").trim();
       setServer(String(s.server ?? ""));
       setToken(String(s.token ?? ""));
       setSyncEvery(Number(s.syncEvery ?? 0));
       setStatus((s.status as Status) ?? {});
-      if (s.queueStatus) setQueueStatus(s.queueStatus as QueueStatus);
       // First run opens on the settings, every run after that on the sources.
       setSettingsOpen(!hasServer);
     });
     const onChange = (changes: Record<string, { newValue?: unknown }>) => {
       if (changes.status) setStatus((changes.status.newValue as Status) ?? {});
-      if (changes.queueStatus) {
-        setQueueStatus((changes.queueStatus.newValue as QueueStatus) ?? {
-          queued: 0,
-          uploading: 0,
-          retrying: 0,
-          failed: 0,
-        });
-      }
     };
     browser.storage.local.onChanged.addListener(onChange);
     return () => browser.storage.local.onChanged.removeListener(onChange);
   }, []);
 
   const base = server.replace(/\/+$/, "");
+
+  /**
+   * Ask the worker what is actually persisted.
+   *
+   * Not a cached copy in storage: the snapshot is read from the outbox and the
+   * run records at the moment it is asked for, so what the popup shows is what
+   * would survive a restart.
+   */
+  const refresh = useCallback(() => {
+    setNow(Date.now());
+    void command({ action: "queue-status" }).then((response) => {
+      const next = (response as { snapshot?: DurableSnapshot } | undefined)?.snapshot;
+      if (next) setSnapshot(next);
+    });
+  }, []);
+
   useEffect(() => {
     if (!base || !token.trim()) return;
     const load = () => {
       fetch(`${base}/api/extension/config`).then((r) => (r.ok ? r.json() : null)).then(setConfig).catch(() => setConfig(null));
       fetch(`${base}/api/stats`).then((r) => (r.ok ? r.json() : null)).then(setStats).catch(() => setStats(null));
-      void browser.runtime.sendMessage({
-        anansi: "popup-command",
-        messageVersion: MESSAGE_PROTOCOL_VERSION,
-        action: "queue-status",
-      }).then((response) => {
-        const snapshot = (response as { ok?: boolean; snapshot?: DurableSnapshot } | undefined)?.snapshot;
-        if (!snapshot) return;
-        setQueueStatus(snapshot.queue);
-        setStatus((current) => {
-          const next = { ...current };
-          for (const [source, run] of Object.entries(snapshot.runs)) {
-            next[source] = {
-              ...(next[source] ?? { lastRun: null, pages: 0, items: 0, uploaded: 0, failed: 0, message: null }),
-              startedAt: run.phase === "running" ? run.startedAt ?? null : null,
-            };
-          }
-          return next;
-        });
-      }).catch(() => {});
+      refresh();
     };
     load();
     // Refresh while a run is in flight, so the numbers move as it works.
     const timer = setInterval(load, 4000);
     return () => clearInterval(timer);
-  }, [base, token]);
+  }, [base, token, refresh]);
 
   const save = async () => {
     await browser.storage.local.set({ server: base, token, syncEvery });
-    await browser.runtime.sendMessage({
-      anansi: "popup-command",
-      messageVersion: MESSAGE_PROTOCOL_VERSION,
-      action: "reschedule",
-    });
+    await command({ action: "reschedule" });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };
 
   const configured = base !== "" && token.trim() !== "";
+  const queue = snapshot?.queue ?? EMPTY_QUEUE;
+  const outbox = describeQueue(queue);
 
   /**
-   * Is a run actually in flight, or did one die without saying so?
+   * Every source, including the ones the server has switched off.
    *
-   * Judged here rather than in the background worker, because MV3 kills an
-   * idle service worker after about thirty seconds — a timer there usually
-   * never fires, which is how "importing…" got written to storage and stayed
-   * there through reloads and restarts.
+   * A switched-off source is simply absent from the config, and a row that
+   * vanishes reads as a bug rather than a setting. So the known sources are
+   * appended back, marked off, and say so.
    */
-  const RUN_TIMEOUT_MS = 90_000;
-  const runState = (st: Status[string] | undefined) => {
-    if (!st?.startedAt) return "idle" as const;
-    return Date.now() - st.startedAt < RUN_TIMEOUT_MS ? ("running" as const) : ("stalled" as const);
+  const rows: Array<SourceConfig & { enabled: boolean }> = [
+    ...(config?.sources ?? []).map((s) => ({ ...s, enabled: true })),
+    ...KNOWN_SOURCES.filter(
+      (source) => config && !config.sources.some((s) => s.source === source),
+    ).map((source) => ({
+      source,
+      host: source,
+      mode: "page" as const,
+      enabled: false,
+    })),
+  ];
+
+  /** Everything one row needs, entirely from persisted state. */
+  const viewOf = (s: SourceConfig & { enabled: boolean }) => {
+    const run = snapshot?.runs[s.source];
+    const input: SourceSnapshot = {
+      source: s.source,
+      enabled: s.enabled,
+      phase: run?.phase ?? "idle",
+      startedAt: run?.startedAt,
+      paused: run?.paused,
+      lastErrorCode: run?.lastErrorCode,
+      queue: snapshot?.bySource?.[s.source] ?? EMPTY_QUEUE,
+      lastRun: status[s.source]?.lastRun ?? null,
+      held: stats?.bySource[s.source] ?? 0,
+    };
+    return describeSource(input, now);
   };
 
-  /** What to say about a source, in words rather than numbers. */
-  const describe = (s: SourceConfig) => {
-    const st = status[s.source];
-    const held = stats?.bySource[s.source] ?? 0;
-    const state = runState(st);
-
-    if (state === "running") {
-      const seen = (st?.items ?? 0) > 0 ? ` · ${st?.items} so far` : "";
-      return { text: `Importing${seen}`, tone: S.accent };
-    }
-    if (state === "stalled") {
-      return { text: "Stopped responding — press Import to retry", tone: S.warn };
-    }
-    if (st?.message && st.message !== "running…" && st.message !== "scanning…") {
-      return { text: st.message, tone: st.failed ? S.warn : S.muted };
-    }
-    if (held > 0) {
-      const when = st?.lastRun ? ` · synced ${new Date(st.lastRun).toLocaleTimeString()}` : "";
-      return { text: `${held.toLocaleString()} saved${when}`, tone: S.faint };
-    }
-    return { text: "Ready to import", tone: S.muted };
+  const act = (s: SourceConfig, action: string) => {
+    if (action === "pause") return void pause(s.source);
+    if (action === "retry") return void retry(s.source).then(refresh);
+    if (action === "sign-in") return void browser.tabs.create({ url: `https://${s.host}` });
+    return void start(s.source);
   };
+
+  // Whatever last went wrong, with anything credential-shaped removed.
+  const diagnostics = Object.entries(status)
+    .filter(([, st]) => !!st.message)
+    .map(([source, st]) => `${source}: ${redactError(st.message ?? "")}`);
 
   return (
-    <div style={{ width: 344, background: S.ink, color: S.text, fontFamily: "system-ui, sans-serif", fontSize: 13 }}>
+    <div className="anansi-popup" style={{ width: 344, background: S.ink, color: S.text, fontFamily: "system-ui, sans-serif", fontSize: 13 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 16px 0" }}>
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={S.accent} strokeWidth="1.6" strokeLinecap="round">
           <circle cx="12" cy="12" r="3.2" />
@@ -231,6 +262,7 @@ export default function App() {
           type="button"
           onClick={() => setSettingsOpen((o) => !o)}
           aria-label="Settings"
+          aria-expanded={settingsOpen}
           style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: settingsOpen ? S.text : S.faint, padding: 2 }}
         >
           <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -259,15 +291,12 @@ export default function App() {
         </div>
       )}
 
-      {configured && (queueStatus.queued + queueStatus.uploading + queueStatus.retrying + queueStatus.failed > 0) && (
-        <div style={{ margin: "0 16px 12px", padding: "8px 10px", border: `1px solid ${queueStatus.failed ? S.warn : S.edge}`, borderRadius: 7, display: "flex", alignItems: "center", gap: 8, color: queueStatus.failed ? S.warn : S.muted, fontSize: 10.5, fontFamily: S.mono }}>
-          <span>
-            outbox {queueStatus.queued + queueStatus.uploading + queueStatus.retrying} pending
-            {queueStatus.failed > 0 ? ` · ${queueStatus.failed} failed` : ""}
-          </span>
-          {queueStatus.failed > 0 && (
-            <button type="button" onClick={retryQueue} style={{ ...button, marginLeft: "auto", height: 23, padding: "0 8px", fontSize: 10 }}>
-              Retry
+      {configured && outbox.total > 0 && (
+        <div style={{ margin: "0 16px 12px", padding: "8px 10px", border: `1px solid ${queue.failed ? S.warn : S.edge}`, borderRadius: 7, display: "flex", alignItems: "center", gap: 8, color: TONES[outbox.tone], fontSize: 10.5, fontFamily: S.mono }}>
+          <span>outbox · {outbox.text}</span>
+          {outbox.canRetry && (
+            <button type="button" onClick={() => void retry().then(refresh)} style={{ ...button, marginLeft: "auto", height: 23, padding: "0 8px", fontSize: 10 }}>
+              Retry all
             </button>
           )}
         </div>
@@ -286,6 +315,7 @@ export default function App() {
                 key={i.value}
                 type="button"
                 onClick={() => setSyncEvery(i.value)}
+                aria-pressed={syncEvery === i.value}
                 style={{
                   flex: 1,
                   height: 26,
@@ -303,9 +333,9 @@ export default function App() {
             ))}
           </div>
           <div style={{ fontSize: 10.5, color: S.faint, lineHeight: 1.5, marginBottom: 10 }}>
-            A scheduled sync needs that site's tab open — capture runs there,
-            with the session your browser already has. Saving something syncs it
-            straight away either way.
+            A scheduled sync opens the site in a background tab and closes it
+            again, using the session your browser already has. Saving something
+            syncs it straight away either way.
           </div>
           <button type="button" onClick={save} style={{ ...button, width: "100%" }}>
             {saved ? "Saved" : "Save"}
@@ -313,40 +343,60 @@ export default function App() {
         </div>
       )}
 
-      {configured &&
-        (config?.sources ?? []).map((s) => {
-          const st = status[s.source];
-          const d = describe(s);
-          const running = runState(st) === "running";
-          return (
-            <div key={s.source} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
-              <span style={{ width: 26, height: 26, borderRadius: 7, background: S.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: S.muted }}>
-                <Mark source={s.source} />
-              </span>
-              <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{NAMES[s.source] ?? s.host}</span>
-                <span style={{ fontSize: 11, color: d.tone, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {d.text}
+      {configured && (
+        <div className="anansi-sources">
+          {rows.map((s) => {
+            const view = viewOf(s);
+            return (
+              <div key={s.source} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
+                <span style={{ width: 26, height: 26, borderRadius: 7, background: S.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: S.muted }}>
+                  <Mark source={s.source} />
                 </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => (running ? stop(s.source) : run(s.source))}
-                style={{
-                  ...button,
-                  height: 27,
-                  padding: "0 12px",
-                  fontSize: 11.5,
-                  flexShrink: 0,
-                  background: running ? S.raised : S.card,
-                  color: running ? S.faint : S.text,
-                }}
-              >
-                {running ? "Stop" : "Import"}
-              </button>
-            </div>
-          );
-        })}
+                <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{NAMES[s.source] ?? s.host}</span>
+                  <span style={{ fontSize: 11, color: TONES[view.tone], overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {view.text}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  disabled={view.action === "none"}
+                  onClick={() => act(s, view.action)}
+                  aria-label={`${view.actionLabel} ${NAMES[s.source] ?? s.host}`}
+                  style={{
+                    ...button,
+                    height: 27,
+                    padding: "0 12px",
+                    fontSize: 11.5,
+                    flexShrink: 0,
+                    opacity: view.action === "none" ? 0.4 : 1,
+                    cursor: view.action === "none" ? "default" : "pointer",
+                    background: view.action === "pause" ? S.raised : S.card,
+                    color: view.action === "pause" ? S.faint : S.text,
+                  }}
+                >
+                  {view.actionLabel}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {configured && diagnostics.length > 0 && (
+        <details className="anansi-diagnostics" style={{ borderTop: `1px solid ${S.line}`, padding: "9px 16px 12px" }}>
+          <summary style={{ fontSize: 10.5, color: S.faint, fontFamily: S.mono }}>
+            Details
+          </summary>
+          <div style={{ marginTop: 7, display: "flex", flexDirection: "column", gap: 5 }}>
+            {diagnostics.map((line) => (
+              <div key={line} style={{ fontSize: 10.5, fontFamily: S.mono, color: S.muted, lineHeight: 1.45, wordBreak: "break-word" }}>
+                {line}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       {!configured && !settingsOpen && (
         <div style={{ padding: "0 16px 16px", fontSize: 12, color: S.faint, lineHeight: 1.5 }}>

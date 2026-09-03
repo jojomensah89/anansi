@@ -197,16 +197,24 @@ function queue(): CaptureQueue {
   return durableQueue;
 }
 
-async function publishQueueStatus(): Promise<CaptureQueueStatus> {
-  const queueStatus = await queue().getStatus();
-  await browser.storage.local.set({ queueStatus });
-  return queueStatus;
+/**
+ * Counts, read at the moment they are asked for.
+ *
+ * There is deliberately no cached copy in storage any more. A second place to
+ * look is a second thing that can be stale, and a stale count is exactly the
+ * failure this whole pass exists to remove.
+ */
+function publishQueueStatus(): Promise<CaptureQueueStatus> {
+  return queue().getStatus();
 }
 
-async function wakeDurableQueue(includeFailed = false): Promise<CaptureQueueStatus> {
-  const queueStatus = await queue().retry(includeFailed ? { includeFailed: true } : undefined);
-  await browser.storage.local.set({ queueStatus });
-  return queueStatus;
+async function wakeDurableQueue(
+  includeFailed = false,
+  source?: CaptureSource,
+): Promise<CaptureQueueStatus> {
+  return queue().retry(
+    includeFailed ? { includeFailed: true, ...(source ? { source } : {}) } : undefined,
+  );
 }
 
 /** Legacy direct upload, kept only while a source's captureV2 flag is off. */
@@ -739,14 +747,44 @@ async function processPendingRefreshes(): Promise<void> {
   }
 }
 
+const EMPTY_COUNTS: CaptureQueueStatus = {
+  queued: 0,
+  uploading: 0,
+  retrying: 0,
+  failed: 0,
+};
+
+/**
+ * Outbox counts split by source.
+ *
+ * The popup needs these per row, not just as a grand total: "1,274 saved" next
+ * to a row that still has three captures it could not send is the kind of
+ * reassurance that made the old popup untrustworthy.
+ */
+async function queueBySource(): Promise<Record<string, CaptureQueueStatus>> {
+  const records = await persistentState().outbox.list();
+  const counts: Record<string, CaptureQueueStatus> = {};
+  for (const source of CAPTURE_SOURCES) counts[source] = { ...EMPTY_COUNTS };
+  for (const record of records) {
+    const bucket = (counts[record.source] ??= { ...EMPTY_COUNTS });
+    if (record.state === "queued") bucket.queued++;
+    else if (record.state === "uploading") bucket.uploading++;
+    else if (record.state === "retry_wait") bucket.retrying++;
+    else bucket.failed++;
+  }
+  return counts;
+}
+
 async function durableSnapshot() {
   const runsState = persistentState().runs;
-  const [queueStatus, ...runs] = await Promise.all([
+  const [queueStatus, bySource, ...runs] = await Promise.all([
     publishQueueStatus(),
+    queueBySource(),
     ...CAPTURE_SOURCES.map((source) => runsState.current(source)),
   ]);
   return {
     queue: queueStatus,
+    bySource,
     runs: Object.fromEntries(runs.map((run) => [run.source, run])),
   };
 }
@@ -814,7 +852,7 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
       await rescheduleAlarm();
       return { ok: true };
     case "retry-queue":
-      await wakeDurableQueue(true);
+      await wakeDurableQueue(true, msg.source);
       return { ok: true, snapshot: await durableSnapshot() };
     case "start": {
       const creds = await settings();
@@ -898,6 +936,7 @@ async function handlePageEvent(
       return { ok: true };
     }
     case "error":
+      await persistentState().runs.noteError(source, msg.errorCode);
       await finishRun(source);
       await patchStatus(source, {
         startedAt: null,

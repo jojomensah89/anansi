@@ -21,6 +21,10 @@ export interface SourceRunState extends SyncStateRecord {
 	pendingSaves: string[];
 	/** The signed-in handle, once a page has told us one. */
 	handle?: string;
+	/** Stopped by hand. Progress is kept; nothing queued is discarded. */
+	paused?: boolean;
+	/** The last thing the page said went wrong, as a code rather than prose. */
+	lastErrorCode?: string;
 }
 
 export interface ActiveSourceRunState extends SourceRunState {
@@ -54,6 +58,8 @@ export interface SourceRuns {
 	setCursor(source: CaptureSource, cursor: string | null): Promise<void>;
 	/** Remember whose profile to open, so the next Import goes straight there. */
 	setHandle(source: CaptureSource, handle: string): Promise<void>;
+	/** Record why a run ended badly, so the popup can offer the right fix. */
+	noteError(source: CaptureSource, code: string): Promise<void>;
 	setOwnedTab(source: CaptureSource, tabId: number): Promise<void>;
 	takeOwnedTab(
 		source: CaptureSource,
@@ -148,6 +154,9 @@ export function createSourceRuns(
 					runId: `${source}-${createId()}`,
 					startedAt: now(),
 					nextPage: 0,
+					// Starting again clears both, so neither outlives its run.
+					paused: false,
+					lastErrorCode: undefined,
 					updatedAt: now(),
 				};
 				await write(run);
@@ -200,6 +209,7 @@ export function createSourceRuns(
 					phase: "idle",
 					startedAt: undefined,
 					createdTabId: undefined,
+					paused: true,
 					updatedAt: now(),
 				});
 				return tabId;
@@ -234,6 +244,13 @@ export function createSourceRuns(
 					-MAX_PENDING_SAVES,
 				);
 				await write({ ...current, pendingSaves, updatedAt: now() });
+			});
+		},
+
+		noteError(source, code) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				await write({ ...current, lastErrorCode: code, updatedAt: now() });
 			});
 		},
 

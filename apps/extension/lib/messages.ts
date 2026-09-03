@@ -114,7 +114,13 @@ export type PopupCommandMessage = MessageBase &
 	(
 		| {
 				anansi: "popup-command";
-				action: "queue-status" | "reschedule" | "retry-queue";
+				action: "queue-status" | "reschedule";
+		  }
+		| {
+				anansi: "popup-command";
+				action: "retry-queue";
+				/** Narrow a retry to the row it was pressed on. */
+				source?: PlatformSource;
 		  }
 		| {
 				anansi: "popup-command";
@@ -510,8 +516,14 @@ function validatePopupCommandShape(
 	const value = candidate;
 	if (value.anansi !== "popup-command" || typeof value.action !== "string")
 		return false;
-	if (["queue-status", "reschedule", "retry-queue"].includes(value.action)) {
+	if (value.action === "queue-status" || value.action === "reschedule") {
 		return hasOnlyKeys(value, ["anansi", "messageVersion", "action"]);
+	}
+	if (value.action === "retry-queue") {
+		return (
+			hasOnlyKeys(value, ["anansi", "messageVersion", "action", "source"]) &&
+			(value.source === undefined || isSource(value.source))
+		);
 	}
 	if (value.action === "start" || value.action === "stop") {
 		return (

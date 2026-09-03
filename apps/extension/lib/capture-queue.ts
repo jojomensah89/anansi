@@ -70,8 +70,10 @@ export interface EnqueueResult {
 
 export interface RetryRequest {
 	eventId?: string;
-	/** Explicit user action: make all permanently failed records eligible again. */
+	/** Explicit user action: make permanently failed records eligible again. */
 	includeFailed?: boolean;
+	/** Narrow that to one source, for a retry pressed on one row. */
+	source?: BookmarkCapture["source"];
 }
 
 export interface CaptureQueue {
@@ -354,7 +356,9 @@ export function createCaptureQueue(
 		await ensureRecovered();
 		if (request?.includeFailed) {
 			const failed = (await store.list()).filter(
-				(record) => record.state === "failed",
+				(record) =>
+					record.state === "failed" &&
+					(!request.source || record.source === request.source),
 			);
 			await Promise.all(
 				failed.map((record) =>
