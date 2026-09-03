@@ -15,6 +15,26 @@ import {
   normalizeServerOrigin,
   type ServerCache,
 } from "../lib/config-cache.ts";
+import {
+  createCaptureQueue,
+  type CaptureQueue,
+} from "../lib/capture-queue.ts";
+import {
+  createIndexedDbOutbox,
+  type IndexedDbOutbox,
+} from "../lib/idb-outbox.ts";
+import { createIngestTransport } from "../lib/ingest-transport.ts";
+import {
+  captureDeliveryMode,
+  createSourceRuns,
+  isExpectedImportTab,
+  type CaptureSource,
+  type SourceRuns,
+} from "../lib/source-runs.ts";
+import type {
+  CaptureQueueStatus,
+  RawPageCapture,
+} from "@anansi/sources";
 
 export interface Settings {
   server: string;
@@ -52,6 +72,15 @@ export interface RemoteConfig {
 }
 
 export interface SourceStatus {
+  /**
+   * When the current run began, or null when nothing is running.
+   *
+   * The popup decides staleness from this rather than trusting a timer here:
+   * MV3 kills an idle service worker after about thirty seconds, so a
+   * setTimeout watchdog in this file usually never fires — which is exactly
+   * how "running…" got written to storage and stayed there forever.
+   */
+  startedAt: number | null;
   lastRun: number | null;
   pages: number;
   items: number;
@@ -64,10 +93,26 @@ export type Status = Record<string, SourceStatus>;
 
 const CONFIG_TTL_MS = 60 * 60 * 1000;
 const ALARM = "anansi-sync";
+const OUTBOX_ALARM = "anansi-outbox";
+const CAPTURE_SOURCES = ["x", "reddit", "tiktok"] as const;
 
 let cached: ServerCache<RemoteConfig> | null = null;
-const savedTimers = new Map<string, number>();
-const closeWhenDone = new Map<string, number>();
+let persistent: { outbox: IndexedDbOutbox; runs: SourceRuns } | null = null;
+let durableQueue: CaptureQueue | null = null;
+
+function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
+  if (persistent) return persistent;
+  const outbox = createIndexedDbOutbox();
+  persistent = {
+    outbox,
+    runs: createSourceRuns({
+      store: outbox,
+      now: Date.now,
+      createId: () => crypto.randomUUID(),
+    }),
+  };
+  return persistent;
+}
 
 async function settings(): Promise<Settings | null> {
   const stored = await browser.storage.local.get(["server", "token", "syncEvery"]);
@@ -79,13 +124,13 @@ async function settings(): Promise<Settings | null> {
 
 async function patchStatus(source: string, patch: Partial<SourceStatus>): Promise<void> {
   const all = ((await browser.storage.local.get("status")).status ?? {}) as Status;
-  const current = all[source] ?? { lastRun: null, pages: 0, items: 0, uploaded: 0, failed: 0, message: null };
+  const current = all[source] ?? { startedAt: null, lastRun: null, pages: 0, items: 0, uploaded: 0, failed: 0, message: null };
   await browser.storage.local.set({ status: { ...all, [source]: { ...current, ...patch } } });
 }
 
 async function readStatus(source: string): Promise<SourceStatus> {
   const all = ((await browser.storage.local.get("status")).status ?? {}) as Status;
-  return all[source] ?? { lastRun: null, pages: 0, items: 0, uploaded: 0, failed: 0, message: null };
+  return all[source] ?? { startedAt: null, lastRun: null, pages: 0, items: 0, uploaded: 0, failed: 0, message: null };
 }
 
 /**
@@ -117,10 +162,45 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
   }
 }
 
-/** Upload one untouched payload. The server does the understanding. */
-async function upload(source: string, raw: unknown): Promise<void> {
-  const s = await settings();
-  const config = await loadConfig();
+function isCaptureSource(source: string): source is CaptureSource {
+  return CAPTURE_SOURCES.includes(source as (typeof CAPTURE_SOURCES)[number]);
+}
+
+function queue(): CaptureQueue {
+  if (durableQueue) return durableQueue;
+  const { outbox } = persistentState();
+  durableQueue = createCaptureQueue({
+    store: outbox,
+    transport: createIngestTransport(async () => {
+      const [s, config] = await Promise.all([settings(), loadConfig()]);
+      return s && config ? { ingest: config.ingest, token: s.token } : null;
+    }),
+    clock: { now: Date.now },
+    random: Math.random,
+    scheduler: {
+      schedule(at) {
+        browser.alarms.create(OUTBOX_ALARM, { when: Math.max(Date.now() + 100, at) });
+      },
+    },
+  });
+  return durableQueue;
+}
+
+async function publishQueueStatus(): Promise<CaptureQueueStatus> {
+  const queueStatus = await queue().getStatus();
+  await browser.storage.local.set({ queueStatus });
+  return queueStatus;
+}
+
+async function wakeDurableQueue(includeFailed = false): Promise<CaptureQueueStatus> {
+  const queueStatus = await queue().retry(includeFailed ? { includeFailed: true } : undefined);
+  await browser.storage.local.set({ queueStatus });
+  return queueStatus;
+}
+
+/** Legacy direct upload, kept only while a source's captureV2 flag is off. */
+async function legacyUpload(source: string, raw: unknown): Promise<void> {
+  const [s, config] = await Promise.all([settings(), loadConfig()]);
   if (!s || !config) return;
 
   try {
@@ -149,6 +229,56 @@ async function upload(source: string, raw: unknown): Promise<void> {
   }
 }
 
+/** Exactly one delivery path owns a payload, selected by its source flag. */
+async function deliverRaw(
+  source: CaptureSource,
+  raw: unknown,
+  requestedPage?: number,
+): Promise<void> {
+  const config = await loadConfig();
+  const delivery = captureDeliveryMode(
+    config?.ingestProtocolVersion,
+    config?.features?.captureV2,
+    source,
+  );
+  if (delivery === "legacy") {
+    await legacyUpload(source, raw);
+    return;
+  }
+
+  const { outbox, runs } = persistentState();
+  const identity = await runs.capturePage(source, requestedPage);
+  const capture: RawPageCapture = {
+    schemaVersion: 1,
+    payloadType: "raw_page",
+    eventId: identity.eventId,
+    source,
+    action: "snapshot",
+    observedAt: Math.floor(Date.now() / 1000),
+    captureMethod: "platform_import",
+    runId: identity.runId,
+    page: identity.page,
+    raw,
+  };
+  const enqueued = await queue().enqueue(capture);
+  await wakeDurableQueue();
+
+  const [pending, current] = await Promise.all([
+    outbox.get(enqueued.eventId),
+    readStatus(source),
+  ]);
+  if (!pending) {
+    await patchStatus(source, { uploaded: current.uploaded + 1, message: null });
+  } else if (pending.state === "failed") {
+    await patchStatus(source, {
+      failed: current.failed + 1,
+      message: pending.lastError?.message ?? "capture delivery failed",
+    });
+  } else {
+    await patchStatus(source, { message: "saved locally; delivery will retry" });
+  }
+}
+
 /** Where to open a tab when there isn't one, per source. */
 const ENTRY_URLS: Record<string, string> = {
   x: "https://x.com/i/bookmarks",
@@ -166,7 +296,7 @@ async function findTab(source: string) {
   const patterns = HOST_PATTERNS[source];
   if (!patterns) return undefined;
   const tabs = await browser.tabs.query({ url: patterns });
-  return tabs[0];
+  return tabs.find((tab) => tab.url && isExpectedImportTab(source as CaptureSource, tab.url));
 }
 
 /**
@@ -199,6 +329,28 @@ async function openTab(source: string): Promise<{ id: number; ours: boolean } | 
   return { id, ours: true };
 }
 
+async function closeOwnedTab(source: CaptureSource, expectedTabId?: number): Promise<void> {
+  const tabId = await persistentState().runs.takeOwnedTab(source, expectedTabId);
+  if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
+}
+
+async function finishRun(source: CaptureSource): Promise<void> {
+  await persistentState().runs.finish(source);
+  await closeOwnedTab(source);
+}
+
+async function expireOwnedRun(source: CaptureSource, expectedTabId: number): Promise<void> {
+  const runs = persistentState().runs;
+  const tabId = await runs.takeOwnedTab(source, expectedTabId);
+  if (tabId === null) return;
+  await runs.finish(source);
+  await browser.tabs.remove(tabId).catch(() => {});
+  await patchStatus(source, {
+    startedAt: null,
+    message: "capture timed out; retry when the platform is ready",
+  });
+}
+
 /**
  * Capture runs in a browser tab, using the session it already has — never
  * from the background worker, which would mean taking the `cookies`
@@ -209,15 +361,25 @@ async function openTab(source: string): Promise<{ id: number; ours: boolean } | 
  * so importing does not depend on you being on the site.
  */
 async function startCapture(source: string, quiet = false, live = false): Promise<void> {
+  if (!isCaptureSource(source)) return;
+  const runs = persistentState().runs;
+  const begun = await runs.begin(source);
+  if (!begun.started) {
+    if (!quiet) await patchStatus(source, { message: "a capture is already running" });
+    return;
+  }
+
   const config = await loadConfig(true);
   if (!config?.enabled) {
     if (!quiet) await patchStatus(source, { message: "server has capture disabled" });
+    await runs.finish(source);
     return;
   }
 
   const entry = config.sources.find((s) => s.source === source);
   if (!entry) {
     if (!quiet) await patchStatus(source, { message: "switched off in Sources" });
+    await runs.finish(source);
     return;
   }
 
@@ -230,24 +392,43 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   }
 
   if (!target) {
-    await patchStatus(source, { message: `could not open ${entry.host}` });
+    await runs.finish(source);
+    await patchStatus(source, { startedAt: null, message: `could not open ${entry.host}` });
     return;
   }
   const tab = { id: target.id };
+  if (target.ours) await runs.setOwnedTab(source, tab.id);
 
   if (entry.mode === "observe") {
     const armed = await talk(tab.id, { anansi: "configure", config: entry });
     if (!armed) {
-      await patchStatus(source, { message: `could not reach the ${entry.host} tab` });
-      if (target.ours) await browser.tabs.remove(tab.id).catch(() => {});
+      await finishRun(source);
+      await patchStatus(source, {
+        startedAt: null,
+        message: `could not reach the ${entry.host} tab`,
+      });
       return;
     }
     // Nothing to request, so the capture is a scroll: the app fetches its own
     // item lists as the page grows, and those are what get kept.
-    await patchStatus(source, { pages: 0, uploaded: 0, failed: 0, message: "scanning…" });
-    await talk(tab.id, { anansi: "scan", config: entry });
+    await patchStatus(source, {
+      startedAt: begun.run.startedAt,
+      pages: 0,
+      uploaded: 0,
+      failed: 0,
+      message: "scanning…",
+    });
+    const scanning = await talk(tab.id, { anansi: "scan", config: entry });
+    if (!scanning) {
+      await finishRun(source);
+      await patchStatus(source, {
+        startedAt: null,
+        message: `could not start the ${entry.host} scan`,
+      });
+      return;
+    }
     if (target.ours) {
-      setTimeout(() => void browser.tabs.remove(tab.id).catch(() => {}), 90_000);
+      setTimeout(() => void expireOwnedRun(source, tab.id), 90_000);
     }
     return;
   }
@@ -260,48 +441,31 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   const job = live
     ? { ...entry, pageLimit: 1, variables: { ...(entry.variables ?? {}), count: 20 } }
     : entry;
-  if (!quiet) {
-    await patchStatus(source, { pages: 0, items: 0, uploaded: 0, failed: 0, message: "running…" });
-  }
+  await patchStatus(source, {
+    startedAt: begun.run.startedAt,
+    pages: 0,
+    items: 0,
+    uploaded: 0,
+    failed: 0,
+    message: "running…",
+  });
   const reached =
     (await talk(tab.id, { anansi: "configure", config: job })) &&
     (await talk(tab.id, { anansi: "backfill", config: job }));
 
   if (!reached) {
+    await finishRun(source);
     await patchStatus(source, {
+      startedAt: null,
       message: `could not reach the ${entry.host} tab; reload it and try again`,
     });
-    if (target.ours) await browser.tabs.remove(tab.id).catch(() => {});
     return;
   }
 
   // Close a tab we opened once the run reports in, or after a ceiling.
   if (target.ours) {
-    closeWhenDone.set(source, tab.id);
-    setTimeout(() => {
-      if (closeWhenDone.get(source) === tab.id) {
-        closeWhenDone.delete(source);
-        void browser.tabs.remove(tab.id).catch(() => {});
-      }
-    }, 180_000);
+    setTimeout(() => void expireOwnedRun(source, tab.id), 180_000);
   }
-
-  /**
-   * A watchdog, because the failure this replaces was silence. If nothing has
-   * arrived by now the run is not coming, and saying so beats "running…"
-   * forever.
-   */
-  const startedAt = Date.now();
-  setTimeout(() => {
-    void (async () => {
-      const now = await readStatus(source);
-      if (now.message === "running…" && (now.lastRun ?? 0) < startedAt && now.pages === 0) {
-        await patchStatus(source, {
-          message: `no response from the ${entry.host} tab — is it signed in?`,
-        });
-      }
-    })();
-  }, 25_000);
 }
 
 /**
@@ -352,111 +516,137 @@ async function rescheduleAlarm(): Promise<void> {
   }
 }
 
-export default defineBackground(() => {
-  browser.runtime.onMessage.addListener((message: unknown) => {
-    const msg = message as Record<string, unknown> | undefined;
-    if (!msg?.anansi) return undefined;
+async function processPendingRefreshes(): Promise<void> {
+  const runs = persistentState().runs;
+  for (const source of CAPTURE_SOURCES) {
+    if (await runs.claimRefresh(source)) await startCapture(source, true, true);
+  }
+}
 
-    // Everything below arrives from a content script sharing a context with
-    // the site's own code. It is data, never instruction: the only thing done
-    // with it is to forward it verbatim to the server.
+async function durableSnapshot() {
+  const runsState = persistentState().runs;
+  const [queueStatus, ...runs] = await Promise.all([
+    publishQueueStatus(),
+    ...CAPTURE_SOURCES.map((source) => runsState.current(source)),
+  ]);
+  return {
+    queue: queueStatus,
+    runs: Object.fromEntries(runs.map((run) => [run.source, run])),
+  };
+}
+
+type BackgroundResult =
+  | { ok: true; snapshot?: Awaited<ReturnType<typeof durableSnapshot>> }
+  | { ok: false; error: string };
+
+async function handleRuntimeMessage(message: unknown): Promise<BackgroundResult> {
+  const msg = message as Record<string, unknown> | undefined;
+  if (!msg?.anansi) return { ok: false, error: "unknown message" };
+
+  try {
+    if (msg.anansi === "queue-status") {
+      return { ok: true, snapshot: await durableSnapshot() };
+    }
+    if (msg.anansi === "reschedule") {
+      await rescheduleAlarm();
+      return { ok: true };
+    }
+    if (msg.anansi === "retry-queue") {
+      await wakeDurableQueue(true);
+      return { ok: true, snapshot: await durableSnapshot() };
+    }
+
     const source = String(msg.source ?? "x");
+    if (!isCaptureSource(source)) return { ok: false, error: "unknown capture source" };
 
-    void (async () => {
-      switch (msg.anansi) {
-        case "page":
-          await upload(source, msg.raw);
-          await patchStatus(source, {
-            pages: Number(msg.page ?? 0),
-            items: Number(msg.items ?? 0),
-          });
-          break;
+    switch (msg.anansi) {
+      case "page":
+        await deliverRaw(source, msg.raw, Number(msg.page ?? 0));
+        await patchStatus(source, {
+          pages: Number(msg.page ?? 0),
+          items: Number(msg.items ?? 0),
+        });
+        return { ok: true };
 
-        /**
-         * Something was just saved in the UI.
-         *
-         * The mutation's own response carries no content — X answers
-         * {"data":{"tweet_bookmark_put":"Done"}} and Reddit's /api/save is no
-         * better — so this pulls the top page of the timeline instead, which
-         * arrives with the whole item. One request, and the upsert makes the
-         * overlap free.
-         *
-         * Debounced because saving three things in a row should cost one
-         * sync, not three.
-         */
-        case "saved": {
-          const pending = savedTimers.get(source);
-          if (pending) clearTimeout(pending);
-          savedTimers.set(
-            source,
-            setTimeout(() => {
-              savedTimers.delete(source);
-              void startCapture(source, true, true);
-            }, 2500) as unknown as number,
-          );
-          break;
-        }
+      case "saved":
+        await persistentState().runs.requestRefresh(source);
+        browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
+        return { ok: true };
 
-        case "observed": {
-          // A save happened in the UI, or a favourites page loaded a batch.
-          await upload(source, msg.raw);
-          const current = await readStatus(source);
-          await patchStatus(source, {
-            lastRun: Date.now(),
-            items: current.items + Number(msg.items ?? 1),
-          });
-          break;
-        }
-
-        case "done": {
-          const tabId = closeWhenDone.get(source);
-          if (tabId !== undefined) {
-            closeWhenDone.delete(source);
-            void browser.tabs.remove(tabId).catch(() => {});
-          }
-          await patchStatus(source, {
-            lastRun: Date.now(),
-            pages: Number(msg.pages ?? 0),
-            items: Number(msg.items ?? 0),
-            message: Number(msg.items ?? 0) === 0 ? "run returned zero items" : null,
-          });
-          break;
-        }
-
-        case "scanned": {
-          const current = await readStatus(source);
-          await patchStatus(source, {
-            lastRun: Date.now(),
-            message: current.items > 0 ? null : "nothing loaded — open your Favourites tab",
-          });
-          break;
-        }
-
-        case "error":
-          await patchStatus(source, { message: String(msg.message ?? "unknown error") });
-          break;
-
-        case "start": {
-          const creds = await settings();
-          if (!creds) {
-            await patchStatus(source, { message: "enter the server and token, then press Save" });
-            return;
-          }
-          await startCapture(source);
-          break;
-        }
-
-        case "reschedule":
-          await rescheduleAlarm();
-          break;
-
-        default:
-          break;
+      case "observed": {
+        await deliverRaw(source, msg.raw);
+        const current = await readStatus(source);
+        await patchStatus(source, {
+          lastRun: Date.now(),
+          items: current.items + Number(msg.items ?? 1),
+        });
+        return { ok: true };
       }
-    })();
 
-    return undefined;
-  });
+      case "done":
+        await finishRun(source);
+        await patchStatus(source, {
+          startedAt: null,
+          lastRun: Date.now(),
+          pages: Number(msg.pages ?? 0),
+          items: Number(msg.items ?? 0),
+          message: Number(msg.items ?? 0) === 0 ? "run returned zero items" : null,
+        });
+        await processPendingRefreshes();
+        return { ok: true };
+
+      case "scanned": {
+        const current = await readStatus(source);
+        await finishRun(source);
+        await patchStatus(source, {
+          startedAt: null,
+          lastRun: Date.now(),
+          message: current.items > 0 ? null : "nothing loaded on that page",
+        });
+        await processPendingRefreshes();
+        return { ok: true };
+      }
+
+      case "error":
+        await finishRun(source);
+        await patchStatus(source, {
+          startedAt: null,
+          message: String(msg.message ?? "unknown error").slice(0, 180),
+        });
+        await processPendingRefreshes();
+        return { ok: true };
+
+      case "start": {
+        const creds = await settings();
+        if (!creds) {
+          await patchStatus(source, {
+            message: "enter the server and token, then press Save",
+          });
+          return { ok: false, error: "extension is not configured" };
+        }
+        await startCapture(source);
+        return { ok: true };
+      }
+
+      case "stop": {
+        const tabId = await persistentState().runs.stop(source);
+        if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
+        await patchStatus(source, { startedAt: null, message: "stopped" });
+        return { ok: true };
+      }
+
+      default:
+        return { ok: false, error: "unknown message" };
+    }
+  } catch {
+    const source = String(msg.source ?? "_");
+    await patchStatus(source, { startedAt: null, message: "background action failed" });
+    return { ok: false, error: "background action failed" };
+  }
+}
+
+export default defineBackground(() => {
+  browser.runtime.onMessage.addListener((message: unknown) => handleRuntimeMessage(message));
 
   /**
    * Automatic sync. Incremental by nature rather than by flag: every capture
@@ -465,8 +655,13 @@ export default defineBackground(() => {
    * changes nothing.
    */
   browser.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name !== ALARM) return;
     void (async () => {
+      if (alarm.name === OUTBOX_ALARM) {
+        await wakeDurableQueue();
+        await processPendingRefreshes();
+        return;
+      }
+      if (alarm.name !== ALARM) return;
       const config = await loadConfig();
       for (const entry of config?.sources ?? []) {
         if (entry.mode !== "page") continue;
@@ -476,14 +671,23 @@ export default defineBackground(() => {
   });
 
   void rescheduleAlarm();
+  void wakeDurableQueue().then(processPendingRefreshes);
+  browser.runtime.onStartup.addListener(() => {
+    void wakeDurableQueue().then(processPendingRefreshes);
+  });
+  browser.runtime.onInstalled.addListener(() => {
+    void wakeDurableQueue().then(processPendingRefreshes);
+  });
 
   // Arm the observers on every matching tab as it loads, so real-time capture
   // works without anyone opening the popup.
   browser.tabs.onUpdated.addListener((tabId, info, tab) => {
     if (info.status !== "complete" || !tab.url) return;
     void loadConfig().then((config) => {
-      for (const entry of config?.sources ?? []) {
-        if (!tab.url?.includes(entry.host.replace("www.", ""))) continue;
+      const entry = config?.sources.find((candidate) =>
+        tab.url?.includes(candidate.host.replace("www.", "")),
+      );
+      if (entry) {
         void browser.tabs.sendMessage(tabId, { anansi: "configure", config: entry }).catch(() => {});
       }
     });

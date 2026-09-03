@@ -169,6 +169,31 @@ describe("CaptureQueue", () => {
 		});
 	}
 
+	test("retries permanent failures only after an explicit user request", async () => {
+		const event = capture("manual-retry");
+		const { queue, store, transport } = setup([
+			{ kind: "http", status: 422 },
+			{
+				kind: "success",
+				receipt: {
+					eventId: event.eventId,
+					itemId: "item-manual-retry",
+					outcome: "created",
+				},
+			},
+		]);
+		await queue.enqueue(event);
+		await queue.retry();
+
+		expect((await store.get(event.eventId))?.state).toBe("failed");
+		await queue.retry();
+		expect(transport.calls).toHaveLength(1);
+
+		await queue.retry({ includeFailed: true });
+		expect(transport.calls).toHaveLength(2);
+		expect(await store.get(event.eventId)).toBeNull();
+	});
+
 	test("retries preserve the event id, capture, and payload hash", async () => {
 		const event = capture("stable-retry");
 		const { queue, store, transport, clock } = setup([

@@ -68,11 +68,17 @@ export interface EnqueueResult {
 	duplicate: boolean;
 }
 
+export interface RetryRequest {
+	eventId?: string;
+	/** Explicit user action: make all permanently failed records eligible again. */
+	includeFailed?: boolean;
+}
+
 export interface CaptureQueue {
 	enqueue(capture: BookmarkCapture): Promise<EnqueueResult>;
 	getStatus(): Promise<CaptureQueueStatus>;
-	/** Drain due work, or explicitly requeue one visible failed event. */
-	retry(eventId?: string): Promise<CaptureQueueStatus>;
+	/** Drain due work, with optional explicit requeueing of visible failures. */
+	retry(request?: RetryRequest): Promise<CaptureQueueStatus>;
 }
 
 export class QueueLimitError extends Error {
@@ -344,10 +350,26 @@ export function createCaptureQueue(
 		);
 	};
 
-	const retry = async (eventId?: string): Promise<CaptureQueueStatus> => {
+	const retry = async (request?: RetryRequest): Promise<CaptureQueueStatus> => {
 		await ensureRecovered();
-		if (eventId) {
-			const record = await store.get(eventId);
+		if (request?.includeFailed) {
+			const failed = (await store.list()).filter(
+				(record) => record.state === "failed",
+			);
+			await Promise.all(
+				failed.map((record) =>
+					store.put({
+						...record,
+						state: "queued",
+						nextAttemptAt: clock.now(),
+						updatedAt: clock.now(),
+						lastError: undefined,
+					}),
+				),
+			);
+		}
+		if (request?.eventId) {
+			const record = await store.get(request.eventId);
 			if (
 				record &&
 				(record.state === "failed" || record.state === "retry_wait")
@@ -369,10 +391,15 @@ export function createCaptureQueue(
 	return {
 		enqueue(capture) {
 			const task = enqueueTail.then(async (): Promise<EnqueueResult> => {
-				await ensureRecovered();
 				const prepared = prepareCapture(capture, config.maxRecordBytes);
-				const hash = await payloadHash(prepared.capture);
-				const existing = await store.get(prepared.capture.eventId);
+				const [, hash] = await Promise.all([
+					ensureRecovered(),
+					payloadHash(prepared.capture),
+				]);
+				const [existing, records] = await Promise.all([
+					store.get(prepared.capture.eventId),
+					store.list(),
+				]);
 				if (existing) {
 					if (existing.payloadHash !== hash) {
 						throw new EventCollisionError(prepared.capture.eventId);
@@ -384,7 +411,6 @@ export function createCaptureQueue(
 						duplicate: true,
 					};
 				}
-				const records = await store.list();
 				const totalBytes = records.reduce(
 					(total, record) => total + record.sizeBytes,
 					0,

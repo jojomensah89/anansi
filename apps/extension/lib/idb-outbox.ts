@@ -10,6 +10,10 @@ export interface SyncStateRecord {
 	cursor?: string;
 	phase: string;
 	updatedAt: number;
+	runId?: string;
+	startedAt?: number;
+	nextPage?: number;
+	pendingRefresh?: boolean;
 	createdTabId?: number;
 }
 
