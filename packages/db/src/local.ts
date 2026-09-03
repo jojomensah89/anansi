@@ -11,7 +11,8 @@ import * as schema from "./schema.ts";
  * `bun:sqlite` in through a shared entry point.
  */
 export function openLocalDb(path: string) {
-  mkdirSync(dirname(path), { recursive: true });
+  const directory = dirname(path);
+  if (directory && directory !== ".") mkdirSync(directory, { recursive: true });
   const sqlite = new Database(path, { create: true });
   // Cascade deletes are declared in the schema and are inert without this.
   sqlite.exec("PRAGMA foreign_keys = ON");

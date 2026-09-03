@@ -15,6 +15,7 @@
     "db:migrate:deploy": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@anansi/sources": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

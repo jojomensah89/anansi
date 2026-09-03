@@ -52,6 +52,12 @@ export const items = sqliteTable(
      * ordering that never needs the exact value.
      */
     saveOrder: integer("save_order"),
+    /** Whether the item is still saved at its originating platform. */
+    platformSaved: integer("platform_saved").notNull().default(1),
+    /** Unix seconds when the source most recently reported an unsave. */
+    removedFromSourceAt: integer("removed_from_source_at"),
+    /** Unix seconds of the newest source-state event applied to this item. */
+    lastSourceEventAt: integer("last_source_event_at"),
     /** json: likes, retweets, stars */
     metrics: text("metrics").notNull().default("{}"),
     /** json: the untouched platform payload */
@@ -67,9 +73,48 @@ export const items = sqliteTable(
     uniqueIndex("items_source_external").on(t.source, t.externalId),
     index("items_saved").on(t.savedAt),
     index("items_save_order").on(t.saveOrder),
+    index("items_platform_saved").on(t.platformSaved),
     index("items_posted").on(t.postedAt),
     index("items_archived").on(t.archivedAt),
     index("items_author").on(t.authorHandle),
+  ],
+);
+
+/** Durable idempotency receipts for extension capture events. */
+export const captureEvents = sqliteTable(
+  "capture_events",
+  {
+    eventId: text("event_id").primaryKey(),
+    source: text("source").notNull(),
+    externalId: text("external_id"),
+    action: text("action").notNull(),
+    observedAt: integer("observed_at").notNull(),
+    receivedAt: integer("received_at").notNull(),
+    itemId: text("item_id").references(() => items.id, { onDelete: "set null" }),
+    outcome: text("outcome").notNull(),
+    receipt: text("receipt").notNull(),
+  },
+  (t) => [
+    index("capture_events_source_observed").on(t.source, t.observedAt),
+    index("capture_events_item").on(t.itemId),
+  ],
+);
+
+/** One canonical web item can be represented by several Chrome bookmark nodes. */
+export const itemSourceLinks = sqliteTable(
+  "item_source_links",
+  {
+    kind: text("kind").notNull(),
+    externalId: text("external_id").notNull(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    present: integer("present").notNull().default(1),
+    observedAt: integer("observed_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.kind, t.externalId] }),
+    index("item_source_links_item_present").on(t.itemId, t.present),
   ],
 );
 

@@ -34,6 +34,13 @@ export interface UpsertResult {
   mediaRows: number;
 }
 
+export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<UpsertResult> {
+  if (batch.length === 0) return { inserted: 0, updated: 0, mediaRows: 0 };
+  return await db.transaction(async (transaction) =>
+    upsertItemsInTransaction(transaction as unknown as AnansiDb, batch),
+  );
+}
+
 /**
  * Idempotent on (source, external_id), because imports will run twice.
  *
@@ -59,7 +66,10 @@ export interface UpsertResult {
  * stamps import time, so letting each re-import overwrite the last would march
  * every item's saved date forward forever.
  */
-export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<UpsertResult> {
+export async function upsertItemsInTransaction(
+  db: AnansiDb,
+  batch: IngestItem[],
+): Promise<UpsertResult> {
   if (batch.length === 0) return { inserted: 0, updated: 0, mediaRows: 0 };
 
   const existing = await db
@@ -160,49 +170,47 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
   // SQLite's limit and few enough statements that the overhead disappears.
   const CHUNK = 200;
 
-  await db.transaction(async (tx) => {
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      await tx
-        .insert(items)
-        .values(rows.slice(i, i + CHUNK))
-        .onConflictDoUpdate({
-          target: [items.source, items.externalId],
-          set: {
-            url: sql`excluded.url`,
-            kind: sql`excluded.kind`,
-            authorHandle: sql`excluded.author_handle`,
-            authorName: sql`excluded.author_name`,
-            authorAvatar: sql`excluded.author_avatar`,
-            title: sql`excluded.title`,
-            body: sql`excluded.body`,
-            lang: sql`excluded.lang`,
-            postedAt: sql`excluded.posted_at`,
-            savedAt: sql`excluded.saved_at`,
-            savedAtExact: sql`excluded.saved_at_exact`,
-            // Keep the first key we ever saw. X's sortIndex is stable per
-            // item, and sources without a real one (Reddit gives no saved-at)
-            // derive theirs from listing position at import time — which must
-            // not be renumbered by a later re-import.
-            saveOrder: sql`coalesce(${items.saveOrder}, excluded.save_order)`,
-            // Never resurrect something you archived: a re-import refreshes
-            // the content, not your decision about it.
-            archivedAt: sql`${items.archivedAt}`,
-            metrics: sql`excluded.metrics`,
-            raw: sql`excluded.raw`,
-          },
-        });
-    }
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    await db
+      .insert(items)
+      .values(rows.slice(i, i + CHUNK))
+      .onConflictDoUpdate({
+        target: [items.source, items.externalId],
+        set: {
+          url: sql`excluded.url`,
+          kind: sql`excluded.kind`,
+          authorHandle: sql`excluded.author_handle`,
+          authorName: sql`excluded.author_name`,
+          authorAvatar: sql`excluded.author_avatar`,
+          title: sql`excluded.title`,
+          body: sql`excluded.body`,
+          lang: sql`excluded.lang`,
+          postedAt: sql`excluded.posted_at`,
+          savedAt: sql`excluded.saved_at`,
+          savedAtExact: sql`excluded.saved_at_exact`,
+          // Keep the first key we ever saw. X's sortIndex is stable per
+          // item, and sources without a real one (Reddit gives no saved-at)
+          // derive theirs from listing position at import time — which must
+          // not be renumbered by a later re-import.
+          saveOrder: sql`coalesce(${items.saveOrder}, excluded.save_order)`,
+          // Never resurrect something you archived: a re-import refreshes
+          // the content, not your decision about it.
+          archivedAt: sql`${items.archivedAt}`,
+          metrics: sql`excluded.metrics`,
+          raw: sql`excluded.raw`,
+        },
+      });
+  }
 
-    // Media is replaced wholesale per item: cheap at this size, and it means
-    // a post that lost an image does not keep a phantom row forever.
-    const ids = rows.map((r) => r.id);
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      await tx.delete(media).where(inArray(media.itemId, ids.slice(i, i + CHUNK)));
-    }
-    for (let i = 0; i < mediaRows.length; i += CHUNK) {
-      await tx.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoNothing();
-    }
-  });
+  // Media is replaced wholesale per item: cheap at this size, and it means
+  // a post that lost an image does not keep a phantom row forever.
+  const ids = rows.map((r) => r.id);
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    await db.delete(media).where(inArray(media.itemId, ids.slice(i, i + CHUNK)));
+  }
+  for (let i = 0; i < mediaRows.length; i += CHUNK) {
+    await db.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoNothing();
+  }
 
   return { inserted, updated, mediaRows: mediaRows.length };
 }

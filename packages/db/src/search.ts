@@ -130,10 +130,10 @@ export async function recentSaves(db: AnansiDb, source?: string, limit = 20) {
            substr(coalesce(i.body, ''), 1, 300) as excerpt, 0 as score
     from items i
     where (${source ?? null} is null or i.source = ${source ?? null})
-    -- save_order is the timeline's own key and the only truthful recency we
-    -- have while saved_at is a backfill stamp. Items without one (GitHub
-    -- stars, which have a real starred_at) fall through to saved_at.
-    order by i.save_order desc nulls last, i.saved_at desc, i.posted_at desc
+    -- Source order keys are not globally comparable: X sort indexes, Reddit
+    -- listing positions, and GitHub timestamps use different scales. Saved
+    -- time orders sources; source order only breaks ties within an import.
+    order by i.saved_at desc, coalesce(i.save_order, 0) desc, i.id asc
     limit ${limit}
   `);
 }
@@ -339,12 +339,18 @@ function typeClause(type: string | undefined) {
 
 export type ListOrder = "saved" | "posted";
 
+export class InvalidListCursorError extends Error {
+  constructor(order: ListOrder) {
+    super(`invalid ${order} cursor`);
+    this.name = "InvalidListCursorError";
+  }
+}
+
 export interface ListOptions {
   /**
-   * Opaque, and shaped by `order`. Saved order carries a save_order; posted
-   * order carries "postedAt.id", because two posts can share a second and a
-   * cursor that cannot break that tie drops or repeats items at every page
-   * boundary it lands on.
+   * Opaque, and shaped by `order`. Saved order carries
+   * "savedAt.sourceOrder.id"; posted order carries "postedAt.id". The item id
+   * makes both orders total when timestamps or source keys tie.
    */
   cursor?: string;
   source?: string;
@@ -362,10 +368,10 @@ export interface ListOptions {
 }
 
 /**
- * The grid's query. Keyset pagination on save_order rather than offset,
- * because offset pagination silently drops or repeats items whenever the set
- * changes underneath it — and an importer running while someone scrolls is
- * exactly that.
+ * The grid's query. Keyset pagination uses the full saved-order tuple rather
+ * than offset, because offset pagination silently drops or repeats items
+ * whenever the set changes underneath it — and an importer running while
+ * someone scrolls is exactly that.
  */
 export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
   const limit = Math.min(opts.limit ?? 50, 200);
@@ -379,10 +385,25 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
    * source without a posted date (a Reddit save has one, a future source may
    * not) would otherwise fall out of paging entirely.
    */
-  const [cursorAt, cursorId] = posted
-    ? [Number(opts.cursor?.split(".")[0] ?? NaN), opts.cursor?.split(".").slice(1).join(".") ?? ""]
-    : [Number(opts.cursor ?? NaN), ""];
-  const hasCursor = Number.isFinite(cursorAt);
+  let cursorAt = Number.NaN;
+  let cursorOrder = Number.NaN;
+  let cursorId = "";
+  if (opts.cursor !== undefined) {
+    const parts = opts.cursor.split(".");
+    if (posted) {
+      cursorAt = Number(parts.shift());
+      cursorId = parts.join(".");
+      if (!Number.isFinite(cursorAt) || !cursorId) throw new InvalidListCursorError("posted");
+    } else {
+      cursorAt = Number(parts.shift());
+      cursorOrder = Number(parts.shift());
+      cursorId = parts.join(".");
+      if (!Number.isFinite(cursorAt) || !Number.isFinite(cursorOrder) || !cursorId) {
+        throw new InvalidListCursorError("saved");
+      }
+    }
+  }
+  const hasCursor = opts.cursor !== undefined;
 
   const keyset = posted
     ? hasCursor
@@ -390,12 +411,15 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
                  or (coalesce(i.posted_at, 0) = ${cursorAt} and i.id > ${cursorId}))`
       : sql``
     : hasCursor
-      ? sql`and i.save_order < ${cursorAt}`
+      ? sql`and (i.saved_at < ${cursorAt}
+                 or (i.saved_at = ${cursorAt} and coalesce(i.save_order, 0) < ${cursorOrder})
+                 or (i.saved_at = ${cursorAt} and coalesce(i.save_order, 0) = ${cursorOrder}
+                     and i.id > ${cursorId}))`
       : sql``;
 
   const ordering = posted
     ? sql`order by coalesce(i.posted_at, 0) desc, i.id asc`
-    : sql`order by i.save_order desc nulls last, i.saved_at desc`;
+    : sql`order by i.saved_at desc, coalesce(i.save_order, 0) desc, i.id asc`;
 
   const rows = await db.all<SearchHit & { saveOrder: number | null }>(sql`
     select i.id, i.url, i.author_handle as author, i.author_name as authorName,
@@ -464,7 +488,7 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
     ? null
     : posted
       ? `${last.postedAt ?? 0}.${last.id}`
-      : String(last.saveOrder ?? "");
+      : `${last.savedAt}.${last.saveOrder ?? 0}.${last.id}`;
 
   return { items: page, nextCursor };
 }

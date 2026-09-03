@@ -50,6 +50,13 @@
       "when": 1788437662916,
       "tag": "0006_posted_index",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788459298497,
+      "tag": "0007_capture_events",
+      "breakpoints": true
     }
   ]
 }

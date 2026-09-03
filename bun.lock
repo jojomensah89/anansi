@@ -94,6 +94,7 @@
       "name": "@anansi/db",
       "version": "0.1.0",
       "dependencies": {
+        "@anansi/sources": "workspace:*",
         "drizzle-orm": "^0.45.2",
       },
       "devDependencies": {

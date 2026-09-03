@@ -14,6 +14,7 @@ import {
   recentSaves,
   searchItems,
   upsertItems,
+  InvalidListCursorError,
 } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
@@ -93,19 +94,24 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
   }
 
   if (request.method === "GET" && path === "/api/items") {
-    return json(
-      await listItems(env.db, {
-        cursor: q.get("cursor") ?? undefined,
-        source: q.get("source") ?? undefined,
-        author: q.get("author") ?? undefined,
-        media: q.get("media") ?? undefined,
-        contentType: q.get("type") ?? undefined,
-        tag: q.get("tag") ?? undefined,
-        archived: q.get("archived") === "1",
-        order: q.get("order") === "posted" ? "posted" : "saved",
-        limit: num(q.get("limit"), 50),
-      }),
-    );
+    try {
+      return json(
+        await listItems(env.db, {
+          cursor: q.get("cursor") ?? undefined,
+          source: q.get("source") ?? undefined,
+          author: q.get("author") ?? undefined,
+          media: q.get("media") ?? undefined,
+          contentType: q.get("type") ?? undefined,
+          tag: q.get("tag") ?? undefined,
+          archived: q.get("archived") === "1",
+          order: q.get("order") === "posted" ? "posted" : "saved",
+          limit: num(q.get("limit"), 50),
+        }),
+      );
+    } catch (error) {
+      if (error instanceof InvalidListCursorError) return json({ error: error.message }, 400);
+      throw error;
+    }
   }
 
   const itemMatch = path.match(/^\/api\/items\/([\w-]+)$/);

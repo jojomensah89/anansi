@@ -1,16 +1,41 @@
-import { describe, expect, test } from "bun:test";
-import { openLocalDb } from "@anansi/db/local";
-import type { AnansiDb } from "@anansi/db";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { upsertItems, type AnansiDb } from "@anansi/db";
+import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi } from "./api.ts";
 
 /**
- * The HTTP surface, tested against the real local library with no framework
- * in the way. That is the point of handleApi being a plain function: these
+ * The HTTP surface, tested against a fully migrated in-memory library with no
+ * framework in the way. That is the point of handleApi being a plain function: these
  * assertions hold whatever TanStack's route-file API looks like this month,
  * and they will keep holding when the same function runs on D1 in a Worker.
  */
-const db = openLocalDb(process.env.ANANSI_DB_PATH ?? "data/anansi.db") as unknown as AnansiDb;
+const localDb = openLocalDb(":memory:");
+migrateLocalDb(localDb);
+const db = localDb as unknown as AnansiDb;
 const env = { db, ingestToken: "test-token" };
+
+beforeAll(async () => {
+  await upsertItems(
+    db,
+    Array.from({ length: 12 }, (_, index) => ({
+      source: "x",
+      externalId: `seed-${index}`,
+      url: `https://x.com/anansi/status/seed-${index}`,
+      kind: "post",
+      authorHandle: index % 2 === 0 ? "anansi" : "arachne",
+      authorName: index % 2 === 0 ? "Anansi" : "Arachne",
+      body: index === 0 ? "ai sdk artifacts" : `seed item ${index}`,
+      postedAt: 1_788_390_000 - index,
+      savedAt: 1_788_390_000 - index,
+      savedAtIsExact: true,
+      saveOrder: 10_000 - index,
+      metrics: {},
+      media: [],
+      links: [],
+      raw: {},
+    })),
+  );
+});
 
 const get = (path: string) => handleApi(env, new Request("https://anansi.test" + path));
 
@@ -22,7 +47,7 @@ const readJson = async (res: Response | Promise<Response>): Promise<any> =>
 describe("handleApi", () => {
   test("GET /api/stats reports the library size", async () => {
     const body = await readJson(get("/api/stats"));
-    expect(body.items).toBeGreaterThan(1000);
+    expect(body.items).toBeGreaterThan(0);
   });
 
   test("GET /api/items paginates by keyset, not offset", async () => {
@@ -37,6 +62,12 @@ describe("handleApi", () => {
     expect(overlap).toHaveLength(0);
   });
 
+  test("GET /api/items rejects a malformed cursor", async () => {
+    const res = await get("/api/items?cursor=not-a-cursor");
+    expect(res.status).toBe(400);
+    expect(await readJson(res)).toEqual({ error: "invalid saved cursor" });
+  });
+
   /**
    * The property that matters for Timeline: paging the whole library in date
    * order reaches every item exactly once. Two posts can share a second, so a
@@ -46,7 +77,7 @@ describe("handleApi", () => {
   test("order=posted walks the whole library, in order, without repeats", async () => {
     const seen = new Set<string>();
     let cursor: string | null = null;
-    let previous = Infinity;
+    let previous = Number.POSITIVE_INFINITY;
     let pages = 0;
 
     do {
