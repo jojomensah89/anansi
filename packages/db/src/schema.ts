@@ -26,6 +26,7 @@ export const items = sqliteTable(
     kind: text("kind").notNull(),
     authorHandle: text("author_handle"),
     authorName: text("author_name"),
+    authorAvatar: text("author_avatar"),
     title: text("title"),
     /** full_text with t.co expanded | repo description + README head */
     body: text("body"),

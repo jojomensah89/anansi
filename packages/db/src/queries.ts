@@ -14,6 +14,7 @@ export interface IngestItem {
   kind: string;
   authorHandle?: string;
   authorName?: string;
+  authorAvatar?: string;
   title?: string;
   body: string;
   lang?: string;
@@ -120,6 +121,7 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
       kind: item.kind,
       authorHandle: item.authorHandle ?? null,
       authorName: item.authorName ?? null,
+      authorAvatar: item.authorAvatar ?? null,
       title: item.title ?? null,
       body: item.body,
       lang: item.lang ?? null,
@@ -170,6 +172,7 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
             kind: sql`excluded.kind`,
             authorHandle: sql`excluded.author_handle`,
             authorName: sql`excluded.author_name`,
+            authorAvatar: sql`excluded.author_avatar`,
             title: sql`excluded.title`,
             body: sql`excluded.body`,
             lang: sql`excluded.lang`,
@@ -202,17 +205,32 @@ export async function countItems(db: AnansiDb): Promise<number> {
   return row?.n ?? 0;
 }
 
-/** Creators is a group-by, not a table. */
+/**
+ * Creators is a group-by, not a table.
+ *
+ * `max(author_name)` and `max(author_avatar)` are not aggregates anyone means
+ * literally — they pick one non-null value per handle, which is what you want
+ * when a display name changed between two saves.
+ */
 export async function creators(db: AnansiDb, limit = 20) {
-  return db
-    .select({
-      authorHandle: items.authorHandle,
-      saves: sql<number>`count(*)`,
-      lastPosted: sql<number>`max(${items.postedAt})`,
-    })
-    .from(items)
-    .where(sql`${items.authorHandle} is not null`)
-    .groupBy(items.authorHandle)
-    .orderBy(sql`count(*) desc`)
-    .limit(limit);
+  return db.all<{
+    authorHandle: string;
+    authorName: string | null;
+    authorAvatar: string | null;
+    source: string;
+    saves: number;
+    lastPosted: number | null;
+  }>(sql`
+    select author_handle as authorHandle,
+           max(author_name) as authorName,
+           max(author_avatar) as authorAvatar,
+           max(source) as source,
+           count(*) as saves,
+           max(posted_at) as lastPosted
+    from items
+    where author_handle is not null
+    group by author_handle
+    order by saves desc
+    limit ${limit}
+  `);
 }

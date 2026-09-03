@@ -74,6 +74,11 @@ export function Rail({ total, authors, bySource }: RailProps) {
             <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5M16 6.2a3 3 0 0 1 0 5.6M17.5 19c0-2-.6-3.6-1.7-4.6" />
           </svg>
         </Item>
+        <Item to="/sources" label="Sources" active={path === "/sources"}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={path === "/sources" ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 7h16M4 12h16M4 17h9" />
+          </svg>
+        </Item>
       </div>
 
       <div className="mono" style={{ padding: "22px 16px 8px", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fainter)" }}>

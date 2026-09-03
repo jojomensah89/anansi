@@ -1,0 +1,1 @@
+ALTER TABLE `items` ADD `author_avatar` text;

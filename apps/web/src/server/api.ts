@@ -5,6 +5,7 @@ import {
   getItem,
   libraryStats,
   listItems,
+  sourceHealth,
   recentSaves,
   searchItems,
   upsertItems,
@@ -92,6 +93,10 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
     const handle = q.get("handle");
     if (!handle) return json({ error: "handle is required" }, 400);
     return json({ results: await findByAuthor(env.db, handle, num(q.get("limit"), 20)) });
+  }
+
+  if (request.method === "GET" && path === "/api/sources") {
+    return json({ sources: await sourceHealth(env.db) });
   }
 
   if (request.method === "GET" && path === "/api/creators") {

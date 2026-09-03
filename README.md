@@ -318,7 +318,7 @@ nothing before this point required.
 
 ### The interface
 
-Two views, not four — Library and Creators. Search is an **overlay** and item
+Three views — Library, Creators, Sources. Search is an **overlay** and item
 detail is a **drawer**, because both are things you do *to* the library rather
 than places you go instead of it; opening a result should never cost you your
 scroll position or your query.
@@ -337,6 +337,19 @@ Colours and type come straight from the Screens artboards rather than being
 reinterpreted, so a screenshot of the app and a screenshot of the mockup are
 the same design. Creators reproduces its numbers off the real library: 874
 authors, 1.46 saves per author, 695 saved exactly once.
+
+**Sources** is borrowed in shape from [removed]'s Connections page, which gets one
+thing right that no grid of cards does: a library is an ongoing process, not a
+pile, and the question you actually have is *is this still working?* It shows
+per-source item counts, media coverage, staleness, and the split between items
+**captured live** and items **backfilled** — a distinction that falls out of
+the `saved_at_exact` column already added for a different reason, rather than
+needing a provenance field.
+
+Borrowed in shape only. [removed] lists seven platforms because breadth is its
+pitch; this lists the two that exist and names the rest as not planned. Its
+four view modes and AI tagging are the parts the spec warns will eat the
+fortnight.
 
 To run it, both halves:
 

@@ -170,9 +170,27 @@ function Creators() {
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                  <span style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--edge-strong)", flexShrink: 0 }} />
-                  <span className="mono" style={{ fontSize: 12.5, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    @{c.authorHandle}
+                  {c.authorAvatar ? (
+                    <img
+                      src={c.authorAvatar}
+                      alt=""
+                      width={24}
+                      height={24}
+                      loading="lazy"
+                      style={{ borderRadius: "50%", flexShrink: 0, background: "var(--edge-strong)" }}
+                    />
+                  ) : (
+                    <span style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--edge-strong)", flexShrink: 0 }} />
+                  )}
+                  <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    {c.authorName && (
+                      <span style={{ fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {c.authorName}
+                      </span>
+                    )}
+                    <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
+                      @{c.authorHandle}
+                    </span>
                   </span>
                 </span>
                 <span style={{ height: 6, borderRadius: 3, background: "#1a2027", display: "block", position: "relative" }}>

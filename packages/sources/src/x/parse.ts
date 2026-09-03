@@ -50,13 +50,15 @@ function unwrap(result: Any | undefined): Any | undefined {
   return result;
 }
 
-function userOf(tweet: Any): { handle?: string; name?: string } {
+function userOf(tweet: Any): { handle?: string; name?: string; avatar?: string } {
   const user = unwrapUser(tweet?.core?.user_results?.result);
   if (!user) return {};
-  // X is mid-migration: newer payloads put these on `core`, older on `legacy`.
+  // X is mid-migration: newer payloads put these on `core` and `avatar`,
+  // older ones on `legacy`. Read both, newest first.
   return {
     handle: user.core?.screen_name ?? user.legacy?.screen_name,
     name: user.core?.name ?? user.legacy?.name,
+    avatar: user.avatar?.image_url ?? user.legacy?.profile_image_url_https,
   };
 }
 
@@ -211,6 +213,7 @@ function normalizeTweet(
     kind: "post",
     authorHandle: author.handle,
     authorName: author.name,
+    authorAvatar: author.avatar,
     body,
     lang: subject.legacy?.lang,
     postedAt: postedAtOf(subject),

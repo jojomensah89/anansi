@@ -295,3 +295,46 @@ export async function libraryStats(db: AnansiDb) {
     media: media[0] ?? { total: 0, stored: 0 },
   };
 }
+
+/**
+ * Per-source health.
+ *
+ * `saved_at_exact` earns a second job here. It was added so a query could not
+ * lie about when something was saved; it also happens to separate the two ways
+ * an item can arrive — a backfill stamps import time, while the extension
+ * watching CreateBookmark produces a real one. So the split between "imported"
+ * and "captured live" falls out of a column that already exists rather than
+ * needing a provenance field.
+ */
+export interface SourceHealth {
+  source: string;
+  items: number;
+  captured: number;
+  imported: number;
+  authors: number;
+  lastSavedAt: number | null;
+  lastPostedAt: number | null;
+  media: number;
+  mediaStored: number;
+}
+
+export async function sourceHealth(db: AnansiDb): Promise<SourceHealth[]> {
+  return db.all<SourceHealth>(sql`
+    select
+      i.source                                                    as source,
+      count(*)                                                    as items,
+      sum(case when i.saved_at_exact = 1 then 1 else 0 end)        as captured,
+      sum(case when i.saved_at_exact = 0 then 1 else 0 end)        as imported,
+      count(distinct i.author_handle)                              as authors,
+      max(i.saved_at)                                              as lastSavedAt,
+      max(i.posted_at)                                             as lastPostedAt,
+      (select count(*) from media m
+         join items mi on mi.id = m.item_id where mi.source = i.source) as media,
+      (select count(*) from media m
+         join items mi on mi.id = m.item_id
+        where mi.source = i.source and m.stored_key is not null)   as mediaStored
+    from items i
+    group by i.source
+    order by items desc
+  `);
+}

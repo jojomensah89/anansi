@@ -24,6 +24,7 @@ export interface NormalizedItem {
   kind: Kind;
   authorHandle?: string;
   authorName?: string;
+  authorAvatar?: string;
   title?: string;
   /** full_text, or repo description + README head. */
   body: string;

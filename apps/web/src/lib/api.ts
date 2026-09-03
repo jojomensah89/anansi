@@ -28,8 +28,23 @@ export interface Page {
 
 export interface Creator {
   authorHandle: string | null;
+  authorName: string | null;
+  authorAvatar: string | null;
+  source: string;
   saves: number;
   lastPosted: number | null;
+}
+
+export interface SourceRow {
+  source: string;
+  items: number;
+  captured: number;
+  imported: number;
+  authors: number;
+  lastSavedAt: number | null;
+  lastPostedAt: number | null;
+  media: number;
+  mediaStored: number;
 }
 
 export const api = {
@@ -68,6 +83,8 @@ export const api = {
 
   creators: (limit = 200, signal?: AbortSignal) =>
     get<{ creators: Creator[] }>(`/api/creators?limit=${limit}`, signal),
+
+  sources: (signal?: AbortSignal) => get<{ sources: SourceRow[] }>("/api/sources", signal),
 };
 
 /** Dates in the UI are always the post's date, never the import stamp. */
