@@ -86,21 +86,31 @@ export function Rail({ total, authors, archived = 0, bySource }: RailProps) {
         Sources
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "0 8px" }}>
+        {/*
+          Links, not labels. The filters live in the URL, so a source in the
+          rail is simply a filtered view of the library — which is what anyone
+          clicking a count in a sidebar expects it to be.
+        */}
         {(
           [
-            ["x", "Bookmarks", bySource.x ?? 0],
-            ["gh", "Stars", bySource.github ?? 0],
-            ["r/", "Reddit", bySource.reddit ?? 0],
-            ["tt", "TikTok", bySource.tiktok ?? 0],
+            ["x", "x", "Bookmarks", bySource.x ?? 0],
+            ["gh", "github", "Stars", bySource.github ?? 0],
+            ["r/", "reddit", "Reddit", bySource.reddit ?? 0],
+            ["tt", "tiktok", "TikTok", bySource.tiktok ?? 0],
           ] as const
-        ).map(([tag, label, n]) => (
-          <div key={tag} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 8px", borderRadius: 5, fontSize: 12.5, color: "var(--text-dim)" }}>
+        ).map(([tag, source, label, n]) => (
+          <Link
+            key={tag}
+            to="/"
+            search={{ source: [source] }}
+            style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 8px", borderRadius: 5, fontSize: 12.5, color: "var(--text-dim)" }}
+          >
             <span className="mono" style={{ fontSize: 10, width: 22, height: 16, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--edge-strong)", borderRadius: 3, color: "var(--muted)" }}>
               {tag}
             </span>
             {label}
             <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faint)" }}>{n}</span>
-          </div>
+          </Link>
         ))}
       </div>
 

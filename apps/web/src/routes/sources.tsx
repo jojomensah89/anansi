@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Rail } from "../components/rail.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
@@ -262,7 +262,7 @@ function Sources() {
                           nothing captured yet
                         </span>
                       </span>
-                      <Mode mode={p.mode} />
+                      <Mode mode={p.mode} push />
                     </div>
                     <div style={{ fontSize: 12, color: "var(--faint)", lineHeight: 1.55 }}>
                       {p.mode === "observe"
@@ -317,12 +317,12 @@ function Badge({ source }: { source: string }) {
   );
 }
 
-function Mode({ mode }: { mode: "page" | "observe" }) {
+function Mode({ mode, push }: { mode: "page" | "observe"; push?: boolean }) {
   return (
     <span
       className="mono"
       style={{
-        marginLeft: "auto",
+        marginLeft: push ? "auto" : undefined,
         fontSize: 9.5,
         padding: "2px 6px",
         borderRadius: 3,
@@ -460,7 +460,21 @@ function SourceCard({ row, onToggle }: { row: SourceRow; onToggle: (source: stri
         <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
           last capture {ago(row.lastSavedAt)}
         </span>
-        <Mode mode={mode} />
+        {/*
+          A real link, because the filters live in the URL. There is still no
+          Import button here on purpose: importing is the extension's job, and
+          a button in the web app that cannot do it would be decoration.
+        */}
+        {row.items > 0 && (
+          <Link
+            to="/"
+            search={{ source: [row.source] }}
+            style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--accent-text)" }}
+          >
+            View {row.items.toLocaleString()}
+          </Link>
+        )}
+        <Mode mode={mode} push={row.items === 0} />
       </div>
     </div>
   );
