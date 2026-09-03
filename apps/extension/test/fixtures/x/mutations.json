@@ -1,0 +1,27 @@
+{
+  "createBookmarkRequest": {
+    "url": "https://x.com/i/api/graphql/aoDbu3RHznuiSkQ9aNM67Q/CreateBookmark",
+    "body": "{\"variables\":{\"tweet_id\":\"1900000000000000001\"},\"queryId\":\"aoDbu3RHznuiSkQ9aNM67Q\"}"
+  },
+  "createBookmarkResponse": {
+    "status": 200,
+    "body": "{\"data\":{\"tweet_bookmark_put\":\"Done\"}}"
+  },
+  "deleteBookmarkRequest": {
+    "url": "https://x.com/i/api/graphql/Wlmlj2-xzyS1GN3a6cj-mQ/DeleteBookmark",
+    "body": "{\"variables\":{\"tweet_id\":\"1900000000000000002\"},\"queryId\":\"Wlmlj2-xzyS1GN3a6cj-mQ\"}"
+  },
+  "deleteBookmarkResponse": {
+    "status": 200,
+    "body": "{\"data\":{\"tweet_bookmark_delete\":\"Done\"}}"
+  },
+  "refusedResponse": {
+    "status": 200,
+    "body": "{\"errors\":[{\"message\":\"Not authorized\",\"code\":37}]}"
+  },
+  "unrelatedRequest": {
+    "url": "https://x.com/i/api/graphql/abc123def456/FavoriteTweet",
+    "body": "{\"variables\":{\"tweet_id\":\"1900000000000000003\"},\"queryId\":\"abc123def456\"}"
+  },
+  "timelineRequestUrl": "https://x.com/i/api/graphql/Xxk9nWFcNy1qWJgYFBQZ3g/Bookmarks?variables=%7B%22count%22%3A100%2C%22cursor%22%3A%22DAABCgABGf__page-two%22%2C%22includePromotedContent%22%3Afalse%7D&features=%7B%22graphql_timeline_v2_bookmark_timeline%22%3Atrue%2C%22responsive_web_grok_analyze_button_fetch_trends_enabled%22%3Afalse%7D&fieldToggles=%7B%22withArticlePlainText%22%3Afalse%7D"
+}

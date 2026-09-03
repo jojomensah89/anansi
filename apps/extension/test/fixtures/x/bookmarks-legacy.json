@@ -1,0 +1,44 @@
+{
+  "data": {
+    "bookmark_timeline": {
+      "timeline": {
+        "instructions": [
+          {
+            "type": "TimelineAddEntries",
+            "entries": [
+              {
+                "entryId": "tweet-1800000000000000007",
+                "sortIndex": "1800000000000000007",
+                "content": {
+                  "entryType": "TimelineTimelineItem",
+                  "itemContent": {
+                    "itemType": "TimelineTweet",
+                    "tweet_results": {
+                      "result": {
+                        "__typename": "Tweet",
+                        "rest_id": "1800000000000000007",
+                        "legacy": {
+                          "full_text": "A bookmark from the older response shape.",
+                          "created_at": "Tue Jul 15 12:00:00 +0000 2025"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "entryId": "cursor-bottom-1800000000000000000",
+                "sortIndex": "0",
+                "content": {
+                  "entryType": "TimelineTimelineCursor",
+                  "cursorType": "Bottom",
+                  "value": "DAABCgABGf__legacy-two"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

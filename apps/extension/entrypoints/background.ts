@@ -38,8 +38,10 @@ import {
   type CaptureSource,
   type SourceRuns,
 } from "../lib/source-runs.ts";
+import { tweetUrl } from "../lib/platforms/x.ts";
 import type {
   CaptureQueueStatus,
+  ItemEventCapture,
   RawPageCapture,
 } from "@anansi/sources";
 
@@ -242,6 +244,7 @@ async function deliverRaw(
   source: CaptureSource,
   raw: unknown,
   requestedPage?: number,
+  cursor?: string | null,
 ): Promise<void> {
   const config = await loadConfig();
   const delivery = captureDeliveryMode(
@@ -266,9 +269,13 @@ async function deliverRaw(
     captureMethod: "platform_import",
     runId: identity.runId,
     page: identity.page,
+    ...(cursor ? { cursor } : {}),
     raw,
   };
   const enqueued = await queue().enqueue(capture);
+  // Only now: a cursor that moves before its page is durable is how an
+  // interrupted import silently skips everything it had not yet sent.
+  if (cursor !== undefined) await runs.setCursor(source, cursor);
   await wakeDurableQueue();
 
   const [pending, current] = await Promise.all([
@@ -284,6 +291,75 @@ async function deliverRaw(
     });
   } else {
     await patchStatus(source, { message: "saved locally; delivery will retry" });
+  }
+}
+
+/**
+ * Deliver one precise save or unsave.
+ *
+ * The event id is derived rather than random on purpose: X fires some
+ * mutations through both fetch and XHR, so the same click can be observed
+ * twice, and two events with one id are one event.
+ */
+async function deliverItemEvent(
+  source: CaptureSource,
+  action: "save" | "unsave",
+  externalId: string,
+): Promise<void> {
+  const config = await loadConfig();
+  const delivery = captureDeliveryMode(
+    config?.ingestProtocolVersion,
+    config?.features?.captureV2,
+    source,
+  );
+  // Legacy delivery has no way to say "this one item changed"; the refresh it
+  // already schedules is the only thing it can do.
+  if (delivery === "legacy") return;
+
+  const observedAt = Math.floor(Date.now() / 1000);
+  const capture: ItemEventCapture = {
+    schemaVersion: 1,
+    payloadType: "item_event",
+    eventId: `${source}:${action}:${externalId}:${observedAt}`,
+    source,
+    action,
+    observedAt,
+    captureMethod: "platform_event",
+    externalId,
+    canonicalUrl: tweetUrl(externalId),
+  };
+  await queue().enqueue(capture);
+  await wakeDurableQueue();
+}
+
+/**
+ * A save arrives before its content does.
+ *
+ * X answers CreateBookmark with "Done" and nothing else, so the id is held
+ * until a refresh has queued the timeline page that carries the post. An
+ * unsave needs no content and goes out immediately.
+ */
+async function handleBookmarkMutation(
+  source: CaptureSource,
+  action: "save" | "unsave",
+  externalId: string,
+): Promise<void> {
+  const runs = persistentState().runs;
+  if (action === "unsave") {
+    await deliverItemEvent(source, "unsave", externalId);
+    await patchStatus(source, { lastRun: Date.now() });
+    return;
+  }
+  await runs.recordPendingSave(source, externalId);
+  await runs.requestRefresh(source);
+  browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
+}
+
+/** Send the held saves now that the pages carrying their content are queued. */
+async function flushPendingSaves(source: CaptureSource): Promise<void> {
+  const pending = await persistentState().runs.takePendingSaves(source);
+  for (const externalId of pending) {
+    await deliverItemEvent(source, "save", externalId);
   }
 }
 
@@ -460,7 +536,9 @@ async function startCapture(source: string, quiet = false, live = false): Promis
    */
   const job = live
     ? { ...entry, pageLimit: 1, variables: { ...(entry.variables ?? {}), count: 20 } }
-    : entry;
+    : // A full run picks up where the last acknowledged page left off, so an
+      // import interrupted at page nine does not start again at page one.
+      { ...entry, ...(begun.run.cursor ? { resumeCursor: begun.run.cursor } : {}) };
   await patchStatus(source, {
     startedAt: begun.run.startedAt,
     pages: 0,
@@ -660,12 +738,15 @@ async function handlePageEvent(
     case "ready":
       return { ok: true };
     case "page":
-      await deliverRaw(source, msg.raw, msg.page);
+      await deliverRaw(source, msg.raw, msg.page, msg.cursor ?? null);
       await patchStatus(source, { pages: msg.page, items: msg.items });
       return { ok: true };
     case "saved":
       await persistentState().runs.requestRefresh(source);
       browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
+      return { ok: true };
+    case "bookmark":
+      await handleBookmarkMutation(source, msg.bookmarkAction, msg.externalId);
       return { ok: true };
     case "observed": {
       await deliverRaw(source, msg.raw);
@@ -677,6 +758,9 @@ async function handlePageEvent(
       return { ok: true };
     }
     case "done":
+      // Before finishing: the pages this run queued are what give the held
+      // saves their content, and the queue is serial per source.
+      await flushPendingSaves(source);
       await finishRun(source);
       await patchStatus(source, {
         startedAt: null,

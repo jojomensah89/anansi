@@ -1,0 +1,65 @@
+{
+  "data": {
+    "bookmark_timeline_v2": {
+      "timeline": {
+        "instructions": [
+          { "type": "TimelineClearCache" },
+          {
+            "type": "TimelineAddEntries",
+            "entries": [
+              {
+                "entryId": "tweet-1900000000000000001",
+                "sortIndex": "1900000000000000001",
+                "content": {
+                  "entryType": "TimelineTimelineItem",
+                  "itemContent": {
+                    "itemType": "TimelineTweet",
+                    "tweet_results": {
+                      "result": {
+                        "__typename": "Tweet",
+                        "rest_id": "1900000000000000001",
+                        "legacy": {
+                          "full_text": "A sanitized first bookmark.",
+                          "created_at": "Mon Sep 01 09:00:00 +0000 2025"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "entryId": "tweet-1900000000000000002",
+                "sortIndex": "1900000000000000002",
+                "content": {
+                  "entryType": "TimelineTimelineItem",
+                  "itemContent": {
+                    "itemType": "TimelineTweet",
+                    "tweet_results": {
+                      "result": {
+                        "__typename": "Tweet",
+                        "rest_id": "1900000000000000002",
+                        "legacy": {
+                          "full_text": "A sanitized second bookmark.",
+                          "created_at": "Mon Sep 01 10:00:00 +0000 2025"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "entryId": "cursor-bottom-1900000000000000000",
+                "sortIndex": "0",
+                "content": {
+                  "entryType": "TimelineTimelineCursor",
+                  "cursorType": "Bottom",
+                  "value": "DAABCgABGf__page-two"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

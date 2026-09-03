@@ -13,7 +13,8 @@
  * This script never talks to any host but x.com. Everything it captures leaves
  * by window.postMessage to the relay, which hands it to the background worker.
  * It holds no token and knows no server, because it shares a context with
- * x.com's own code.
+ * x.com's own code. The bearer and `ct0` it reads are used in the request it
+ * is making and are never sent anywhere.
  *
  * Every side effect lives inside main(). WXT imports this module in Node to
  * read the config below, and touching `window` at module scope crashes the
@@ -21,6 +22,15 @@
  */
 
 import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
+import {
+  buildTimelineUrl,
+  isMutationAccepted,
+  readBookmarkMutation,
+  readRequestTemplate,
+  readTimelinePage,
+  shouldStopImport,
+  type RequestTemplate,
+} from "../lib/platforms/x.ts";
 
 interface SourceConfig {
   operation: string;
@@ -29,12 +39,20 @@ interface SourceConfig {
   entryPrefix: string;
   pageLimit: number;
   watchOperations?: string[];
+  /** Where the last acknowledged run stopped, if it stopped part-way. */
+  resumeCursor?: string;
 }
 
 type Outbound =
   | { action: "ready"; queryId: string | null }
-  | { action: "saved" }
-  | { action: "page"; raw: unknown; page: number; items: number }
+  | { action: "bookmark"; bookmarkAction: "save" | "unsave"; externalId: string }
+  | {
+      action: "page";
+      raw: unknown;
+      page: number;
+      items: number;
+      cursor?: string;
+    }
   | { action: "done"; pages: number; items: number }
   | {
       action: "error";
@@ -44,6 +62,9 @@ type Outbound =
 /** A public app constant, identical for every visitor — not a user credential. */
 const FALLBACK_BEARER =
   "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+/** How long a backfill waits for X to make a Bookmarks request of its own. */
+const TEMPLATE_WAIT_MS = 12_000;
 
 export default defineContentScript({
   matches: ["https://x.com/*", "https://twitter.com/*"],
@@ -87,10 +108,46 @@ export default defineContentScript({
       scanChunks(new RegExp(`queryId:"([\\w-]+)",operationName:"${operation}"`)) ??
       scanChunks(new RegExp(`operationName:"${operation}",queryId:"([\\w-]+)"`));
 
-    // ---- real-time: watch what the app itself does -------------------------
+    // ---- what the app does for itself -------------------------------------
 
     let watched: string[] = [];
+    let timelineOperation: string | null = null;
+
+    /**
+     * The last Bookmarks request X made and X liked.
+     *
+     * This is the whole point of watching the timeline query rather than only
+     * the mutations: the import stops guessing which feature flags X wants
+     * this week and reuses the ones it just accepted.
+     */
+    let observed: RequestTemplate | null = null;
+
     const matchOp = (url: string) => watched.find((op) => url.includes(`/${op}`));
+
+    const noteTemplate = (url: string) => {
+      if (!timelineOperation || !url.includes(`/${timelineOperation}`)) return;
+      const template = readRequestTemplate(url, timelineOperation);
+      if (template) observed = template;
+    };
+
+    /**
+     * Report a mutation only when X both understood it and applied it.
+     *
+     * Create and Delete used to arrive here as the same word, which is why an
+     * unbookmark did nothing: the library never heard that anything had been
+     * removed. Now the operation name decides the action and the request body
+     * says which post it applies to.
+     */
+    const noteMutation = (url: string, body: unknown, status: number, response: unknown) => {
+      const mutation = readBookmarkMutation(url, body);
+      if (!mutation) return;
+      if (!isMutationAccepted(status, response)) return;
+      send({
+        action: "bookmark",
+        bookmarkAction: mutation.action,
+        externalId: mutation.tweetId,
+      });
+    };
 
     const nativeFetch = window.fetch;
     // Object.assign rather than a bare function: `typeof fetch` carries
@@ -102,12 +159,18 @@ export default defineContentScript({
         const input = args[0];
         const url =
           typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
-        // A signal, not a payload. CreateBookmark answers
-        // {"data":{"tweet_bookmark_put":"Done"}} — it says that something was
-        // bookmarked and nothing about what, so uploading it would parse to
-        // zero items and 422 on every save. The background pulls the top of
-        // the timeline instead, which arrives with the whole post.
-        if (matchOp(url) && res.ok) send({ action: "saved" });
+
+        if (res.ok) noteTemplate(url);
+
+        if (matchOp(url)) {
+          const request = input instanceof Request ? input.clone() : null;
+          const body = args[1]?.body ?? (request ? await request.text() : null);
+          const text = await res
+            .clone()
+            .text()
+            .catch(() => null);
+          noteMutation(url, body, res.status, text);
+        }
       } catch {
         // Observation must never break the page.
       }
@@ -116,19 +179,17 @@ export default defineContentScript({
     window.fetch = Object.assign(patched, nativeFetch) as typeof fetch;
 
     // X uses both; hooking only one misses half the traffic.
+    type WatchedXhr = XMLHttpRequest & { __anansiUrl?: string };
+
     const nativeOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (
-      this: XMLHttpRequest,
+      this: WatchedXhr,
       method: string,
       url: string | URL,
       ...rest: unknown[]
     ) {
       try {
-        if (matchOp(String(url))) {
-          this.addEventListener("load", () => {
-            if (this.status >= 200 && this.status < 300) send({ action: "saved" });
-          });
-        }
+        this.__anansiUrl = String(url);
       } catch {
         /* never break the page */
       }
@@ -136,51 +197,95 @@ export default defineContentScript({
       return nativeOpen.call(this, method, url, ...rest);
     };
 
+    const nativeSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (
+      this: WatchedXhr,
+      body?: Document | XMLHttpRequestBodyInit | null,
+    ) {
+      try {
+        const url = this.__anansiUrl ?? "";
+        if (url) {
+          this.addEventListener("load", () => {
+            try {
+              if (this.status >= 200 && this.status < 300) noteTemplate(url);
+              if (matchOp(url)) {
+                noteMutation(
+                  url,
+                  typeof body === "string" ? body : null,
+                  this.status,
+                  this.responseText,
+                );
+              }
+            } catch {
+              /* never break the page */
+            }
+          });
+        }
+      } catch {
+        /* never break the page */
+      }
+      return nativeSend.call(this, body ?? null);
+    };
+
     // ---- backfill: page with the session the browser already has ----------
 
-    const readPage = (json: unknown, cfg: SourceConfig) => {
-      const root = json as Record<string, any>;
-      const timeline =
-        root?.data?.bookmark_timeline_v2?.timeline ?? root?.data?.bookmark_timeline?.timeline;
-      const entries: Record<string, any>[] =
-        (timeline?.instructions ?? []).find((i: Record<string, any>) => Array.isArray(i.entries))
-          ?.entries ?? [];
-      const bottom = entries.find((e) => String(e.entryId).startsWith(cfg.cursorPrefix));
-      const items = entries.filter((e) => String(e.entryId).startsWith(cfg.entryPrefix)).length;
-      return { cursor: (bottom?.content?.value as string | undefined) ?? null, items };
+    /**
+     * Wait a little for X to ask for its own bookmarks.
+     *
+     * On x.com/i/bookmarks it always does, within a second or two of load. The
+     * wait is what buys the observed feature set; the fallback below is what
+     * keeps an import possible if the page never gets there.
+     */
+    const waitForTemplate = async (): Promise<RequestTemplate | null> => {
+      const deadline = Date.now() + TEMPLATE_WAIT_MS;
+      while (!observed && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      return observed;
+    };
+
+    const reconstruct = (cfg: SourceConfig, cursor: string | null): string | null => {
+      const queryId = resolveQueryId(cfg.operation);
+      if (!queryId) return null;
+      const variables = { ...cfg.variables, ...(cursor ? { cursor } : {}) };
+      return (
+        `https://x.com/i/api/graphql/${queryId}/${cfg.operation}` +
+        `?variables=${encodeURIComponent(JSON.stringify(variables))}&features=%7B%7D`
+      );
     };
 
     const backfill = async (cfg: SourceConfig) => {
-      const queryId = resolveQueryId(cfg.operation);
-      if (!queryId) {
-        send({
-          action: "error",
-          errorCode: "query_unavailable",
-        });
+      timelineOperation = cfg.operation;
+      const template = await waitForTemplate();
+      if (!template && !resolveQueryId(cfg.operation)) {
+        send({ action: "error", errorCode: "query_unavailable" });
         return;
       }
 
       const bearer = scanChunks(/AAAAAAAA[A-Za-z0-9%\-_]{40,}/) ?? FALLBACK_BEARER;
       const csrf = document.cookie.match(/ct0=([^;]+)/)?.[1] ?? "";
-      let cursor: string | null = null;
+      let cursor: string | null = cfg.resumeCursor ?? null;
       let page = 0;
       let total = 0;
 
       for (;;) {
-        const variables = { ...cfg.variables, ...(cursor ? { cursor } : {}) };
-        const res = await nativeFetch(
-          `https://x.com/i/api/graphql/${queryId}/${cfg.operation}` +
-            `?variables=${encodeURIComponent(JSON.stringify(variables))}&features=%7B%7D`,
-          {
-            credentials: "include",
-            headers: {
-              authorization: `Bearer ${bearer}`,
-              "x-csrf-token": csrf,
-              "x-twitter-active-user": "yes",
-              "x-twitter-auth-type": "OAuth2Session",
-            },
+        // Prefer whatever X most recently used; it may improve mid-run.
+        const url = (observed ? buildTimelineUrl(observed, cursor) : null) ??
+          reconstruct(cfg, cursor);
+        if (!url) {
+          send({ action: "error", errorCode: "query_unavailable" });
+          return;
+        }
+
+        const res = await nativeFetch(url, {
+          credentials: "include",
+          headers: {
+            authorization: `Bearer ${bearer}`,
+            "x-csrf-token": csrf,
+            "x-twitter-active-user": "yes",
+            "x-twitter-auth-type": "OAuth2Session",
           },
-        );
+        });
 
         if (res.status === 429) {
           const reset = Number(res.headers.get("x-rate-limit-reset")) * 1000 - Date.now();
@@ -193,16 +298,29 @@ export default defineContentScript({
         }
 
         const raw = await res.json();
-        const { cursor: next, items } = readPage(raw, cfg);
+        const read = readTimelinePage(raw, cfg);
         page++;
-        total += items;
+        total += read.items;
 
         // Raw and untouched. The server parses it, which is what lets a stale
         // install be repaired without anyone reinstalling anything.
-        send({ action: "page", raw, page, items });
+        send({
+          action: "page",
+          raw,
+          page,
+          items: read.items,
+          ...(read.cursor ? { cursor: read.cursor } : {}),
+        });
 
-        if (items === 0 || !next || next === cursor || page >= cfg.pageLimit) break;
-        cursor = next;
+        const decision = shouldStopImport({
+          page,
+          pageLimit: cfg.pageLimit,
+          items: read.items,
+          cursor: read.cursor,
+          previousCursor: cursor,
+        });
+        if (decision.stop) break;
+        cursor = read.cursor;
       }
 
       send({ action: "done", pages: page, items: total });
@@ -228,6 +346,7 @@ export default defineContentScript({
       if (msg.action === "configure") {
         nonce = msg.nonce;
         watched = msg.config.watchOperations ?? [];
+        timelineOperation = msg.config.operation;
         send({ action: "ready", queryId: resolveQueryId(msg.config.operation) ?? null });
       }
       if (msg.action === "backfill" && msg.nonce === nonce) {

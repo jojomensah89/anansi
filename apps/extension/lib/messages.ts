@@ -76,6 +76,8 @@ export type PageEventMessage = PageTrafficBase &
 				raw: unknown;
 				page: number;
 				items: number;
+				/** Where the next page starts, once this one is durable. */
+				cursor?: string;
 		  }
 		| {
 				anansi: "page-event";
@@ -83,6 +85,12 @@ export type PageEventMessage = PageTrafficBase &
 				operation: string;
 				raw: unknown;
 				items: number;
+		  }
+		| {
+				anansi: "page-event";
+				action: "bookmark";
+				bookmarkAction: "save" | "unsave";
+				externalId: string;
 		  }
 		| { anansi: "page-event"; action: "done"; pages: number; items: number }
 		| { anansi: "page-event"; action: "scanned" }
@@ -159,7 +167,7 @@ const SOURCE_HOSTS: Record<PlatformSource, ReadonlySet<string>> = {
 };
 
 const PAGE_EVENT_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
-	x: new Set(["ready", "saved", "page", "done", "error"]),
+	x: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
 	reddit: new Set(["saved", "page", "done", "error"]),
 	tiktok: new Set(["observed", "scanned", "error"]),
 };
@@ -312,6 +320,16 @@ function isSource(value: unknown): value is PlatformSource {
 	return value === "x" || value === "reddit" || value === "tiktok";
 }
 
+/**
+ * A platform object identifier, kept to what an id can be.
+ *
+ * The background turns this into a capture addressed at one item, so a value
+ * that could carry a path or a URL fragment has no business being one.
+ */
+function isExternalId(value: unknown): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+}
+
 function isNonce(value: unknown): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(value);
 }
@@ -345,12 +363,23 @@ function validatePageEventShape(
 		case "saved":
 		case "scanned":
 			return hasOnlyKeys(value, base);
+		case "bookmark":
+			return (
+				hasOnlyKeys(value, [...base, "bookmarkAction", "externalId"]) &&
+				(value.bookmarkAction === "save" ||
+					value.bookmarkAction === "unsave") &&
+				isExternalId(value.externalId)
+			);
 		case "page":
 			return (
-				hasOnlyKeys(value, [...base, "raw", "page", "items"]) &&
+				hasOnlyKeys(value, [...base, "raw", "page", "items", "cursor"]) &&
 				Object.hasOwn(value, "raw") &&
 				isPositiveInteger(value.page) &&
-				isNonNegativeInteger(value.items)
+				isNonNegativeInteger(value.items) &&
+				(value.cursor === undefined ||
+					(typeof value.cursor === "string" &&
+						value.cursor.length > 0 &&
+						value.cursor.length <= 2_000))
 			);
 		case "observed":
 			return (

@@ -282,4 +282,46 @@ describe("parseExtensionMessage", () => {
 			if (!result.ok) expect(result.error.message).not.toContain(marker);
 		}
 	});
+
+	describe("bookmark mutations", () => {
+		const bookmark = (patch: Record<string, unknown>) => ({
+			...pageEvent("x", "bookmark"),
+			bookmarkAction: "save",
+			externalId: "1900000000000000001",
+			...patch,
+		});
+
+		test("accepts an explicit save and an explicit unsave", () => {
+			for (const action of ["save", "unsave"]) {
+				const result = parseExtensionMessage(
+					bookmark({ bookmarkAction: action }),
+					pageContext("https://x.com/i/bookmarks"),
+				);
+				expect(result.ok).toBe(true);
+			}
+		});
+
+		test("rejects an unknown action, a bad id and extra fields", () => {
+			const rejected = [
+				bookmark({ bookmarkAction: "delete" }),
+				bookmark({ externalId: "../../etc/passwd" }),
+				bookmark({ externalId: "" }),
+				bookmark({ raw: { anything: true } }),
+			];
+			for (const message of rejected) {
+				expect(
+					parseExtensionMessage(message, pageContext("https://x.com/i/bookmarks"))
+						.ok,
+				).toBe(false);
+			}
+		});
+
+		test("is an X message only", () => {
+			const result = parseExtensionMessage(
+				{ ...bookmark({}), source: "reddit" },
+				pageContext("https://www.reddit.com/user/example/saved"),
+			);
+			expect(result.ok).toBe(false);
+		});
+	});
 });

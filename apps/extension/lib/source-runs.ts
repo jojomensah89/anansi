@@ -9,6 +9,16 @@ export interface SourceRunState extends SyncStateRecord {
 	startedAt?: number;
 	nextPage: number;
 	pendingRefresh: boolean;
+	/**
+	 * Saves seen live that still need their content.
+	 *
+	 * A platform tells you that something was bookmarked long before it tells
+	 * you what: X's CreateBookmark answers `{"tweet_bookmark_put":"Done"}`. So
+	 * the id waits here while a refresh fetches the post, and the save event is
+	 * only sent once those pages are queued ahead of it — a save for an item
+	 * the server has never seen is a permanent failure, not a retry.
+	 */
+	pendingSaves: string[];
 }
 
 export interface ActiveSourceRunState extends SourceRunState {
@@ -36,6 +46,10 @@ export interface SourceRuns {
 	stop(source: CaptureSource): Promise<number | null>;
 	requestRefresh(source: CaptureSource): Promise<void>;
 	claimRefresh(source: CaptureSource): Promise<boolean>;
+	recordPendingSave(source: CaptureSource, externalId: string): Promise<void>;
+	takePendingSaves(source: CaptureSource): Promise<string[]>;
+	/** Advance the resume point. Only ever called after a page is queued. */
+	setCursor(source: CaptureSource, cursor: string | null): Promise<void>;
 	setOwnedTab(source: CaptureSource, tabId: number): Promise<void>;
 	takeOwnedTab(
 		source: CaptureSource,
@@ -55,6 +69,7 @@ function defaultState(source: CaptureSource, now: number): SourceRunState {
 		phase: "idle",
 		nextPage: 0,
 		pendingRefresh: false,
+		pendingSaves: [],
 		updatedAt: now,
 	};
 }
@@ -75,8 +90,16 @@ function asRunState(
 				? value.nextPage
 				: 0,
 		pendingRefresh: value.pendingRefresh === true,
+		pendingSaves: Array.isArray(value.pendingSaves)
+			? value.pendingSaves.filter(
+					(id): id is string => typeof id === "string" && id.length > 0,
+				)
+			: [],
 	};
 }
+
+/** Enough to survive a burst of saves, not enough to become a second library. */
+const MAX_PENDING_SAVES = 200;
 
 /** Durable source-run coordinator backed by the IndexedDB syncState store. */
 export function createSourceRuns(
@@ -194,6 +217,39 @@ export function createSourceRuns(
 					return false;
 				await write({ ...current, pendingRefresh: false, updatedAt: now() });
 				return true;
+			});
+		},
+
+		recordPendingSave(source, externalId) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				if (current.pendingSaves.includes(externalId)) return;
+				// Oldest first out, so a flood loses the stale end rather than
+				// the save that just happened.
+				const pendingSaves = [...current.pendingSaves, externalId].slice(
+					-MAX_PENDING_SAVES,
+				);
+				await write({ ...current, pendingSaves, updatedAt: now() });
+			});
+		},
+
+		setCursor(source, cursor) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				await write({
+					...current,
+					cursor: cursor ?? undefined,
+					updatedAt: now(),
+				});
+			});
+		},
+
+		takePendingSaves(source) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				if (current.pendingSaves.length === 0) return [];
+				await write({ ...current, pendingSaves: [], updatedAt: now() });
+				return current.pendingSaves;
 			});
 		},
 

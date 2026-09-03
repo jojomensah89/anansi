@@ -154,3 +154,80 @@ describe("capture delivery ownership", () => {
 		expect(captureDeliveryMode(2, { reddit: true }, "x")).toBe("legacy");
 	});
 });
+
+
+describe("held saves", () => {
+	test("holds an id until it is taken, and only once", async () => {
+		const { runs } = setup();
+
+		await runs.recordPendingSave("x", "1900000000000000001");
+		await runs.recordPendingSave("x", "1900000000000000002");
+
+		expect(await runs.takePendingSaves("x")).toEqual([
+			"1900000000000000001",
+			"1900000000000000002",
+		]);
+		expect(await runs.takePendingSaves("x")).toEqual([]);
+	});
+
+	test("the same save observed twice is held once", async () => {
+		const { runs } = setup();
+
+		await runs.recordPendingSave("x", "1900000000000000001");
+		await runs.recordPendingSave("x", "1900000000000000001");
+
+		expect(await runs.takePendingSaves("x")).toEqual([
+			"1900000000000000001",
+		]);
+	});
+
+	test("survives a worker restart, because it is in the store", async () => {
+		const { runs, store } = setup();
+		await runs.recordPendingSave("x", "1900000000000000009");
+
+		const revived = createSourceRuns({
+			store,
+			now: () => 20_000,
+			createId: () => "run-revived",
+		});
+
+		expect(await revived.takePendingSaves("x")).toEqual([
+			"1900000000000000009",
+		]);
+	});
+
+	test("a flood keeps the newest saves rather than the oldest", async () => {
+		const { runs } = setup();
+		for (let index = 0; index < 260; index++) {
+			await runs.recordPendingSave("x", `id-${index}`);
+		}
+
+		const held = await runs.takePendingSaves("x");
+		expect(held).toHaveLength(200);
+		expect(held.at(-1)).toBe("id-259");
+	});
+});
+
+describe("resume cursor", () => {
+	test("a run begins where the last acknowledged page left off", async () => {
+		const { runs } = setup();
+		await runs.begin("x");
+		await runs.setCursor("x", "cursor-page-9");
+		await runs.finish("x");
+
+		const next = await runs.begin("x");
+		expect(next.run.cursor).toBe("cursor-page-9");
+	});
+
+	test("a walk that reached the end starts fresh next time", async () => {
+		const { runs } = setup();
+		await runs.begin("x");
+		await runs.setCursor("x", "cursor-page-9");
+		// The final page carries no cursor: there is nothing after it.
+		await runs.setCursor("x", null);
+		await runs.finish("x");
+
+		const next = await runs.begin("x");
+		expect(next.run.cursor).toBeUndefined();
+	});
+});
