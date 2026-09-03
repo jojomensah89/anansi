@@ -9,6 +9,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 export interface RailProps {
   total: number;
   authors: number;
+  archived?: number;
   bySource: Record<string, number>;
 }
 
@@ -48,7 +49,7 @@ function Item({
   );
 }
 
-export function Rail({ total, authors, bySource }: RailProps) {
+export function Rail({ total, authors, archived = 0, bySource }: RailProps) {
   const path = useRouterState({ select: (s) => s.location.pathname });
 
   return (

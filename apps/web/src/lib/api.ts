@@ -11,6 +11,16 @@ import type { ItemDetail, SearchHit } from "@anansi/db";
  */
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
 
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(BASE + path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
+  return (await res.json()) as T;
+}
+
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(BASE + path, { signal });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
@@ -19,6 +29,23 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 
 export interface ItemRow extends SearchHit {
   saveOrder: number | null;
+  metrics?: Record<string, number>;
+}
+
+/** Thumbnails come from our own copy; the key is a path, so it is not escaped. */
+export function mediaUrl(key: string): string {
+  return `${BASE}/api/media/${key}`;
+}
+
+export interface ItemQuery {
+  cursor?: number | null;
+  source?: string;
+  author?: string;
+  media?: string;
+  type?: string;
+  tag?: string;
+  archived?: boolean;
+  limit?: number;
 }
 
 export interface Page {
@@ -37,6 +64,7 @@ export interface Creator {
 
 export interface SourceRow {
   source: string;
+  enabled: boolean;
   items: number;
   captured: number;
   imported: number;
@@ -52,21 +80,29 @@ export const api = {
     get<{
       items: number;
       authors: number;
+      archived: number;
       bySource: Record<string, number>;
       media: { total: number; stored: number };
     }>("/api/stats", signal),
 
-  items: (
-    opts: { cursor?: number | null; source?: string; author?: string; limit?: number } = {},
-    signal?: AbortSignal,
-  ) => {
+  items: (opts: ItemQuery = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (opts.cursor != null) q.set("cursor", String(opts.cursor));
     if (opts.source) q.set("source", opts.source);
     if (opts.author) q.set("author", opts.author);
+    if (opts.media) q.set("media", opts.media);
+    if (opts.type) q.set("type", opts.type);
+    if (opts.tag) q.set("tag", opts.tag);
+    if (opts.archived) q.set("archived", "1");
     q.set("limit", String(opts.limit ?? 60));
     return get<Page>(`/api/items?${q}`, signal);
   },
+
+  tags: (signal?: AbortSignal) =>
+    get<{ tags: { label: string; count: number }[] }>("/api/tags", signal),
+
+  archive: (ids: string[], archived = true) => post("/api/items/archive", { ids, archived }),
+  tag: (ids: string[], label: string) => post("/api/items/tag", { ids, label }),
 
   search: (
     query: string,
@@ -85,6 +121,9 @@ export const api = {
     get<{ creators: Creator[] }>(`/api/creators?limit=${limit}`, signal),
 
   sources: (signal?: AbortSignal) => get<{ sources: SourceRow[] }>("/api/sources", signal),
+
+  toggleSource: (source: string, enabled: boolean) =>
+    post<{ source: string; enabled: boolean }>(`/api/sources/${source}`, { enabled }),
 };
 
 /** Dates in the UI are always the post's date, never the import stamp. */

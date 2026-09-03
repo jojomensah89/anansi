@@ -38,6 +38,15 @@ function ago(unix: number | null): string {
 
 function Sources() {
   const [sources, setSources] = useState<SourceRow[]>([]);
+  const toggle = (source: string, enabled: boolean) => {
+    // Optimistic: the switch is the whole interaction, and waiting a round
+    // trip to move it makes it feel broken.
+    setSources((prev) => prev.map((s) => (s.source === source ? { ...s, enabled } : s)));
+    api.toggleSource(source, enabled).catch(() => {
+      setSources((prev) => prev.map((s) => (s.source === source ? { ...s, enabled: !enabled } : s)));
+    });
+  };
+
   const [stats, setStats] = useState<{ items: number; authors: number; bySource: Record<string, number> }>({ items: 0, authors: 0, bySource: {} });
 
   useEffect(() => {
@@ -83,6 +92,7 @@ function Sources() {
           >
             {sources.map((s) => {
               const stale = s.lastSavedAt !== null && Date.now() / 1000 - s.lastSavedAt > 7 * 86400;
+              const off = s.enabled === false;
               return (
                 <div
                   key={s.source}
@@ -91,6 +101,8 @@ function Sources() {
                     border: "1px solid var(--line)",
                     borderRadius: 8,
                     padding: 16,
+                    // Dimmed, never hidden: an absent source reads as broken.
+                    opacity: off ? 0.55 : 1,
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
@@ -122,26 +134,32 @@ function Sources() {
                         {s.items.toLocaleString()} items · {s.authors} authors
                       </span>
                     </div>
-                    <span
-                      className="mono"
-                      style={{
-                        marginLeft: "auto",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        fontSize: 10.5,
-                        color: stale ? "var(--accent)" : "var(--ok)",
-                      }}
-                    >
-                      <span
+                    <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+                      {!off && (
+                        <span className="mono" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: stale ? "var(--accent)" : "var(--ok)" }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: stale ? "var(--accent)" : "var(--ok)" }} />
+                          {stale ? "stale" : "healthy"}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggle(s.source, off)}
+                        aria-label={`${off ? "Enable" : "Disable"} ${s.source}`}
                         style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: stale ? "var(--accent)" : "var(--ok)",
+                          width: 36,
+                          height: 20,
+                          borderRadius: 10,
+                          padding: "0 2px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: off ? "flex-start" : "flex-end",
+                          background: off ? "var(--raised)" : "#2a3f36",
+                          border: `1px solid ${off ? "var(--edge)" : "#3d6353"}`,
+                          cursor: "pointer",
                         }}
-                      />
-                      {stale ? "stale" : "healthy"}
+                      >
+                        <span style={{ width: 14, height: 14, borderRadius: "50%", background: off ? "var(--faint)" : "var(--ok)" }} />
+                      </button>
                     </span>
                   </div>
 

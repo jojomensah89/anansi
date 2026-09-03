@@ -56,11 +56,18 @@ export const items = sqliteTable(
     metrics: text("metrics").notNull().default("{}"),
     /** json: the untouched platform payload */
     raw: text("raw").notNull(),
+    /**
+     * A flag, deliberately, and not a delete. Deleting a row would be undone
+     * by the next import — it comes straight back — so the only thing that can
+     * persist an "I am done with this" is a column the importer preserves.
+     */
+    archivedAt: integer("archived_at"),
   },
   (t) => [
     uniqueIndex("items_source_external").on(t.source, t.externalId),
     index("items_saved").on(t.savedAt),
     index("items_save_order").on(t.saveOrder),
+    index("items_archived").on(t.archivedAt),
     index("items_author").on(t.authorHandle),
   ],
 );
@@ -113,3 +120,19 @@ export const creatorsQuery = sql`
   from items where author_handle is not null
   group by author_handle order by saves desc
 `;
+
+/**
+ * Per-source switches.
+ *
+ * A row per source rather than a column on items: this is configuration, not
+ * data about a save, and it has to be readable by the extension config
+ * endpoint without touching the library at all.
+ *
+ * A source with no row is enabled — absence means "not configured yet", which
+ * is the right default for one you have just added.
+ */
+export const sourceSettings = sqliteTable("source_settings", {
+  source: text("source").primaryKey(),
+  enabled: integer("enabled").notNull().default(1),
+  updatedAt: integer("updated_at"),
+});

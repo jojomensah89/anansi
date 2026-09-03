@@ -2,6 +2,8 @@ import type { AnansiDb } from "@anansi/db";
 
 export interface ServerEnv {
   db: AnansiDb;
+  /** R2 binding in a Worker, a directory locally. Exactly one is set. */
+  media: { bucket?: any; dir?: string };
   /** Absent means the endpoint is closed, not open. */
   ingestToken?: string;
   mcpToken?: string;
@@ -36,6 +38,7 @@ export async function serverEnv(): Promise<ServerEnv> {
       const { openD1 } = await import("@anansi/db/d1");
       cached = {
         db: openD1(env.DB as D1Database),
+        media: { bucket: env.MEDIA },
         ingestToken: env.INGEST_TOKEN as string | undefined,
         mcpToken: env.MCP_TOKEN as string | undefined,
         source: "d1",
@@ -50,6 +53,7 @@ export async function serverEnv(): Promise<ServerEnv> {
   const path = process.env.ANANSI_DB_PATH ?? "data/anansi.db";
   cached = {
     db: openLocalDb(path) as unknown as AnansiDb,
+    media: { dir: process.env.ANANSI_MEDIA_DIR ?? "data/media" },
     ingestToken: process.env.INGEST_TOKEN,
     mcpToken: process.env.MCP_TOKEN,
     source: "local",

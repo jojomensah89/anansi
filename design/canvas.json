@@ -1,0 +1,39 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Library" },
+    { "file": "Filters.dc.html", "x": 1560, "y": 0, "w": 1000, "h": 700, "title": "Filters" },
+    { "file": "Select.dc.html", "x": 0, "y": 1080, "w": 1000, "h": 760, "title": "Select mode" },
+    { "file": "Sources.dc.html", "x": 1120, "y": 1080, "w": 1000, "h": 720, "title": "Source toggles" }
+  ],
+  "annotations": [
+    {
+      "id": "note-cards",
+      "x": 0,
+      "y": -150,
+      "w": 520,
+      "text": "Real thumbnails and avatars from the 1,274-item library, not placeholders.\n\nThe blocker: nothing serves media today. 1,246 webp thumbs sit in data/media/ with no route to reach them, which is why the built grid is text-only. Needs GET /api/media/:id over the existing MediaSink — local dir now, R2 binding in the Worker."
+    },
+    {
+      "id": "note-filters",
+      "x": 1560,
+      "y": -150,
+      "w": 460,
+      "text": "Content type is per-source and cannot be one flat list: a Reddit save can be a comment, a GitHub star never is.\n\nThe menu offers only kinds actually present, with counts from the same group-by that feeds the source row — so an empty option is never shown."
+    },
+    {
+      "id": "note-select",
+      "x": 0,
+      "y": 1900,
+      "w": 520,
+      "text": "Tag writes to the tags and item_tags tables, which exist in the schema and have never been written to.\n\nArchive needs one new column, items.archived_at. Deliberately a flag and not a delete: a re-import would resurrect a deleted row on the next run."
+    },
+    {
+      "id": "note-sources",
+      "x": 1120,
+      "y": 1860,
+      "w": 460,
+      "text": "The switch writes `enabled` on the source row /api/extension/config already serves, so the extension stops capturing that platform on its next run. Same kill switch, per source.\n\nOff dims the card rather than hiding it — an absent source reads as broken."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

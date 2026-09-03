@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0b0e11; }
+    a { color: #e4a33c; text-decoration: none; }
+    a:hover { color: #f5c97e; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1000px; height: 760px; background: #0b0e11; color: #e6ebef; font-family: 'Instrument Sans', system-ui, sans-serif; padding: 22px; display: flex; flex-direction: column; gap: 16px;">
+
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <span style="font-size: 14px; font-weight: 600;">Select mode</span>
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #5d6874;">
+      cards gain a checkbox; actions live in a bar that only exists while something is selected
+    </span>
+  </div>
+
+  <!-- selected vs unselected card, side by side -->
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;">
+    <sc-for list="{{cards}}" as="c" hint-placeholder-count="3">
+      <div style="background: #12161a; border: 1px solid {{c.border}}; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; height: 300px; position: relative;">
+        <span style="position: absolute; top: 9px; left: 9px; z-index: 2; width: 19px; height: 19px; border-radius: 4px; border: 1px solid {{c.box}}; background: {{c.fill}}; display: flex; align-items: center; justify-content: center;">
+          <sc-if value="{{c.on}}" hint-placeholder-val="{{ true }}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0b0e11" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
+          </sc-if>
+        </span>
+
+        <div style="position: relative; height: 152px; flex-shrink: 0; background: #0e1216;">
+          <img src="{{c.thumb}}" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block; opacity: {{c.dim}};">
+          <sc-if value="{{c.isVideo}}" hint-placeholder-val="{{ true }}">
+            <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;">
+              <span style="width: 34px; height: 34px; border-radius: 50%; background: #0b0e11b3; display: flex; align-items: center; justify-content: center;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="#e6ebef"><path d="M8 5v14l11-7z"></path></svg>
+              </span>
+            </span>
+          </sc-if>
+        </div>
+
+        <div style="padding: 11px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0;">
+          <div style="display: flex; align-items: center; gap: 7px;">
+            <img src="{{c.avatar}}" alt="" style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex-shrink: 0;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #8d9aa6;">{{c.handle}}</span>
+          </div>
+          <div style="flex: 1; min-height: 0; font-size: 12px; line-height: 1.5; color: #d5dde4; overflow: hidden;">{{c.body}}</div>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- the action bar, floating over the grid -->
+  <div style="display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 8px; background: #10151a; border: 1px solid #2a333b; box-shadow: 0 18px 44px -14px #000000cc;">
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: {{accent}};">3 selected</span>
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #5d6874;">select all 60 loaded</span>
+
+    <div style="margin-left: auto; display: flex; gap: 7px;">
+      <sc-for list="{{actions}}" as="a" hint-placeholder-count="4">
+        <span style="display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 5px; border: 1px solid {{a.border}}; background: {{a.bg}}; color: {{a.fg}}; font-size: 12.5px;">
+          {{a.label}}
+        </span>
+      </sc-for>
+      <span style="display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: 5px; border: 1px solid #1f262d; color: #5d6874; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">esc</span>
+    </div>
+  </div>
+
+  <!-- tagging is where this stops being cosmetic -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+    <div style="border: 1px solid #1f262d; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e;">Tag 3 items</span>
+      <div style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid #232a31; border-radius: 5px; background: #12161a;">
+        <span style="font-size: 12.5px; color: #4a545e;">Type a tag, or pick one</span>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <sc-for list="{{tags}}" as="t" hint-placeholder-count="6">
+          <span style="display: flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; padding: 4px 8px; border-radius: 4px; background: {{t.bg}}; border: 1px solid {{t.border}}; color: {{t.fg}};">
+            {{t.label}}
+            <span style="color: #4a545e;">{{t.count}}</span>
+          </span>
+        </sc-for>
+      </div>
+      <div style="font-size: 11.5px; color: #5d6874; line-height: 1.6;">
+        The <span style="font-family: 'IBM Plex Mono', monospace; color: #8d9aa6;">tags</span> and
+        <span style="font-family: 'IBM Plex Mono', monospace; color: #8d9aa6;">item_tags</span>
+        tables already exist in the schema and nothing writes to them yet. This is what fills them.
+      </div>
+    </div>
+
+    <div style="border: 1px solid #1f262d; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e;">Archive, not delete</span>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 5px; border: 1px solid #232a31; background: #12161a;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8d9aa6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="4" rx="1"></rect><path d="M5.2 8.5v10a1 1 0 0 0 1 1h11.6a1 1 0 0 0 1-1v-10M10 13h4"></path></svg>
+        <span style="font-size: 12.5px; color: #d5dde4;">Move 3 items to Archive</span>
+      </div>
+      <div style="font-size: 11.5px; color: #5d6874; line-height: 1.6;">
+        Archived items leave the grid and the default search, and stay in the database. Nothing here
+        deletes: a re-import would bring a deleted row straight back, so the flag has to be the
+        thing that persists.
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px; padding-top: 10px; border-top: 1px solid #1f262d;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #4a545e;">needs</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #8d9aa6;">items.archived_at</span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#e4a33c","options":["#e4a33c","#5fd1c0","#8fa0ff","#e07a5f"],"section":"Theme"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#e4a33c';
+    return {
+      accent,
+      cards: [
+        { thumb: 'thumb2.webp', avatar: 'av2.jpg', handle: '@ErnestoSOFTWARE', isVideo: true,
+          body: 'This app idea got 1M views on X. This prompt will 1 shot it in 5 minutes.',
+          on: true, border: accent, box: accent, fill: accent, dim: '1' },
+        { thumb: 'thumb8.webp', avatar: 'av8.jpg', handle: '@bryllim_', isVideo: true,
+          body: 'Generated over a 1000 svgs on my workout app with codex with Image Gen',
+          on: true, border: accent, box: accent, fill: accent, dim: '1' },
+        { thumb: 'thumb6.webp', avatar: 'av6.jpg', handle: '@bkdgiffug', isVideo: false,
+          body: '设计师和产品经理看过来，Peek Paper 这网站值得存一下。',
+          on: false, border: '#1f262d', box: '#2a333b', fill: 'transparent', dim: '0.55' },
+      ],
+      actions: [
+        { label: 'Tag',       bg: '#12161a', border: '#232a31', fg: '#d5dde4' },
+        { label: 'Archive',   bg: '#12161a', border: '#232a31', fg: '#d5dde4' },
+        { label: 'Open all',  bg: '#12161a', border: '#232a31', fg: '#d5dde4' },
+        { label: 'Copy links', bg: '#12161a', border: '#232a31', fg: '#d5dde4' },
+      ],
+      tags: [
+        { label: 'design-systems', count: '31', bg: '#1e2329', border: '#2e373f', fg: '#e6ebef' },
+        { label: 'ai-sdk',         count: '18', bg: 'transparent', border: '#1f262d', fg: '#8d9aa6' },
+        { label: 'retrieval',      count: '12', bg: 'transparent', border: '#1f262d', fg: '#8d9aa6' },
+        { label: 'prompting',      count: '9',  bg: 'transparent', border: '#1f262d', fg: '#8d9aa6' },
+        { label: 'self-hosted',    count: '7',  bg: 'transparent', border: '#1f262d', fg: '#8d9aa6' },
+        { label: 'read-later',     count: '4',  bg: 'transparent', border: '#1f262d', fg: '#8d9aa6' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
-import { inArray, sql } from "drizzle-orm";
-import { items, media } from "./schema.ts";
+import { eq, inArray, sql } from "drizzle-orm";
+import { itemTags, items, media, sourceSettings, tags } from "./schema.ts";
 import type { AnansiDb, NewDbItem } from "./types.ts";
 
 /**
@@ -184,6 +184,9 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
             // derive theirs from listing position at import time — which must
             // not be renumbered by a later re-import.
             saveOrder: sql`coalesce(${items.saveOrder}, excluded.save_order)`,
+            // Never resurrect something you archived: a re-import refreshes
+            // the content, not your decision about it.
+            archivedAt: sql`${items.archivedAt}`,
             metrics: sql`excluded.metrics`,
             raw: sql`excluded.raw`,
           },
@@ -237,4 +240,81 @@ export async function creators(db: AnansiDb, limit = 20) {
     order by saves desc
     limit ${limit}
   `);
+}
+
+/**
+ * Archive and tag, the two things select mode does.
+ *
+ * Both are set-shaped rather than per-item: selecting forty cards and issuing
+ * forty round trips is how a bulk action becomes slow enough that people stop
+ * using it.
+ */
+export async function setArchived(
+  db: AnansiDb,
+  ids: string[],
+  archived: boolean,
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  const at = archived ? Math.floor(Date.now() / 1000) : null;
+  for (let i = 0; i < ids.length; i += 200) {
+    await db.update(items).set({ archivedAt: at }).where(inArray(items.id, ids.slice(i, i + 200)));
+  }
+  return ids.length;
+}
+
+/**
+ * Tags have existed in the schema since the first migration and nothing has
+ * ever written to them. This is what fills them.
+ */
+export async function tagItems(db: AnansiDb, ids: string[], label: string): Promise<number> {
+  const clean = label.trim().toLowerCase();
+  if (ids.length === 0 || !clean) return 0;
+
+  const existing = await db.select({ id: tags.id }).from(tags).where(eq(tags.label, clean)).limit(1);
+  const tagId = existing[0]?.id ?? crypto.randomUUID();
+  if (!existing[0]) {
+    await db.insert(tags).values({ id: tagId, label: clean, origin: "manual" }).onConflictDoNothing();
+  }
+
+  for (let i = 0; i < ids.length; i += 200) {
+    await db
+      .insert(itemTags)
+      .values(ids.slice(i, i + 200).map((itemId) => ({ itemId, tagId })))
+      .onConflictDoNothing();
+  }
+  return ids.length;
+}
+
+/** Tags that exist, with how many items carry each. */
+export async function listTags(db: AnansiDb) {
+  return db.all<{ label: string; count: number }>(sql`
+    select t.label as label, count(it.item_id) as count
+    from tags t left join item_tags it on it.tag_id = t.id
+    group by t.id order by count desc, t.label asc
+  `);
+}
+
+/** Sources switched off. Absence means enabled, so this is the exception list. */
+export async function disabledSources(db: AnansiDb): Promise<string[]> {
+  const rows = await db
+    .select({ source: sourceSettings.source })
+    .from(sourceSettings)
+    .where(eq(sourceSettings.enabled, 0));
+  return rows.map((r) => r.source);
+}
+
+export async function setSourceEnabled(
+  db: AnansiDb,
+  source: string,
+  enabled: boolean,
+): Promise<void> {
+  const row = {
+    source,
+    enabled: enabled ? 1 : 0,
+    updatedAt: Math.floor(Date.now() / 1000),
+  };
+  await db.insert(sourceSettings).values(row).onConflictDoUpdate({
+    target: sourceSettings.source,
+    set: { enabled: row.enabled, updatedAt: row.updatedAt },
+  });
 }

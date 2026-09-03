@@ -4,22 +4,21 @@ import { Rail } from "../components/rail.tsx";
 import { Card } from "../components/card.tsx";
 import { Palette } from "../components/palette.tsx";
 import { Detail } from "../components/detail.tsx";
+import { FilterBar, type Filters } from "../components/filters.tsx";
+import { SelectBar } from "../components/selectbar.tsx";
 import { api, type ItemRow } from "../lib/api.ts";
 
 export const Route = createFileRoute("/")({ component: Library });
 
-type Filter = "all" | "x" | "github";
-
 /**
  * The Library.
  *
- * Two views, not four — this and Creators. Search is an overlay and detail is
- * a drawer, because both are things you do *to* the library rather than
- * places you go instead of it.
+ * Search is an overlay and detail is a drawer, because both are things you do
+ * *to* the library rather than places you go instead of it.
  *
- * Pagination is keyset and infinite: the grid appends as you reach the end.
- * Offset paging would silently drop or repeat items whenever an import runs
- * underneath a scroll, which is a thing that will happen.
+ * Pagination is keyset and infinite. Offset paging would silently drop or
+ * repeat items whenever an import ran underneath a scroll, which is a thing
+ * that will happen.
  */
 function Library() {
   const [items, setItems] = useState<ItemRow[]>([]);
@@ -27,46 +26,41 @@ function Library() {
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filters, setFilters] = useState<Filters>({});
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [authors, setAuthors] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const sentinel = useRef<HTMLDivElement>(null);
 
-  // One request for everything the shell needs, so the rail and the grid can
-  // never disagree about how many things there are.
-  useEffect(() => {
-    const controller = new AbortController();
+  const refreshStats = useCallback(() => {
     api
-      .stats(controller.signal)
+      .stats()
       .then((s) => {
         setTotal(s.items);
         setAuthors(s.authors);
         setCounts(s.bySource);
       })
       .catch(() => {});
-    return () => controller.abort();
   }, []);
 
-  const reset = useCallback(() => {
+  useEffect(() => refreshStats(), [refreshStats]);
+
+  // A filter change is a different query, not more of the same one.
+  useEffect(() => {
     setItems([]);
     setCursor(null);
     setDone(false);
-  }, []);
-
-  useEffect(reset, [filter, reset]);
+  }, [filters]);
 
   const loadMore = useCallback(async () => {
     if (done) return;
     setLoading(true);
     try {
-      const page = await api.items({
-        cursor,
-        source: filter === "all" ? undefined : filter,
-        limit: 60,
-      });
+      const page = await api.items({ ...filters, cursor, limit: 60 });
       setItems((prev) => [...prev, ...page.items]);
       setCursor(page.nextCursor);
       if (page.nextCursor === null) setDone(true);
@@ -77,7 +71,7 @@ function Library() {
     } finally {
       setLoading(false);
     }
-  }, [cursor, done, filter]);
+  }, [cursor, done, filters]);
 
   useEffect(() => {
     if (items.length === 0 && !done) void loadMore();
@@ -99,10 +93,33 @@ function Library() {
         e.preventDefault();
         setPaletteOpen(true);
       }
+      if (e.key === "Escape" && selecting) {
+        setSelecting(false);
+        setPicked(new Set());
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [selecting]);
+
+  const toggle = (item: ItemRow) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
+      return next;
+    });
+  };
+
+  /** A bulk action changes the set under you, so reload rather than patch. */
+  const afterBulk = () => {
+    setPicked(new Set());
+    setSelecting(false);
+    setItems([]);
+    setCursor(null);
+    setDone(false);
+    refreshStats();
+  };
 
   return (
     <div style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
@@ -124,83 +141,83 @@ function Library() {
           <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
             {total.toLocaleString()} items · {authors} authors
           </span>
-          <button
-            type="button"
-            onClick={() => setPaletteOpen(true)}
-            style={{
-              marginLeft: "auto",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              height: 30,
-              padding: "0 10px 0 9px",
-              border: "1px solid var(--edge)",
-              borderRadius: 5,
-              background: "var(--card)",
-              width: 250,
-              cursor: "pointer",
-              font: "inherit",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--fainter)" strokeWidth="1.8" strokeLinecap="round">
-              <circle cx="11" cy="11" r="6.5" />
-              <path d="m20 20-4.2-4.2" />
-            </svg>
-            <span style={{ fontSize: 12.5, color: "var(--fainter)" }}>
-              Search {total.toLocaleString()} saves
-            </span>
-            <span
-              className="mono"
-              style={{
-                marginLeft: "auto",
-                fontSize: 10,
-                color: "var(--faintest)",
-                border: "1px solid var(--edge)",
-                borderRadius: 3,
-                padding: "1px 4px",
-              }}
-            >
-              ⌘K
-            </span>
-          </button>
-        </div>
 
-        <div
-          style={{
-            height: 42,
-            flexShrink: 0,
-            borderBottom: "1px solid var(--line)",
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            padding: "0 20px",
-          }}
-        >
-          {(["all", "x", "github"] as const).map((f) => (
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
             <button
-              key={f}
               type="button"
-              onClick={() => setFilter(f)}
-              className="mono"
+              onClick={() => setPaletteOpen(true)}
               style={{
-                fontSize: 11,
-                padding: "4px 9px",
-                borderRadius: 4,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                height: 30,
+                padding: "0 10px 0 9px",
+                border: "1px solid var(--edge)",
+                borderRadius: 5,
+                background: "var(--card)",
+                width: 250,
                 cursor: "pointer",
                 font: "inherit",
-                fontFamily: "var(--mono)",
-                background: filter === f ? "#1e2329" : "transparent",
-                color: filter === f ? "var(--text)" : "var(--muted)",
-                border: `1px solid ${filter === f ? "#2e373f" : "var(--line)"}`,
               }}
             >
-              {f}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--fainter)" strokeWidth="1.8" strokeLinecap="round">
+                <circle cx="11" cy="11" r="6.5" />
+                <path d="m20 20-4.2-4.2" />
+              </svg>
+              <span style={{ fontSize: 12.5, color: "var(--fainter)" }}>
+                Search {total.toLocaleString()} saves
+              </span>
+              <span
+                className="mono"
+                style={{
+                  marginLeft: "auto",
+                  fontSize: 10,
+                  color: "var(--faintest)",
+                  border: "1px solid var(--edge)",
+                  borderRadius: 3,
+                  padding: "1px 4px",
+                }}
+              >
+                ⌘K
+              </span>
             </button>
-          ))}
-          <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--fainter)" }}>
-            {items.length} loaded{done ? " · end" : ""}
-          </span>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelecting((s) => !s);
+                setPicked(new Set());
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                height: 30,
+                padding: "0 11px",
+                borderRadius: 5,
+                cursor: "pointer",
+                font: "inherit",
+                fontSize: 12.5,
+                background: selecting ? "var(--accent)" : "var(--card)",
+                color: selecting ? "var(--ink)" : "var(--text-dim)",
+                border: `1px solid ${selecting ? "var(--accent)" : "var(--edge)"}`,
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 12l5 5L20 6" />
+              </svg>
+              Select
+            </button>
+          </div>
         </div>
+
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          bySource={counts}
+          loaded={items.length}
+          matched={done ? items.length : null}
+        />
 
         <div className="scroll" style={{ flex: 1, padding: "16px 20px" }}>
           {error && (
@@ -211,16 +228,38 @@ function Library() {
               </div>
             </div>
           )}
+
+          {!loading && !error && items.length === 0 && (
+            <div style={{ padding: "40px 12px", color: "var(--muted)", fontSize: 13.5 }}>
+              Nothing matches these filters.
+              <div className="mono" style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 6 }}>
+                Clear one from the bar above.
+              </div>
+            </div>
+          )}
+
+          {/*
+            alignItems: start keeps every card its natural height. Rows end
+            unevenly, which is the honest result of a library that mixes
+            media-heavy saves with text ones.
+          */}
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
               gap: 14,
-              alignContent: "start",
+              alignItems: "start",
             }}
           >
             {items.map((item) => (
-              <Card key={item.id} item={item} onOpen={(i) => setOpenId(i.id)} />
+              <Card
+                key={item.id}
+                item={item}
+                selectable={selecting}
+                selected={picked.has(item.id)}
+                onOpen={(i) => setOpenId(i.id)}
+                onToggle={toggle}
+              />
             ))}
           </div>
           <div ref={sentinel} style={{ height: 40 }} />
@@ -231,6 +270,17 @@ function Library() {
           )}
         </div>
       </div>
+
+      {selecting && picked.size > 0 && (
+        <SelectBar
+          ids={[...picked]}
+          onClear={() => setPicked(new Set())}
+          onSelectAll={() => setPicked(new Set(items.map((i) => i.id)))}
+          loaded={items.length}
+          archived={!!filters.archived}
+          onDone={afterBulk}
+        />
+      )}
 
       <Palette
         open={paletteOpen}

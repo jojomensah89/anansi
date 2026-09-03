@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0b0e11; }
+    a { color: #e4a33c; text-decoration: none; }
+    a:hover { color: #f5c97e; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1000px; height: 700px; background: #0b0e11; color: #e6ebef; font-family: 'Instrument Sans', system-ui, sans-serif; padding: 22px; display: flex; flex-direction: column; gap: 18px;">
+
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <span style="font-size: 14px; font-weight: 600;">Filters</span>
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #5d6874;">
+      applied as chips beside the source row, cleared individually
+    </span>
+  </div>
+
+  <!-- the active state: chips sit in the existing 42px filter bar -->
+  <div style="border: 1px solid #1f262d; border-radius: 6px; background: #0e1216;">
+    <div style="height: 42px; display: flex; align-items: center; gap: 7px; padding: 0 14px; border-bottom: 1px solid #1f262d;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 4px 9px; border-radius: 4px; color: #8d9aa6; border: 1px solid #1f262d;">all 1274</span>
+      <sc-for list="{{chips}}" as="chip" hint-placeholder-count="3">
+        <span style="display: flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 4px 8px; border-radius: 4px; background: {{chip.bg}}; border: 1px solid {{chip.border}}; color: {{chip.fg}};">
+          <span style="color: #5d6874;">{{chip.key}}</span>
+          {{chip.value}}
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </span>
+      </sc-for>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #4a545e; padding-left: 4px;">clear all</span>
+      <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #e4a33c;">318 of 1,274</span>
+    </div>
+
+    <!-- the menu -->
+    <div style="display: flex; padding: 14px; gap: 14px;">
+      <div style="width: 176px; display: flex; flex-direction: column; gap: 2px;">
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="5">
+          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 5px; font-size: 12.5px; background: {{g.bg}}; color: {{g.fg}};">
+            {{g.label}}
+            <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a545e;">{{g.hint}}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="flex: 1; border-left: 1px solid #1f262d; padding-left: 14px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e;">Content type</div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;">
+          <sc-for list="{{types}}" as="t" hint-placeholder-count="6">
+            <div style="display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 5px; border: 1px solid {{t.border}}; background: {{t.bg}};">
+              <span style="width: 13px; height: 13px; border-radius: 3px; border: 1px solid {{t.box}}; background: {{t.fill}}; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
+                <sc-if value="{{t.on}}" hint-placeholder-val="{{ true }}">
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#0b0e11" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
+                </sc-if>
+              </span>
+              <span style="font-size: 12.5px; color: {{t.fg}};">{{t.label}}</span>
+              <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4a545e;">{{t.count}}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e; margin-top: 6px;">Media</div>
+        <div style="display: flex; gap: 6px;">
+          <sc-for list="{{media}}" as="m" hint-placeholder-count="4">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 6px 11px; border-radius: 4px; border: 1px solid {{m.border}}; background: {{m.bg}}; color: {{m.fg}};">{{m.label}}</span>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- content type is per-source, and pretending otherwise is the trap -->
+  <div style="border: 1px solid #1f262d; border-radius: 6px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e;">Content type is per source</div>
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">
+      <sc-for list="{{perSource}}" as="p" hint-placeholder-count="4">
+        <div style="border: 1px solid #1f262d; border-radius: 5px; padding: 10px 11px; display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8d9aa6;">{{p.source}}</span>
+          <span style="font-size: 12px; color: #d5dde4; line-height: 1.5;">{{p.kinds}}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size: 12px; color: #5d6874; line-height: 1.6;">
+      A Reddit save can be a comment; a GitHub star never is. The menu shows only the kinds
+      present in your library, so an empty option is never offered — the counts come from the
+      same group-by that feeds the source row.
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#e4a33c","options":["#e4a33c","#5fd1c0","#8fa0ff","#e07a5f"],"section":"Theme"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#e4a33c';
+    const on  = { bg: '#1e2329', border: '#2e373f', fg: '#e6ebef' };
+    const off = { bg: 'transparent', border: '#1f262d', fg: '#8d9aa6' };
+    return {
+      accent,
+      chips: [
+        { key: 'source',  value: 'x',     bg: '#1e2329', border: '#2e373f', fg: '#e6ebef' },
+        { key: 'type',    value: 'video', bg: '#1e2329', border: '#2e373f', fg: '#e6ebef' },
+        { key: 'author',  value: '@bryllim_', bg: '#1e2329', border: '#2e373f', fg: '#e6ebef' },
+      ],
+      groups: [
+        { label: 'Source',       hint: '4',    bg: 'transparent', fg: '#8d9aa6' },
+        { label: 'Content type', hint: '5',    bg: '#171d23',     fg: '#e6ebef' },
+        { label: 'Media',        hint: '3',    bg: 'transparent', fg: '#8d9aa6' },
+        { label: 'Author',       hint: '874',  bg: 'transparent', fg: '#8d9aa6' },
+        { label: 'Saved',        hint: 'date', bg: 'transparent', fg: '#8d9aa6' },
+      ],
+      types: [
+        { label: 'Post',    count: '1041', on: false, ...off, box: '#2a333b', fill: 'transparent' },
+        { label: 'Video',   count: '557',  on: true,  ...on,  box: accent,    fill: accent },
+        { label: 'Article', count: '286',  on: false, ...off, box: '#2a333b', fill: 'transparent' },
+        { label: 'Comment', count: '0',    on: false, ...off, box: '#2a333b', fill: 'transparent' },
+        { label: 'Repo',    count: '0',    on: false, ...off, box: '#2a333b', fill: 'transparent' },
+        { label: 'Thread',  count: '51',   on: false, ...off, box: '#2a333b', fill: 'transparent' },
+      ],
+      media: [
+        { label: 'has media', ...on },
+        { label: 'image',     ...off },
+        { label: 'video',     ...off },
+        { label: 'no media',  ...off },
+      ],
+      perSource: [
+        { source: 'x',      kinds: 'post · video · article · thread' },
+        { source: 'reddit', kinds: 'post · comment · article' },
+        { source: 'tiktok', kinds: 'video' },
+        { source: 'github', kinds: 'repo' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

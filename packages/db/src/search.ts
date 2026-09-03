@@ -59,6 +59,10 @@ export interface SearchOptions {
 
 export interface SearchHit {
   id: string;
+  authorAvatar?: string | null;
+  thumbKey?: string | null;
+  thumbKind?: string | null;
+  mediaCount?: number;
   url: string;
   author: string | null;
   authorName: string | null;
@@ -236,12 +240,68 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
   };
 }
 
+/**
+ * Archived items are out of the library unless you ask for them. The flag is
+ * the whole point of Archive being a flag: the row is still there for search
+ * to find when you go looking for it deliberately.
+ */
+function archiveClause(archived: boolean | undefined) {
+  if (archived === true) return sql`and i.archived_at is not null`;
+  return sql`and i.archived_at is null`;
+}
+
+function mediaClause(media: string | undefined) {
+  if (media === "none") return sql`and not exists (select 1 from media m where m.item_id = i.id)`;
+  if (media === "any") return sql`and exists (select 1 from media m where m.item_id = i.id)`;
+  if (media === "image")
+    return sql`and exists (select 1 from media m where m.item_id = i.id and m.kind = 'image')`;
+  if (media === "video")
+    return sql`and exists (select 1 from media m where m.item_id = i.id and m.kind = 'video_poster')`;
+  return sql``;
+}
+
+/**
+ * Content type is derived, not stored.
+ *
+ * It is a different question per source — a Reddit save can be a comment and a
+ * GitHub star never is — so it is computed from what each source actually
+ * recorded rather than flattened into a column that would need backfilling
+ * every time a source is added.
+ */
+function typeClause(type: string | undefined) {
+  switch (type) {
+    case "video":
+      return sql`and exists (select 1 from media m where m.item_id = i.id and m.kind = 'video_poster')`;
+    case "article":
+      return sql`and json_array_length(coalesce(json_extract(i.raw, '$.links'), '[]')) > 0`;
+    case "comment":
+      return sql`and json_extract(i.raw, '$.isComment') = 1`;
+    case "repo":
+      return sql`and i.kind = 'repo'`;
+    case "thread":
+      return sql`and json_extract(i.raw, '$.inReplyToStatusId') is not null`;
+    case "post":
+      return sql`and i.kind = 'post'
+                 and not exists (select 1 from media m
+                                  where m.item_id = i.id and m.kind = 'video_poster')`;
+    default:
+      return sql``;
+  }
+}
+
 export interface ListOptions {
   /** The save_order of the last item on the previous page. */
   cursor?: number;
   source?: string;
   author?: string;
   limit?: number;
+  /** "any" | "image" | "video" | "none" */
+  media?: string;
+  /** post | video | article | comment | repo | thread */
+  contentType?: string;
+  tag?: string;
+  /** Archived items are excluded unless asked for. */
+  archived?: boolean;
 }
 
 /**
@@ -254,19 +314,43 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
   const limit = Math.min(opts.limit ?? 50, 200);
   const rows = await db.all<SearchHit & { saveOrder: number | null }>(sql`
     select i.id, i.url, i.author_handle as author, i.author_name as authorName,
+           i.author_avatar as authorAvatar,
            i.title, i.posted_at as postedAt, i.saved_at as savedAt,
            i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
-           substr(coalesce(i.body, ''), 1, 300) as excerpt, 0 as score
+           substr(coalesce(i.body, ''), 1, 300) as excerpt, 0 as score,
+           -- One representative thumbnail per card. A stored key only, so the
+           -- grid never falls back to hot-linking the platform.
+           (select m.stored_key from media m
+             where m.item_id = i.id and m.stored_key is not null limit 1) as thumbKey,
+           (select m.kind from media m
+             where m.item_id = i.id and m.stored_key is not null limit 1) as thumbKind,
+           (select count(*) from media m where m.item_id = i.id) as mediaCount,
+           i.metrics as metricsJson
     from items i
     where (${opts.source ?? null} is null or i.source = ${opts.source ?? null})
       and (${opts.author ?? null} is null or i.author_handle = ${opts.author ?? null})
       and (${opts.cursor ?? null} is null or i.save_order < ${opts.cursor ?? null})
+      and (${opts.tag ?? null} is null or exists (
+            select 1 from item_tags it join tags t on t.id = it.tag_id
+             where it.item_id = i.id and t.label = ${opts.tag ?? null}))
+      ${archiveClause(opts.archived)}
+      ${mediaClause(opts.media)}
+      ${typeClause(opts.contentType)}
     order by i.save_order desc nulls last, i.saved_at desc
     limit ${limit + 1}
   `);
 
   const hasMore = rows.length > limit;
-  const page = hasMore ? rows.slice(0, limit) : rows;
+  const page = (hasMore ? rows.slice(0, limit) : rows).map((row) => {
+    const { metricsJson, ...rest } = row as typeof row & { metricsJson?: string };
+    let metrics: Record<string, number> = {};
+    try {
+      metrics = JSON.parse(metricsJson ?? "{}") as Record<string, number>;
+    } catch {
+      /* metrics are decoration; never fail a row for them */
+    }
+    return { ...rest, metrics };
+  });
   return { items: page, nextCursor: hasMore ? (page.at(-1)?.saveOrder ?? null) : null };
 }
 
@@ -277,11 +361,17 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
  * list — which is how a sidebar ends up disagreeing with the page beside it.
  */
 export async function libraryStats(db: AnansiDb) {
-  const [totals] = await db.all<{ items: number; authors: number }>(sql`
-    select count(*) as items, count(distinct author_handle) as authors from items
+  // Archived items are excluded from the headline count, because the grid
+  // excludes them: a sidebar that counts what the page does not show is a
+  // sidebar you stop trusting.
+  const [totals] = await db.all<{ items: number; authors: number; archived: number }>(sql`
+    select sum(case when archived_at is null then 1 else 0 end) as items,
+           count(distinct case when archived_at is null then author_handle end) as authors,
+           sum(case when archived_at is null then 0 else 1 end) as archived
+    from items
   `);
   const bySource = await db.all<{ source: string; n: number }>(sql`
-    select source, count(*) as n from items group by source
+    select source, count(*) as n from items where archived_at is null group by source
   `);
   const media = await db.all<{ total: number; stored: number }>(sql`
     select count(*) as total,
@@ -291,6 +381,7 @@ export async function libraryStats(db: AnansiDb) {
   return {
     items: totals?.items ?? 0,
     authors: totals?.authors ?? 0,
+    archived: totals?.archived ?? 0,
     bySource: Object.fromEntries(bySource.map((r) => [r.source, r.n])) as Record<string, number>,
     media: media[0] ?? { total: 0, stored: 0 },
   };

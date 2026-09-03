@@ -22,6 +22,7 @@ const ingestToken = process.env.INGEST_TOKEN;
 const mcpToken = process.env.MCP_TOKEN;
 
 const db = openLocalDb(dbPath) as unknown as AnansiDb;
+const media = { dir: process.env.ANANSI_MEDIA_DIR ?? "data/media" };
 
 /**
  * A stale server on this port answers with whatever code it was started
@@ -50,7 +51,7 @@ try {
         pathname === "/mcp"
           ? await handleMcp({ db, token: mcpToken }, request)
           : pathname.startsWith("/api/")
-            ? await handleApi({ db, ingestToken }, request)
+            ? await handleApi({ db, media, ingestToken }, request)
             : new Response("anansi local: /api/* and /mcp", { status: 404 });
 
       for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);

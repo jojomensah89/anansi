@@ -3,14 +3,20 @@ import {
   creators,
   findByAuthor,
   getItem,
+  disabledSources,
   libraryStats,
   listItems,
+  listTags,
+  setArchived,
+  setSourceEnabled,
+  tagItems,
   sourceHealth,
   recentSaves,
   searchItems,
   upsertItems,
 } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
+import { readMedia, type MediaSource } from "./media.ts";
 import {
   parseBookmarksPage,
   parseItemList,
@@ -50,6 +56,7 @@ const num = (value: string | null, fallback?: number) => {
 
 export interface ApiEnv {
   db: AnansiDb;
+  media?: MediaSource;
   /** Shared secret for /api/ingest. Absent means ingest is closed. */
   ingestToken?: string;
 }
@@ -59,12 +66,23 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
   const path = url.pathname.replace(/\/+$/, "");
   const q = url.searchParams;
 
+  // Served from our own copy, never hot-linked: a deleted post still renders,
+  // and no request from the library tells the platform what you are reading.
+  const mediaMatch = path.match(/^\/api\/media\/(.+)$/);
+  if (request.method === "GET" && mediaMatch) {
+    return readMedia(env.media ?? {}, decodeURIComponent(mediaMatch[1]!));
+  }
+
   if (request.method === "GET" && path === "/api/items") {
     return json(
       await listItems(env.db, {
         cursor: num(q.get("cursor")),
         source: q.get("source") ?? undefined,
         author: q.get("author") ?? undefined,
+        media: q.get("media") ?? undefined,
+        contentType: q.get("type") ?? undefined,
+        tag: q.get("tag") ?? undefined,
+        archived: q.get("archived") === "1",
         limit: num(q.get("limit"), 50),
       }),
     );
@@ -100,8 +118,41 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
     return json({ results: await findByAuthor(env.db, handle, num(q.get("limit"), 20)) });
   }
 
+  if (request.method === "GET" && path === "/api/tags") {
+    return json({ tags: await listTags(env.db) });
+  }
+
+  /**
+   * Bulk actions, set-shaped on purpose: selecting forty cards and issuing
+   * forty round trips is how a bulk action becomes slow enough to abandon.
+   */
+  if (request.method === "POST" && path === "/api/items/archive") {
+    const body = (await request.json().catch(() => ({}))) as { ids?: string[]; archived?: boolean };
+    if (!Array.isArray(body.ids)) return json({ error: "expected { ids: [...] }" }, 400);
+    return json({ changed: await setArchived(env.db, body.ids, body.archived !== false) });
+  }
+
+  if (request.method === "POST" && path === "/api/items/tag") {
+    const body = (await request.json().catch(() => ({}))) as { ids?: string[]; label?: string };
+    if (!Array.isArray(body.ids) || !body.label) {
+      return json({ error: "expected { ids: [...], label }" }, 400);
+    }
+    return json({ tagged: await tagItems(env.db, body.ids, body.label) });
+  }
+
   if (request.method === "GET" && path === "/api/sources") {
-    return json({ sources: await sourceHealth(env.db) });
+    const [health, off] = await Promise.all([sourceHealth(env.db), disabledSources(env.db)]);
+    return json({
+      sources: health.map((s) => ({ ...s, enabled: !off.includes(s.source) })),
+      disabled: off,
+    });
+  }
+
+  const toggleMatch = path.match(/^\/api\/sources\/([\w-]+)$/);
+  if (request.method === "POST" && toggleMatch) {
+    const body = (await request.json().catch(() => ({}))) as { enabled?: boolean };
+    await setSourceEnabled(env.db, toggleMatch[1]!, body.enabled !== false);
+    return json({ source: toggleMatch[1], enabled: body.enabled !== false });
   }
 
   if (request.method === "GET" && path === "/api/creators") {
@@ -124,11 +175,10 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
    * It doubles as a kill switch: set enabled false and every install stops.
    */
   if (request.method === "GET" && path === "/api/extension/config") {
-    return json({
-      version: 1,
-      enabled: true,
-      ingest: new URL("/api/ingest", url.origin).toString(),
-      sources: [
+    // A switched-off source is simply absent from the config, so the
+    // extension stops capturing it on its next run without an update.
+    const off = new Set(await disabledSources(env.db));
+    const all = [
         {
           // Paged: the extension can walk the whole history itself.
           mode: "page",
@@ -178,7 +228,12 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
             "/api/user/favorite/item_list",
           ],
         },
-      ],
+    ];
+    return json({
+      version: 1,
+      enabled: true,
+      ingest: new URL("/api/ingest", url.origin).toString(),
+      sources: all.filter((s) => !off.has(s.source)),
     });
   }
 
