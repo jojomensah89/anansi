@@ -22,7 +22,13 @@ const ingestToken = process.env.INGEST_TOKEN;
 const mcpToken = process.env.MCP_TOKEN;
 
 const db = openLocalDb(dbPath) as unknown as AnansiDb;
-const media = { dir: process.env.ANANSI_MEDIA_DIR ?? "data/media" };
+const mediaDir = process.env.ANANSI_MEDIA_DIR ?? "data/media";
+const media = {
+  dir: mediaDir,
+  put: async (key: string, bytes: ArrayBuffer) => {
+    await Bun.write(`${mediaDir}/${key}`, bytes);
+  },
+};
 
 /**
  * A stale server on this port answers with whatever code it was started

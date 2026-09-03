@@ -56,6 +56,7 @@ const ALARM = "anansi-sync";
 
 let cached: { at: number; config: RemoteConfig } | null = null;
 const savedTimers = new Map<string, number>();
+const closeWhenDone = new Map<string, number>();
 
 async function settings(): Promise<Settings | null> {
   const stored = await browser.storage.local.get(["server", "token", "syncEvery"]);
@@ -135,6 +136,13 @@ async function upload(source: string, raw: unknown): Promise<void> {
   }
 }
 
+/** Where to open a tab when there isn't one, per source. */
+const ENTRY_URLS: Record<string, string> = {
+  x: "https://x.com/i/bookmarks",
+  reddit: "https://www.reddit.com/user/me/saved/",
+  tiktok: "https://www.tiktok.com/",
+};
+
 const HOST_PATTERNS: Record<string, string[]> = {
   x: ["https://x.com/*", "https://twitter.com/*"],
   reddit: ["https://www.reddit.com/*", "https://old.reddit.com/*", "https://reddit.com/*"],
@@ -149,12 +157,43 @@ async function findTab(source: string) {
 }
 
 /**
- * Capture runs in a tab you already have open.
+ * Open a tab for a source and wait for its content scripts.
  *
- * Deliberately not from the background worker, which would mean reading your
- * cookies through the `cookies` permission and reconstructing a session the
- * page already has. That is a much broader grant for a convenience, and the
- * cost of not taking it is stated plainly: no open tab, no sync.
+ * Opened inactive, so an import does not yank you out of what you were doing,
+ * and closed again afterwards if we were the ones who opened it.
+ */
+async function openTab(source: string): Promise<{ id: number; ours: boolean } | null> {
+  const url = ENTRY_URLS[source];
+  if (!url) return null;
+  const tab = await browser.tabs.create({ url, active: false });
+  if (!tab.id) return null;
+
+  const id = tab.id;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(finish, 25_000);
+    function finish() {
+      clearTimeout(timer);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+      // document_idle scripts land a beat after "complete".
+      setTimeout(resolve, 900);
+    }
+    function onUpdated(tabId: number, info: { status?: string }) {
+      if (tabId === id && info.status === "complete") finish();
+    }
+    browser.tabs.onUpdated.addListener(onUpdated);
+  });
+
+  return { id, ours: true };
+}
+
+/**
+ * Capture runs in a browser tab, using the session it already has — never
+ * from the background worker, which would mean taking the `cookies`
+ * permission to rebuild a session the page is already holding.
+ *
+ * It no longer has to be a tab YOU opened, though. If none is open the
+ * extension opens one in the background and closes it when the run is done,
+ * so importing does not depend on you being on the site.
  */
 async function startCapture(source: string, quiet = false, live = false): Promise<void> {
   const config = await loadConfig(true);
@@ -169,19 +208,34 @@ async function startCapture(source: string, quiet = false, live = false): Promis
     return;
   }
 
-  const tab = await findTab(source);
-  if (!tab?.id) {
-    await patchStatus(source, { message: `open a logged-in ${entry.host} tab first` });
+  let target: { id: number; ours: boolean } | null = null;
+  const existing = await findTab(source);
+  if (existing?.id) target = { id: existing.id, ours: false };
+  else {
+    await patchStatus(source, { message: `opening ${entry.host}…` });
+    target = await openTab(source);
+  }
+
+  if (!target) {
+    await patchStatus(source, { message: `could not open ${entry.host}` });
     return;
   }
+  const tab = { id: target.id };
 
   if (entry.mode === "observe") {
     const armed = await talk(tab.id, { anansi: "configure", config: entry });
-    await patchStatus(source, {
-      message: armed
-        ? "watching — open your favourites and scroll to capture"
-        : `could not reach the ${entry.host} tab; reload it and try again`,
-    });
+    if (!armed) {
+      await patchStatus(source, { message: `could not reach the ${entry.host} tab` });
+      if (target.ours) await browser.tabs.remove(tab.id).catch(() => {});
+      return;
+    }
+    // Nothing to request, so the capture is a scroll: the app fetches its own
+    // item lists as the page grows, and those are what get kept.
+    await patchStatus(source, { pages: 0, uploaded: 0, failed: 0, message: "scanning…" });
+    await talk(tab.id, { anansi: "scan", config: entry });
+    if (target.ours) {
+      setTimeout(() => void browser.tabs.remove(tab.id).catch(() => {}), 90_000);
+    }
     return;
   }
 
@@ -204,7 +258,19 @@ async function startCapture(source: string, quiet = false, live = false): Promis
     await patchStatus(source, {
       message: `could not reach the ${entry.host} tab; reload it and try again`,
     });
+    if (target.ours) await browser.tabs.remove(tab.id).catch(() => {});
     return;
+  }
+
+  // Close a tab we opened once the run reports in, or after a ceiling.
+  if (target.ours) {
+    closeWhenDone.set(source, tab.id);
+    setTimeout(() => {
+      if (closeWhenDone.get(source) === tab.id) {
+        closeWhenDone.delete(source);
+        void browser.tabs.remove(tab.id).catch(() => {});
+      }
+    }, 180_000);
   }
 
   /**
@@ -329,7 +395,12 @@ export default defineBackground(() => {
           break;
         }
 
-        case "done":
+        case "done": {
+          const tabId = closeWhenDone.get(source);
+          if (tabId !== undefined) {
+            closeWhenDone.delete(source);
+            void browser.tabs.remove(tabId).catch(() => {});
+          }
           await patchStatus(source, {
             lastRun: Date.now(),
             pages: Number(msg.pages ?? 0),
@@ -337,6 +408,16 @@ export default defineBackground(() => {
             message: Number(msg.items ?? 0) === 0 ? "run returned zero items" : null,
           });
           break;
+        }
+
+        case "scanned": {
+          const current = await readStatus(source);
+          await patchStatus(source, {
+            lastRun: Date.now(),
+            message: current.items > 0 ? null : "nothing loaded — open your Favourites tab",
+          });
+          break;
+        }
 
         case "error":
           await patchStatus(source, { message: String(msg.message ?? "unknown error") });

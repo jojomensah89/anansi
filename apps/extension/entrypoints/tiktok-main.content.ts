@@ -17,6 +17,7 @@
 
 type Outbound =
   | { anansi: "observed"; source: "tiktok"; operation: string; raw: unknown; items: number }
+  | { anansi: "scanned"; source: "tiktok" }
   | { anansi: "error"; source: "tiktok"; message: string };
 
 export default defineContentScript({
@@ -28,6 +29,7 @@ export default defineContentScript({
     const send = (msg: Outbound) => window.postMessage(msg, window.location.origin);
 
     let watched: string[] = [];
+    let scanning = false;
     const matchUrl = (url: string) => watched.find((fragment) => url.includes(fragment));
 
     /** Only pass on a payload that actually carries items. */
@@ -87,12 +89,30 @@ export default defineContentScript({
       if (msg?.anansi === "configure" && msg.config?.source === "tiktok") {
         watched = msg.config.watchUrls ?? [];
       }
-      if (msg?.anansi === "backfill" && msg.config?.source === "tiktok") {
-        send({
-          anansi: "error",
-          source: "tiktok",
-          message: "TikTok has no history endpoint — open your Favourites and scroll; saves are captured as they load.",
-        });
+      /**
+       * The scan.
+       *
+       * There is no request to make, so capture is a scroll: TikTok fetches
+       * its own item lists as the page grows, and the fetch patch above keeps
+       * what comes back. Scrolling on your behalf is the whole import.
+       *
+       * It stops when the page stops growing twice in a row, which is what
+       * "no more to load" looks like from out here.
+       */
+      if ((msg?.anansi === "scan" || msg?.anansi === "backfill") && msg.config?.source === "tiktok") {
+        if (scanning) return;
+        scanning = true;
+        void (async () => {
+          let stalled = 0;
+          for (let step = 0; step < 60 && stalled < 3; step++) {
+            const before = document.body.scrollHeight;
+            window.scrollTo({ top: before, behavior: "auto" });
+            await new Promise((r) => setTimeout(r, 1200));
+            stalled = document.body.scrollHeight > before ? 0 : stalled + 1;
+          }
+          scanning = false;
+          send({ anansi: "scanned", source: "tiktok" });
+        })();
       }
     });
   },

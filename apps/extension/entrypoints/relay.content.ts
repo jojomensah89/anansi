@@ -28,13 +28,13 @@ export default defineContentScript({
       if (event.source !== window || event.origin !== window.location.origin) return;
       const msg = event.data as { anansi?: string } | undefined;
       // Commands travel the other way; do not echo them back.
-      if (!msg?.anansi || msg.anansi === "configure" || msg.anansi === "backfill") return;
+      if (!msg?.anansi || ["configure", "backfill", "scan"].includes(msg.anansi)) return;
       void browser.runtime.sendMessage(msg).catch(() => {});
     });
 
     browser.runtime.onMessage.addListener((message: unknown) => {
       const msg = message as { anansi?: string } | undefined;
-      if (msg?.anansi === "configure" || msg?.anansi === "backfill") {
+      if (msg?.anansi && ["configure", "backfill", "scan"].includes(msg.anansi)) {
         window.postMessage(msg, window.location.origin);
       }
       return undefined;

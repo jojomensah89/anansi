@@ -16,7 +16,7 @@ import {
   upsertItems,
 } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
-import { readMedia, type MediaSource } from "./media.ts";
+import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import {
   parseBookmarksPage,
   parseItemList,
@@ -318,6 +318,20 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
 
     // Idempotent on (source, external_id), so a retried POST is free.
     const result = await upsertItems(env.db, items as never[]);
+
+    /**
+     * Thumbnails, without making the upload wait for them.
+     *
+     * Anything ingested this way used to keep a media row with a null
+     * stored_key forever, because only the CLI ever fetched images — so a
+     * TikTok save rendered as a caption with no video. Fire-and-forget and
+     * bounded: an ingest must not block on image fetches, and a burst of
+     * saves must not become an unbounded download.
+     */
+    if (env.media && result.mediaRows > 0) {
+      void fetchPendingMedia(env.db, env.media).catch(() => {});
+    }
+
     return json({ ...result, parsed: items.length });
   }
 
