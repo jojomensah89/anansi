@@ -174,9 +174,11 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   }
 
   if (entry.mode === "observe") {
-    await browser.tabs.sendMessage(tab.id, { anansi: "configure", config: entry }).catch(() => {});
+    const armed = await talk(tab.id, { anansi: "configure", config: entry });
     await patchStatus(source, {
-      message: "watching — open your favourites and scroll to capture",
+      message: armed
+        ? "watching — open your favourites and scroll to capture"
+        : `could not reach the ${entry.host} tab; reload it and try again`,
     });
     return;
   }
@@ -192,8 +194,72 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   if (!quiet) {
     await patchStatus(source, { pages: 0, items: 0, uploaded: 0, failed: 0, message: "running…" });
   }
-  await browser.tabs.sendMessage(tab.id, { anansi: "configure", config: job }).catch(() => {});
-  await browser.tabs.sendMessage(tab.id, { anansi: "backfill", config: job }).catch(() => {});
+  const reached =
+    (await talk(tab.id, { anansi: "configure", config: job })) &&
+    (await talk(tab.id, { anansi: "backfill", config: job }));
+
+  if (!reached) {
+    await patchStatus(source, {
+      message: `could not reach the ${entry.host} tab; reload it and try again`,
+    });
+    return;
+  }
+
+  /**
+   * A watchdog, because the failure this replaces was silence. If nothing has
+   * arrived by now the run is not coming, and saying so beats "running…"
+   * forever.
+   */
+  const startedAt = Date.now();
+  setTimeout(() => {
+    void (async () => {
+      const now = await readStatus(source);
+      if (now.message === "running…" && (now.lastRun ?? 0) < startedAt && now.pages === 0) {
+        await patchStatus(source, {
+          message: `no response from the ${entry.host} tab — is it signed in?`,
+        });
+      }
+    })();
+  }, 25_000);
+}
+
+/**
+ * Talk to a tab, reloading it once if nobody is listening.
+ *
+ * Content scripts are injected when a page loads, so a tab that was already
+ * open when the extension was installed or reloaded has none — and
+ * `sendMessage` rejects with "Receiving end does not exist". Swallowing that
+ * is what left the popup saying "running…" forever with no way to tell why.
+ *
+ * A reload puts the script in place. It is the user's own tab, on the site
+ * they just asked to import from, in response to their click.
+ */
+async function talk(tabId: number, message: unknown): Promise<boolean> {
+  try {
+    await browser.tabs.sendMessage(tabId, message);
+    return true;
+  } catch {
+    // Nobody home. Reload and wait for the script to land.
+  }
+
+  try {
+    await browser.tabs.reload(tabId);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("tab reload timed out")), 20_000);
+      const onUpdated = (id: number, info: { status?: string }) => {
+        if (id !== tabId || info.status !== "complete") return;
+        clearTimeout(timer);
+        browser.tabs.onUpdated.removeListener(onUpdated);
+        // document_idle scripts land a beat after "complete".
+        setTimeout(resolve, 600);
+      };
+      browser.tabs.onUpdated.addListener(onUpdated);
+    });
+    await browser.tabs.sendMessage(tabId, message);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function rescheduleAlarm(): Promise<void> {

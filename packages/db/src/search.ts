@@ -479,10 +479,17 @@ export async function libraryStats(db: AnansiDb) {
   // Archived items are excluded from the headline count, because the grid
   // excludes them: a sidebar that counts what the page does not show is a
   // sidebar you stop trusting.
-  const [totals] = await db.all<{ items: number; authors: number; archived: number }>(sql`
+  const [totals] = await db.all<{
+    items: number; authors: number; archived: number; today: number;
+  }>(sql`
     select sum(case when archived_at is null then 1 else 0 end) as items,
            count(distinct case when archived_at is null then author_handle end) as authors,
-           sum(case when archived_at is null then 0 else 1 end) as archived
+           sum(case when archived_at is null then 0 else 1 end) as archived,
+           -- Captured live today. Backfilled items all share one import
+           -- stamp, so counting those would call the whole library "today".
+           sum(case when saved_at_exact = 1
+                     and saved_at >= ${Math.floor(new Date().setHours(0, 0, 0, 0) / 1000)}
+                    then 1 else 0 end) as today
     from items
   `);
   const bySource = await db.all<{ source: string; n: number }>(sql`
@@ -497,6 +504,7 @@ export async function libraryStats(db: AnansiDb) {
     items: totals?.items ?? 0,
     authors: totals?.authors ?? 0,
     archived: totals?.archived ?? 0,
+    today: totals?.today ?? 0,
     bySource: Object.fromEntries(bySource.map((r) => [r.source, r.n])) as Record<string, number>,
     media: media[0] ?? { total: 0, stored: 0 },
   };
