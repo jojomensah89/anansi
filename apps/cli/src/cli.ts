@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { createXAdapter } from "./adapters/x/adapter.ts";
 import { createGithubAdapter } from "./adapters/github/adapter.ts";
+import { createRedditAdapter } from "./adapters/reddit/adapter.ts";
 import type { CaptureAdapter } from "./adapters/types.ts";
 import { envCookies, envSession } from "./session/env.ts";
 import { reparse, runImport, summarize } from "./core/import.ts";
@@ -10,7 +11,7 @@ import { recordRun, startIngestServer } from "./ingest/server.ts";
 import { reparse as reparseFromDisk } from "./core/import.ts";
 import { loadCheckpoint } from "./store/checkpoint.ts";
 import { dataPath, ensureDir, readJsonl } from "./store/files.ts";
-import type { NormalizedItem } from "@anansi/sources";
+import type { NormalizedItem, Source } from "@anansi/sources";
 import { countItems, creators, findByAuthor, recentSaves, searchItems } from "@anansi/db";
 import { HIT, OFF, parseSince, printHits } from "./format.ts";
 import { createAnansiServer } from "@anansi/mcp";
@@ -113,6 +114,7 @@ function report(summary: ImportSummary): void {
 function adapterFor(source: string, capture = false): CaptureAdapter | undefined {
   if (source === "x") return createXAdapter(capture ? { session: envSession } : {});
   if (source === "github") return createGithubAdapter();
+  if (source === "reddit") return createRedditAdapter({ cookie: process.env.REDDIT_COOKIE });
   return undefined;
 }
 
@@ -370,7 +372,7 @@ async function main(): Promise<void> {
 
   const source = target ?? "x";
   if (!adapterFor(source)) {
-    console.error(`Unknown source: ${source}. Try "x" or "github".`);
+    console.error(`Unknown source: ${source}. Try "x", "github" or "reddit".`);
     process.exitCode = 1;
     return;
   }
@@ -388,7 +390,7 @@ async function main(): Promise<void> {
     return report(await reparse(adapter));
   }
 
-  const checkpoint = await loadCheckpoint(source as "x" | "github");
+  const checkpoint = await loadCheckpoint(source as Source);
   console.log(`  importing ${source}${values.incremental ? " (incremental)" : ""}…`);
   report(
     await runImport(adapter, {

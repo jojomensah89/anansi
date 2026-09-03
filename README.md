@@ -209,6 +209,32 @@ it. Everything raw is actually consulted for — links, thread siblings, media �
 is extracted instead. `apps/cli/scripts/mcp-smoke.ts` drives the whole thing
 over real stdio and fails if any of that regresses.
 
+### Sources
+
+Four, in two capture modes:
+
+| source | mode | how |
+|---|---|---|
+| X bookmarks | page | GraphQL timeline, queryId resolved at runtime |
+| GitHub stars | page | documented API, scoped PAT, real `starred_at` |
+| Reddit saves | page | `/user/me/saved.json`, plain REST, session cookie |
+| TikTok favourites | **observe** | no history endpoint exists |
+
+**page** means the extension can walk your whole history itself. **observe**
+means the platform publishes no history endpoint and signs its own web
+requests (`X-Bogus`, `msToken`), so they cannot be forged from outside the app.
+Capture happens by watching what the app fetches while you scroll. There is no
+import button for TikTok, and saying so beats letting an empty card read as
+broken.
+
+Reddit is the easy middle: a documented JSON endpoint that answers to a normal
+logged-in session, so no app registration, no OAuth dance, no client secret.
+
+The TikTok parser is **written but unverified** against a real payload. That is
+survivable because of where it runs — the extension uploads raw and the server
+parses, so a wrong guess is a server-side fix, and `/api/ingest` returns 422 on
+a payload that parses to zero, so it surfaces in the popup immediately.
+
 ### GitHub, and what it proved
 
 Adding a second source touched **no file** in `core/`, `packages/db`,

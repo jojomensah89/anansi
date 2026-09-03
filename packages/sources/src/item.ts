@@ -6,7 +6,7 @@
  * doesn't fit here survives in `raw`.
  */
 
-export type Source = "x" | "github";
+export type Source = "x" | "github" | "reddit" | "tiktok";
 export type Kind = "post" | "repo";
 
 export interface MediaRef {

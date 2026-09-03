@@ -11,7 +11,12 @@ import {
   upsertItems,
 } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
-import { parseBookmarksPage, parseStarredPage } from "@anansi/sources";
+import {
+  parseBookmarksPage,
+  parseItemList,
+  parseSavedListing,
+  parseStarredPage,
+} from "@anansi/sources";
 
 /**
  * The HTTP surface, as plain Request -> Response.
@@ -125,6 +130,9 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
       ingest: new URL("/api/ingest", url.origin).toString(),
       sources: [
         {
+          // Paged: the extension can walk the whole history itself.
+          mode: "page",
+          source: "x",
           host: "x.com",
           operation: "Bookmarks",
           variables: { count: 100, includePromotedContent: false },
@@ -134,6 +142,41 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
           // Watched for real-time capture; unlike the timeline query this
           // operation IS in the main bundle.
           watchOperations: ["CreateBookmark", "DeleteBookmark"],
+        },
+        {
+          // Also paged, but plain REST rather than GraphQL — no queryId to
+          // resolve, and a documented cursor. `me` resolves from the session.
+          mode: "page",
+          source: "reddit",
+          host: "reddit.com",
+          url: "https://www.reddit.com/user/me/saved.json?limit=100&raw_json=1",
+          cursorParam: "after",
+          cursorPath: "data.after",
+          pageLimit: 40,
+          watchUrls: ["/api/save", "/api/unsave"],
+        },
+        {
+          /**
+           * Observe-only, and the reason that mode exists.
+           *
+           * TikTok publishes no saved/favorites API, and its web requests are
+           * signed (X-Bogus, msToken) so they cannot be forged from outside
+           * the app. What can be done is watch what the app fetches while you
+           * scroll your own Favorites — no forging, no signature work, and the
+           * payload is the same one the page renders from.
+           *
+           * The cost is honest and worth stating in the UI: there is no
+           * "import everything" for TikTok. Your history arrives as you scroll
+           * it once, and everything after that is captured live.
+           */
+          mode: "observe",
+          source: "tiktok",
+          host: "tiktok.com",
+          watchUrls: [
+            "/api/user/collect/item_list",
+            "/api/favorite/item_list",
+            "/api/user/favorite/item_list",
+          ],
         },
       ],
     });
@@ -171,13 +214,15 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
     let items: unknown[];
     if (body.raw !== undefined) {
       const importedAt = Math.floor(Date.now() / 1000);
-      if (body.source === "github") {
-        items = parseStarredPage(body.raw, { importedAt });
-      } else if (body.source === "x" || body.source === undefined) {
-        items = parseBookmarksPage(body.raw, { importedAt }).items;
-      } else {
-        return json({ error: `unknown source: ${body.source}` }, 400);
-      }
+      const parsers: Record<string, (raw: unknown) => unknown[]> = {
+        x: (r) => parseBookmarksPage(r, { importedAt }).items,
+        github: (r) => parseStarredPage(r, { importedAt }),
+        reddit: (r) => parseSavedListing(r, { importedAt }),
+        tiktok: (r) => parseItemList(r, { importedAt }),
+      };
+      const parse = parsers[body.source ?? "x"];
+      if (!parse) return json({ error: `unknown source: ${body.source}` }, 400);
+      items = parse(body.raw);
       // A payload that parses to nothing is the failure the whole project
       // exists to notice, so say so rather than reporting a cheerful zero.
       if (items.length === 0) {

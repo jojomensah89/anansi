@@ -29,7 +29,7 @@ function Library() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [total, setTotal] = useState(0);
-  const [counts, setCounts] = useState({ x: 0, github: 0 });
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [authors, setAuthors] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -44,7 +44,7 @@ function Library() {
       .then((s) => {
         setTotal(s.items);
         setAuthors(s.authors);
-        setCounts({ x: s.bySource.x ?? 0, github: s.bySource.github ?? 0 });
+        setCounts(s.bySource);
       })
       .catch(() => {});
     return () => controller.abort();

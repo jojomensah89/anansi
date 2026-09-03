@@ -179,7 +179,11 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
             postedAt: sql`excluded.posted_at`,
             savedAt: sql`excluded.saved_at`,
             savedAtExact: sql`excluded.saved_at_exact`,
-            saveOrder: sql`excluded.save_order`,
+            // Keep the first key we ever saw. X's sortIndex is stable per
+            // item, and sources without a real one (Reddit gives no saved-at)
+            // derive theirs from listing position at import time — which must
+            // not be renumbered by a later re-import.
+            saveOrder: sql`coalesce(${items.saveOrder}, excluded.save_order)`,
             metrics: sql`excluded.metrics`,
             raw: sql`excluded.raw`,
           },

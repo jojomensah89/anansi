@@ -12,16 +12,18 @@ export const Route = createFileRoute("/sources")({ component: Sources });
  * right: a library is an ongoing process, not a pile, and the question you
  * actually have is "is this still working?" — which no grid of cards answers.
  *
- * Borrowed in shape only. [removed] lists seven platforms because breadth is its
- * pitch; the spec's non-goals rule that out, so this lists the two that exist
- * and says plainly what the others are. And it leads with capture health
- * rather than a connect button, because the failure this project most needs
- * to notice is an import that quietly returns nothing.
+ * It leads with capture health rather than a connect button, because the
+ * failure this project most needs to notice is an import that quietly returns
+ * nothing.
+ *
+ * Sources with nothing in them yet are still listed, with their capture mode
+ * stated. "Observe" is not a lesser version of "page" — it is the only thing
+ * possible for a platform that publishes no history endpoint, and saying so
+ * is better than letting an empty card read as broken.
  */
-const PLANNED = [
-  { name: "Reddit", note: "saved posts and comments" },
-  { name: "Instagram", note: "saved posts and reels" },
-  { name: "TikTok", note: "favourites" },
+const PLANNED: { name: string; source: string; mode: "page" | "observe"; note: string }[] = [
+  { name: "Reddit", source: "reddit", mode: "page", note: "saved posts and comments" },
+  { name: "TikTok", source: "tiktok", mode: "observe", note: "favourites" },
 ];
 
 function ago(unix: number | null): string {
@@ -36,18 +38,13 @@ function ago(unix: number | null): string {
 
 function Sources() {
   const [sources, setSources] = useState<SourceRow[]>([]);
-  const [stats, setStats] = useState({ items: 0, authors: 0, x: 0, github: 0 });
+  const [stats, setStats] = useState<{ items: number; authors: number; bySource: Record<string, number> }>({ items: 0, authors: 0, bySource: {} });
 
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([api.stats(controller.signal), api.sources(controller.signal)])
       .then(([s, r]) => {
-        setStats({
-          items: s.items,
-          authors: s.authors,
-          x: s.bySource.x ?? 0,
-          github: s.bySource.github ?? 0,
-        });
+        setStats({ items: s.items, authors: s.authors, bySource: s.bySource });
         setSources(r.sources);
       })
       .catch(() => {});
@@ -56,7 +53,7 @@ function Sources() {
 
   return (
     <div style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
-      <Rail total={stats.items} authors={stats.authors} bySource={{ x: stats.x, github: stats.github }} />
+      <Rail total={stats.items} authors={stats.authors} bySource={stats.bySource} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div
@@ -111,11 +108,15 @@ function Sources() {
                         color: "var(--text-dim)",
                       }}
                     >
-                      {s.source === "github" ? "gh" : "x"}
+                      {({ github: "gh", reddit: "r/", tiktok: "tt" } as Record<string, string>)[s.source] ?? "x"}
                     </span>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                        {s.source === "github" ? "GitHub stars" : "X bookmarks"}
+                        {({
+                          github: "GitHub stars",
+                          reddit: "Reddit saves",
+                          tiktok: "TikTok favourites",
+                        } as Record<string, string>)[s.source] ?? "X bookmarks"}
                       </span>
                       <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
                         {s.items.toLocaleString()} items · {s.authors} authors
@@ -191,7 +192,7 @@ function Sources() {
               color: "var(--fainter)",
             }}
           >
-            Not planned for v1
+            Connected, nothing captured yet
           </div>
           <div
             style={{
@@ -200,7 +201,7 @@ function Sources() {
               gap: 10,
             }}
           >
-            {PLANNED.map((p) => (
+            {PLANNED.filter((p) => !sources.some((s) => s.source === p.source)).map((p) => (
               <div
                 key={p.name}
                 style={{
@@ -209,7 +210,22 @@ function Sources() {
                   padding: "12px 14px",
                 }}
               >
-                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{p.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12.5, color: "var(--muted)" }}>{p.name}</span>
+                  <span
+                    className="mono"
+                    style={{
+                      marginLeft: "auto",
+                      fontSize: 9.5,
+                      padding: "1px 5px",
+                      borderRadius: 3,
+                      border: "1px solid var(--edge)",
+                      color: p.mode === "observe" ? "var(--accent)" : "var(--faint)",
+                    }}
+                  >
+                    {p.mode}
+                  </span>
+                </div>
                 <div className="mono" style={{ fontSize: 10, color: "var(--fainter)", marginTop: 3 }}>
                   {p.note}
                 </div>
@@ -225,9 +241,13 @@ function Sources() {
               maxWidth: 620,
             }}
           >
-            Each of these is a plausible afternoon that becomes a week. Two sources that answer
-            questions well beat seven that half-work — the point of this library is what your
-            agent can do with it, not how many logos it has.
+            <strong style={{ color: "var(--muted)", fontWeight: 500 }}>page</strong> means the
+            extension can walk your whole history itself.{" "}
+            <strong style={{ color: "var(--accent)", fontWeight: 500 }}>observe</strong> means the
+            platform publishes no history endpoint and signs its own requests, so capture happens
+            by watching what the app fetches while you scroll. TikTok is the second kind: there is
+            no import button for it, and your history arrives the first time you scroll your
+            favourites.
           </div>
         </div>
       </div>

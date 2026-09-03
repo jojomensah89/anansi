@@ -9,7 +9,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 export interface RailProps {
   total: number;
   authors: number;
-  bySource: { x: number; github: number };
+  bySource: Record<string, number>;
 }
 
 function Web() {
@@ -85,7 +85,14 @@ export function Rail({ total, authors, bySource }: RailProps) {
         Sources
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "0 8px" }}>
-        {([["x", "Bookmarks", bySource.x], ["gh", "Stars", bySource.github]] as const).map(([tag, label, n]) => (
+        {(
+          [
+            ["x", "Bookmarks", bySource.x ?? 0],
+            ["gh", "Stars", bySource.github ?? 0],
+            ["r/", "Reddit", bySource.reddit ?? 0],
+            ["tt", "TikTok", bySource.tiktok ?? 0],
+          ] as const
+        ).map(([tag, label, n]) => (
           <div key={tag} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 8px", borderRadius: 5, fontSize: 12.5, color: "var(--text-dim)" }}>
             <span className="mono" style={{ fontSize: 10, width: 22, height: 16, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--edge-strong)", borderRadius: 3, color: "var(--muted)" }}>
               {tag}

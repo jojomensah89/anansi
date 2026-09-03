@@ -6,6 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./x": "./src/x/parse.ts",
-    "./github": "./src/github/parse.ts"
+    "./github": "./src/github/parse.ts",
+    "./reddit": "./src/reddit/parse.ts",
+    "./tiktok": "./src/tiktok/parse.ts"
   }
 }

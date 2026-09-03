@@ -16,7 +16,7 @@ export const Route = createFileRoute("/creators")({ component: Creators });
  */
 function Creators() {
   const [creators, setCreators] = useState<Creator[]>([]);
-  const [stats, setStats] = useState({ items: 0, authors: 0, x: 0, github: 0 });
+  const [stats, setStats] = useState<{ items: number; authors: number; bySource: Record<string, number> }>({ items: 0, authors: 0, bySource: {} });
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [posts, setPosts] = useState<ItemRow[]>([]);
@@ -26,12 +26,7 @@ function Creators() {
     const controller = new AbortController();
     Promise.all([api.stats(controller.signal), api.creators(1000, controller.signal)])
       .then(([s, c]) => {
-        setStats({
-          items: s.items,
-          authors: s.authors,
-          x: s.bySource.x ?? 0,
-          github: s.bySource.github ?? 0,
-        });
+        setStats({ items: s.items, authors: s.authors, bySource: s.bySource });
         setCreators(c.creators);
       })
       .catch(() => {});
@@ -65,7 +60,7 @@ function Creators() {
 
   return (
     <div style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
-      <Rail total={stats.items} authors={stats.authors} bySource={{ x: stats.x, github: stats.github }} />
+      <Rail total={stats.items} authors={stats.authors} bySource={stats.bySource} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div
