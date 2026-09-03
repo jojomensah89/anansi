@@ -197,9 +197,21 @@ describe("handleApi", () => {
 
   test("extension config is readable without a token, and names the ingest url", async () => {
     const body = await readJson(get("/api/extension/config"));
+    expect(body.version).toBe(1);
     expect(body.enabled).toBe(true);
     expect(body.ingest).toEndWith("/api/ingest");
     expect(body.sources[0].operation).toBe("Bookmarks");
+    expect(body.ingestProtocolVersion).toBe(2);
+    expect(body.features.captureV2).toEqual({
+      x: false,
+      reddit: false,
+      tiktok: false,
+      web: false,
+    });
+    expect(body.features.chromeBookmarks).toBe(false);
+
+    const tiktok = body.sources.find((source: { source: string }) => source.source === "tiktok");
+    expect(tiktok.watchUrls).toEqual(["/api/user/collect/item_list"]);
   });
 
   test("ingest parses a raw payload server-side", async () => {

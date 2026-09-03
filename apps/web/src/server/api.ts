@@ -223,17 +223,25 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
           mode: "observe",
           source: "tiktok",
           host: "tiktok.com",
-          watchUrls: [
-            "/api/user/collect/item_list",
-            "/api/favorite/item_list",
-            "/api/user/favorite/item_list",
-          ],
+          watchUrls: ["/api/user/collect/item_list"],
         },
     ];
     return json({
       version: 1,
       enabled: true,
       ingest: new URL("/api/ingest", url.origin).toString(),
+      ingestProtocolVersion: 2,
+      features: {
+        // New delivery remains off until each source has its durable queue
+        // and adapter enabled. A capture must never be sent by both paths.
+        captureV2: {
+          x: false,
+          reddit: false,
+          tiktok: false,
+          web: false,
+        },
+        chromeBookmarks: false,
+      },
       sources: all.filter((s) => !off.has(s.source)),
     });
   }

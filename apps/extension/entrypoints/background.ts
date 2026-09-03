@@ -10,6 +10,12 @@
  * trap.
  */
 
+import {
+  cachedForServer,
+  normalizeServerOrigin,
+  type ServerCache,
+} from "../lib/config-cache.ts";
+
 export interface Settings {
   server: string;
   token: string;
@@ -37,6 +43,11 @@ export interface RemoteConfig {
   version: number;
   enabled: boolean;
   ingest: string;
+  ingestProtocolVersion?: number;
+  features?: {
+    captureV2?: Partial<Record<"x" | "reddit" | "tiktok" | "web", boolean>>;
+    chromeBookmarks?: boolean;
+  };
   sources: SourceConfig[];
 }
 
@@ -54,13 +65,13 @@ export type Status = Record<string, SourceStatus>;
 const CONFIG_TTL_MS = 60 * 60 * 1000;
 const ALARM = "anansi-sync";
 
-let cached: { at: number; config: RemoteConfig } | null = null;
+let cached: ServerCache<RemoteConfig> | null = null;
 const savedTimers = new Map<string, number>();
 const closeWhenDone = new Map<string, number>();
 
 async function settings(): Promise<Settings | null> {
   const stored = await browser.storage.local.get(["server", "token", "syncEvery"]);
-  const server = String(stored.server ?? "").replace(/\/+$/, "");
+  const server = normalizeServerOrigin(String(stored.server ?? ""));
   const token = String(stored.token ?? "");
   const syncEvery = Number(stored.syncEvery ?? 0);
   return server && token ? { server, token, syncEvery } : null;
@@ -83,9 +94,11 @@ async function readStatus(source: string): Promise<SourceStatus> {
  * for it stops on the next run without anyone updating anything.
  */
 async function loadConfig(force = false): Promise<RemoteConfig | null> {
-  if (!force && cached && Date.now() - cached.at < CONFIG_TTL_MS) return cached.config;
   const s = await settings();
   if (!s) return null;
+  const now = Date.now();
+  const fresh = cachedForServer(cached, s.server, now, CONFIG_TTL_MS);
+  if (!force && fresh) return fresh;
 
   const url = `${s.server}/api/extension/config`;
   try {
@@ -96,11 +109,11 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} from ${url}`);
     const config = (await res.json()) as RemoteConfig;
     if (!Array.isArray(config.sources)) throw new Error(`unexpected config shape from ${url}`);
-    cached = { at: Date.now(), config };
+    cached = { serverOrigin: s.server, at: Date.now(), value: config };
     return config;
   } catch (err) {
     await patchStatus("_", { message: (err as Error).message });
-    return cached?.config ?? null;
+    return cachedForServer(cached, s.server, Date.now(), CONFIG_TTL_MS, true);
   }
 }
 
