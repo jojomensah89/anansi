@@ -122,9 +122,11 @@ async function upload(source: string, raw: unknown): Promise<void> {
       // 422 is the server's zero-parse alarm. It means the payload shape
       // changed, and it must be visible rather than swallowed.
       const body = await res.text().catch(() => "");
+      // A 422 carries the shape the server could not parse. Keep more of it
+      // than a normal error, because it is the whole diagnosis.
       await patchStatus(source, {
         failed: current.failed + 1,
-        message: `ingest ${res.status}: ${body.slice(0, 120)}`,
+        message: `ingest ${res.status}: ${body.slice(0, res.status === 422 ? 600 : 120)}`,
       });
     }
   } catch (err) {

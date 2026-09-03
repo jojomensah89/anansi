@@ -61,6 +61,25 @@ export interface ApiEnv {
   ingestToken?: string;
 }
 
+/**
+ * A structural sketch of an unparseable payload: keys and types only, three
+ * levels deep, never values. Enough to see that `data.children` became
+ * `data.items`, and not enough to leak anything from the payload itself.
+ */
+function describe(value: unknown, depth = 3): unknown {
+  if (value === null || value === undefined) return String(value);
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "[]" : [`array(${value.length})`, depth > 0 ? describe(value[0], depth - 1) : "…"];
+  }
+  if (typeof value !== "object") return typeof value;
+  if (depth === 0) return `{${Object.keys(value as object).slice(0, 12).join(", ")}}`;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .slice(0, 12)
+      .map(([k, v]) => [k, describe(v, depth - 1)]),
+  );
+}
+
 export async function handleApi(env: ApiEnv, request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "");
@@ -281,8 +300,15 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
       items = parse(body.raw);
       // A payload that parses to nothing is the failure the whole project
       // exists to notice, so say so rather than reporting a cheerful zero.
+      //
+      // And say what arrived. "Parsed to zero" is a dead end; the shape of
+      // what came back is the thing that identifies which assumption broke,
+      // and it is the difference between a bug report and a guess.
       if (items.length === 0) {
-        return json({ error: "payload parsed to zero items", parsed: 0 }, 422);
+        return json(
+          { error: "payload parsed to zero items", parsed: 0, shape: describe(body.raw) },
+          422,
+        );
       }
     } else if (Array.isArray(body.items)) {
       items = body.items;
