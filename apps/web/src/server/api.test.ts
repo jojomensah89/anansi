@@ -148,6 +148,53 @@ describe("handleApi", () => {
     expect(res.status).toBe(503);
   });
 
+  test("versioned ingest requires auth and a matching idempotency key", async () => {
+    const capture = {
+      schemaVersion: 1,
+      payloadType: "item_event",
+      eventId: "api-web-save-1",
+      source: "web",
+      action: "save",
+      externalId: "sha256:api-web-save-1",
+      canonicalUrl: "https://example.com/durable-bookmarks",
+      observedAt: 1_788_390_100,
+      captureMethod: "toolbar",
+      normalizedItem: {
+        source: "web",
+        externalId: "sha256:api-web-save-1",
+        url: "https://example.com/durable-bookmarks",
+        kind: "article",
+        body: "Durable bookmarks",
+        savedAt: 1_788_390_100,
+        savedAtIsExact: true,
+        metrics: {},
+        media: [],
+        links: [],
+        raw: {},
+      },
+    };
+    const send = (authorization?: string, idempotencyKey?: string) =>
+      handleApi(env, new Request("https://anansi.test/api/ingest", {
+        method: "POST",
+        headers: {
+          ...(authorization ? { authorization } : {}),
+          ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(capture),
+      }));
+
+    expect((await send()).status).toBe(401);
+    expect((await send("Bearer test-token", "wrong-event")).status).toBe(400);
+
+    const first = await send("Bearer test-token", capture.eventId);
+    const firstBody = await readJson(first);
+    const replay = await send("Bearer test-token", capture.eventId);
+    expect(first.status).toBe(200);
+    expect(firstBody).toMatchObject({ eventId: capture.eventId, outcome: "created" });
+    expect(await readJson(replay)).toEqual(firstBody);
+  });
+
   test("extension config is readable without a token, and names the ingest url", async () => {
     const body = await readJson(get("/api/extension/config"));
     expect(body.enabled).toBe(true);

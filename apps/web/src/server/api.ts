@@ -13,17 +13,11 @@ import {
   sourceHealth,
   recentSaves,
   searchItems,
-  upsertItems,
   InvalidListCursorError,
 } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
-import {
-  parseBookmarksPage,
-  parseItemList,
-  parseSavedListing,
-  parseStarredPage,
-} from "@anansi/sources";
+import { ingestCapture } from "./ingest.ts";
 
 /**
  * The HTTP surface, as plain Request -> Response.
@@ -60,25 +54,6 @@ export interface ApiEnv {
   media?: MediaSource;
   /** Shared secret for /api/ingest. Absent means ingest is closed. */
   ingestToken?: string;
-}
-
-/**
- * A structural sketch of an unparseable payload: keys and types only, three
- * levels deep, never values. Enough to see that `data.children` became
- * `data.items`, and not enough to leak anything from the payload itself.
- */
-function describe(value: unknown, depth = 3): unknown {
-  if (value === null || value === undefined) return String(value);
-  if (Array.isArray(value)) {
-    return value.length === 0 ? "[]" : [`array(${value.length})`, depth > 0 ? describe(value[0], depth - 1) : "…"];
-  }
-  if (typeof value !== "object") return typeof value;
-  if (depth === 0) return `{${Object.keys(value as object).slice(0, 12).join(", ")}}`;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .slice(0, 12)
-      .map(([k, v]) => [k, describe(v, depth - 1)]),
-  );
 }
 
 export async function handleApi(env: ApiEnv, request: Request): Promise<Response> {
@@ -273,57 +248,7 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
     const auth = request.headers.get("authorization") ?? "";
     if (auth !== `Bearer ${env.ingestToken}`) return json({ error: "unauthorized" }, 401);
 
-    let body: { items?: unknown[]; source?: string; raw?: unknown };
-    try {
-      body = (await request.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid json" }, 400);
-    }
-
-    /**
-     * Two shapes, and the raw one is the point.
-     *
-     * The extension uploads the untouched platform payload and this parses
-     * it. That is what makes shipping load-unpacked viable: when X reshapes a
-     * response you fix it here, once, and every install is repaired on its
-     * next run — whether it was installed yesterday or six months ago. The
-     * extension's version stops mattering.
-     *
-     * `{ items }` stays for callers that already hold normalized items, which
-     * is how the CLI and the tests speak.
-     */
-    let items: unknown[];
-    if (body.raw !== undefined) {
-      const importedAt = Math.floor(Date.now() / 1000);
-      const parsers: Record<string, (raw: unknown) => unknown[]> = {
-        x: (r) => parseBookmarksPage(r, { importedAt }).items,
-        github: (r) => parseStarredPage(r, { importedAt }),
-        reddit: (r) => parseSavedListing(r, { importedAt }),
-        tiktok: (r) => parseItemList(r, { importedAt }),
-      };
-      const parse = parsers[body.source ?? "x"];
-      if (!parse) return json({ error: `unknown source: ${body.source}` }, 400);
-      items = parse(body.raw);
-      // A payload that parses to nothing is the failure the whole project
-      // exists to notice, so say so rather than reporting a cheerful zero.
-      //
-      // And say what arrived. "Parsed to zero" is a dead end; the shape of
-      // what came back is the thing that identifies which assumption broke,
-      // and it is the difference between a bug report and a guess.
-      if (items.length === 0) {
-        return json(
-          { error: "payload parsed to zero items", parsed: 0, shape: describe(body.raw) },
-          422,
-        );
-      }
-    } else if (Array.isArray(body.items)) {
-      items = body.items;
-    } else {
-      return json({ error: "expected { source, raw } or { items: [...] }" }, 400);
-    }
-
-    // Idempotent on (source, external_id), so a retried POST is free.
-    const result = await upsertItems(env.db, items as never[]);
+    const ingest = await ingestCapture(env.db, request);
 
     /**
      * Thumbnails, without making the upload wait for them.
@@ -334,11 +259,11 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
      * bounded: an ingest must not block on image fetches, and a burst of
      * saves must not become an unbounded download.
      */
-    if (env.media && result.mediaRows > 0) {
+    if (env.media && ingest.syncMedia) {
       void fetchPendingMedia(env.db, env.media).catch(() => {});
     }
 
-    return json({ ...result, parsed: items.length });
+    return json(ingest.body, ingest.status);
   }
 
   return json({ error: "not found" }, 404);
