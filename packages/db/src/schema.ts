@@ -41,6 +41,16 @@ export const items = sqliteTable(
      * quietly lie about when you saved things.
      */
     savedAtExact: integer("saved_at_exact").notNull().default(0),
+    /**
+     * The timeline's own ordering key, and the only truthful answer to "what
+     * did I save most recently?" while saved_at is a backfill stamp.
+     *
+     * Stored as a JS number despite exceeding 2^53: these run ~1.7-1.9e18
+     * across 1,274 items, an average gap of 1.3e14, against a float ulp of
+     * 256 at that magnitude. Nine orders of magnitude of headroom for an
+     * ordering that never needs the exact value.
+     */
+    saveOrder: integer("save_order"),
     /** json: likes, retweets, stars */
     metrics: text("metrics").notNull().default("{}"),
     /** json: the untouched platform payload */
@@ -49,6 +59,7 @@ export const items = sqliteTable(
   (t) => [
     uniqueIndex("items_source_external").on(t.source, t.externalId),
     index("items_saved").on(t.savedAt),
+    index("items_save_order").on(t.saveOrder),
     index("items_author").on(t.authorHandle),
   ],
 );

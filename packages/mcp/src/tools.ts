@@ -79,8 +79,9 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
         "Keyword search across everything the user has saved from X and GitHub. " +
         "Returns excerpts with a source URL, ranked by BM25 (negative; lower is " +
         "better). Use this first, then get_item to pull one result into context. " +
-        "Note: non-Latin text (Japanese, Chinese) is poorly tokenized and may not " +
-        "match on substrings.",
+        "Matching is keyword-based with English stemming and no fuzziness, so a " +
+        "misspelling returns nothing rather than a near miss — if a query comes " +
+        "back empty, try a likely correction or a broader single term.",
       inputSchema: {
         query: z.string().describe("Words to search for. A trailing * does prefix matching."),
         source: z.enum(["x", "github"]).optional(),
@@ -121,7 +122,11 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
     "recent_saves",
     {
       title: "Recently saved",
-      description: "What the user saved most recently. Answers 'what did I save this week?'",
+      description:
+        "What the user saved most recently, in true bookmark order. Note that " +
+        "saved_at is the import time for backfilled items, not the moment they " +
+        "were saved — saved_at_is_exact says which. The ordering is correct " +
+        "regardless; the timestamps are not yet.",
       inputSchema: {
         source: z.enum(["x", "github"]).optional(),
         limit: z.number().int().min(1).max(50).default(20),

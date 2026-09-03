@@ -20,6 +20,7 @@ export interface IngestItem {
   postedAt?: number;
   savedAt: number;
   savedAtIsExact: boolean;
+  saveOrder?: number;
   metrics: Record<string, number>;
   media: { kind: string; originUrl: string; width?: number; height?: number }[];
   links: string[];
@@ -104,6 +105,7 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
       postedAt: item.postedAt ?? null,
       savedAt,
       savedAtExact: item.savedAtIsExact || was?.savedAtExact === 1 ? 1 : 0,
+      saveOrder: item.saveOrder ?? null,
       metrics: JSON.stringify(item.metrics),
       // links ride inside raw rather than earning a column: the spec's schema
       // has none, and they are read only when one item is opened. Folded in
@@ -151,6 +153,7 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
             postedAt: sql`excluded.posted_at`,
             savedAt: sql`excluded.saved_at`,
             savedAtExact: sql`excluded.saved_at_exact`,
+            saveOrder: sql`excluded.save_order`,
             metrics: sql`excluded.metrics`,
             raw: sql`excluded.raw`,
           },

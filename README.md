@@ -157,19 +157,19 @@ thrown query inside an MCP call looks to an agent like the library is broken.
 `search.test.ts` holds those inputs; a trailing `*` and an explicit "phrase"
 are kept as real affordances.
 
-**It does not work for CJK.** `unicode61` splits on non-alphanumeric
-characters, and Japanese has no spaces, so a whole run becomes one token:
+**CJK is tokenized badly, but it matters less than it looks.** `unicode61`
+splits on non-alphanumeric characters and Japanese has no spaces, so a whole
+run becomes one token — `デザイン` returns 0 hits against a post that plainly
+contains it. `scripts/probe-cjk.ts` measures it.
 
-```
-query            FTS  LIKE
-デザイン           0     1   <- invisible to search
-UIデザイン          0     1   <- invisible to search
-```
+The corpus makes this small, though: 36 items contain CJK, and 34 of them also
+carry a Latin word of four characters or more (`GitHub`, `Codex`, a URL), which
+is enough to find them. **Two items** are genuinely unreachable. Not worth a
+second index.
 
-That is 496 items, 39% of this library. `scripts/probe-cjk.ts` measures it.
-The fix is either a second FTS table using the `trigram` tokenizer, or the
-vectors the spec defers to phase 2 — this is the "keyword search visibly
-fails" trigger it describes, arriving earlier than expected.
+What is missing is fuzziness, not tokenization. A misspelling returns nothing,
+because BM25 has no notion of near. `search_memory` says so in its description
+so the agent retries rather than concluding the library is empty.
 
 ## The MCP server
 

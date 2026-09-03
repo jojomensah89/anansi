@@ -122,7 +122,10 @@ export async function recentSaves(db: AnansiDb, source?: string, limit = 20) {
            substr(coalesce(i.body, ''), 1, 300) as excerpt, 0 as score
     from items i
     where (${source ?? null} is null or i.source = ${source ?? null})
-    order by i.saved_at desc, i.posted_at desc
+    -- save_order is the timeline's own key and the only truthful recency we
+    -- have while saved_at is a backfill stamp. Items without one (GitHub
+    -- stars, which have a real starred_at) fall through to saved_at.
+    order by i.save_order desc nulls last, i.saved_at desc, i.posted_at desc
     limit ${limit}
   `);
 }

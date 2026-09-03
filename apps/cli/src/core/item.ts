@@ -37,6 +37,8 @@ export interface NormalizedItem {
    */
   savedAt: number;
   savedAtIsExact: boolean;
+  /** The source timeline's ordering key, where it has one. */
+  saveOrder?: number;
   metrics: Record<string, number>;
   media: MediaRef[];
   links: string[];

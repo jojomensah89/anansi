@@ -218,6 +218,7 @@ function normalizeTweet(
     // real ordering key and it is preserved in raw; this stamp is the import.
     savedAt: ctx.importedAt,
     savedAtIsExact: false,
+    saveOrder: sortIndex ? Number(sortIndex) : undefined,
     metrics: metricsOf(subject),
     media: [...mediaOf(subject), ...(quoted ? mediaOf(quoted) : [])],
     links,
