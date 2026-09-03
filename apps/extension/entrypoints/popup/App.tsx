@@ -38,6 +38,7 @@ const S = {
   text: "#e6ebef",
   muted: "#8d9aa6",
   faint: "#5d6874",
+  faintest: "#414a53",
   accent: "#e4a33c",
   ok: "#4fbf8b",
   warn: "#e0714f",
@@ -245,6 +246,20 @@ export default function App() {
     return void start(s.source);
   };
 
+  /**
+   * The one line that answers "is anything outstanding".
+   *
+   * Counted from the same persisted records the rows are, so it cannot
+   * disagree with them.
+   */
+  const running = rows.filter((s) => viewOf(s).state === "running").length;
+  const summary =
+    running > 0
+      ? `${running} running`
+      : outbox.total > 0
+        ? `${outbox.total} in the outbox`
+        : "nothing waiting";
+
   // Whatever last went wrong, with anything credential-shaped removed.
   const diagnostics = Object.entries(status)
     .filter(([, st]) => !!st.message)
@@ -380,6 +395,21 @@ export default function App() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {configured && (
+        <div style={{ display: "flex", alignItems: "center", padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
+          <span className="mono" style={{ fontSize: 10.5, color: S.faintest, fontFamily: S.mono }}>
+            {summary}
+          </span>
+          <button
+            type="button"
+            onClick={() => void browser.tabs.create({ url: base })}
+            style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", font: "inherit", fontSize: 11.5, color: S.accent }}
+          >
+            Open library ↗
+          </button>
         </div>
       )}
 

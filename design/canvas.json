@@ -1,38 +1,31 @@
 {
   "artboards": [
-    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Library" },
-    { "file": "Filters.dc.html", "x": 1560, "y": 0, "w": 1000, "h": 700, "title": "Filters" },
-    { "file": "Select.dc.html", "x": 0, "y": 1080, "w": 1000, "h": 760, "title": "Select mode" },
-    { "file": "Sources.dc.html", "x": 1120, "y": 1080, "w": 1000, "h": 720, "title": "Source toggles" }
+    { "file": "Main.dc.html", "title": "Library — filters", "x": 0, "y": 0, "w": 1440, "h": 900 },
+    { "file": "Creators.dc.html", "title": "Creators", "x": 1560, "y": 0, "w": 1440, "h": 900 },
+    { "file": "Sources.dc.html", "title": "Sources", "x": 0, "y": 1080, "w": 1440, "h": 900 },
+    { "file": "Popup.dc.html", "title": "Extension popup — three states", "x": 1560, "y": 1080, "w": 1176, "h": 700 }
   ],
   "annotations": [
     {
-      "id": "note-cards",
-      "x": 0,
-      "y": -150,
-      "w": 520,
-      "text": "Real thumbnails and avatars from the 1,274-item library, not placeholders.\n\nThe blocker: nothing serves media today. 1,246 webp thumbs sit in data/media/ with no route to reach them, which is why the built grid is text-only. Needs GET /api/media/:id over the existing MediaSink — local dir now, R2 binding in the Worker."
+      "id": "filter-grammar",
+      "x": -330,
+      "y": 40,
+      "w": 270,
+      "text": "The chip is a sentence: field · operator · value.\n\n\"Platform is any of 2 selected\" survives being read at a glance in a way \"x, tiktok\" does not — and the operator is what makes multi-select legible at all.\n\nToday's bar has five single-value menus. This replaces them with one grammar that Library, Creators and any future page can all speak."
     },
     {
-      "id": "note-filters",
+      "id": "capture-health",
+      "x": -330,
+      "y": 1120,
+      "w": 270,
+      "text": "Sources leads with health, not a connect button.\n\nThe split bar is the thing no competitor shows: captured live vs backfilled. A backfilled item's saved-at is an import stamp, and pretending otherwise is how a library quietly lies about its own history.\n\nStale and sign-in states say what to do, on the card, not in a toast that has already gone."
+    },
+    {
+      "id": "popup-states",
       "x": 1560,
-      "y": -150,
-      "w": 460,
-      "text": "Content type is per-source and cannot be one flat list: a Reddit save can be a comment, a GitHub star never is.\n\nThe menu offers only kinds actually present, with counts from the same group-by that feeds the source row — so an empty option is never shown."
-    },
-    {
-      "id": "note-select",
-      "x": 0,
-      "y": 1900,
-      "w": 520,
-      "text": "Tag writes to the tags and item_tags tables, which exist in the schema and have never been written to.\n\nArchive needs one new column, items.archived_at. Deliberately a flag and not a delete: a re-import would resurrect a deleted row on the next run."
-    },
-    {
-      "id": "note-sources",
-      "x": 1120,
-      "y": 1860,
-      "w": 460,
-      "text": "The switch writes `enabled` on the source row /api/extension/config already serves, so the extension stops capturing that platform on its next run. Same kill switch, per source.\n\nOff dims the card rather than hiding it — an absent source reads as broken."
+      "y": 1850,
+      "w": 320,
+      "text": "Three of the ten states the popup can now be in, drawn from durable run and outbox records.\n\nNote what is missing: any wording that could outlive the fact behind it. A row cannot say \"saved\" while its outbox still holds something, and the details line is redacted before it reaches the screen."
     }
   ],
   "launch": { "view": "canvas" }

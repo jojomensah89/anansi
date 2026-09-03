@@ -1,207 +1,652 @@
-import { useEffect, useState } from "react";
-import { api, type ItemQuery } from "../lib/api.ts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, type Creator, type ItemQuery } from "../lib/api.ts";
+import { SourceMark } from "./sourcemark.tsx";
 
 /**
  * The filter bar.
  *
- * Applied filters live as chips in the existing 42px row rather than behind a
- * menu, because a filter you cannot see is a filter you forget is on — and an
- * unexplained empty grid reads as a broken library.
+ * A chip is a sentence: field · operator · value. That grammar is doing real
+ * work — "Platform is any of 2 selected" survives being read at a glance in a
+ * way a bare list of values does not, and without the operator a multi-value
+ * chip is ambiguous about whether it widens or narrows the result.
  *
- * Content type is offered per source. A Reddit save can be a comment and a
- * GitHub star never is, so a flat list would offer options that can only ever
- * return nothing.
+ * Values within one field are ORed and different fields are ANDed, which is
+ * the only combination that behaves the way the sentence reads. The
+ * alternative — ANDing two platforms — can only ever return nothing, and an
+ * empty grid is indistinguishable from a broken library.
+ *
+ * Applied filters live in the bar rather than behind a menu, because a filter
+ * you cannot see is a filter you forget is on.
+ *
+ * Content type is offered per selected platform. A Reddit save can be a
+ * comment and a GitHub star never is, so a flat list would offer options that
+ * can only ever return nothing.
  */
-export type Filters = Pick<ItemQuery, "source" | "author" | "media" | "type" | "tag" | "archived">;
+export type Filters = Pick<
+  ItemQuery,
+  "source" | "author" | "media" | "type" | "tag" | "archived"
+>;
 
-const MEDIA = [
-  { value: "any", label: "has media" },
-  { value: "image", label: "image" },
-  { value: "video", label: "video" },
-  { value: "none", label: "no media" },
+interface Option {
+  value: string;
+  label: string;
+  count?: number;
+  /** Rendered before the label: a platform mark, or an author's avatar. */
+  icon?: React.ReactNode;
+}
+
+type FieldKey = "source" | "type" | "media" | "author" | "tag";
+
+interface Field {
+  key: FieldKey;
+  label: string;
+  /** Single-value fields read "is"; multi-value ones read "is any of". */
+  multi: boolean;
+  icon: React.ReactNode;
+  options: Option[];
+  searchable?: string;
+}
+
+const SOURCES: { value: string; label: string }[] = [
+  { value: "x", label: "X" },
+  { value: "github", label: "GitHub" },
+  { value: "reddit", label: "Reddit" },
+  { value: "tiktok", label: "TikTok" },
 ];
 
-const TYPES_BY_SOURCE: Record<string, { value: string; label: string }[]> = {
+const MEDIA: Option[] = [
+  { value: "any", label: "Has media" },
+  { value: "image", label: "Image" },
+  { value: "video", label: "Video" },
+  { value: "none", label: "No media" },
+];
+
+const TYPES_BY_SOURCE: Record<string, Option[]> = {
   x: [
-    { value: "post", label: "post" },
-    { value: "video", label: "video" },
-    { value: "article", label: "article" },
-    { value: "thread", label: "thread reply" },
+    { value: "post", label: "Post" },
+    { value: "video", label: "Video" },
+    { value: "article", label: "Article" },
+    { value: "thread", label: "Thread reply" },
   ],
   reddit: [
-    { value: "post", label: "post" },
-    { value: "comment", label: "comment" },
-    { value: "article", label: "article" },
+    { value: "post", label: "Post" },
+    { value: "comment", label: "Comment" },
+    { value: "article", label: "Article" },
   ],
-  tiktok: [{ value: "video", label: "video" }],
-  github: [{ value: "repo", label: "repo" }],
+  tiktok: [{ value: "video", label: "Video" }],
+  github: [{ value: "repo", label: "Repo" }],
 };
 
-function allTypes(sources: string[]) {
+function allTypes(sources: string[]): Option[] {
   const seen = new Map<string, string>();
   for (const s of sources) for (const t of TYPES_BY_SOURCE[s] ?? []) seen.set(t.value, t.label);
   return [...seen].map(([value, label]) => ({ value, label }));
 }
 
+const list = (v: string[] | undefined): string[] => v ?? [];
+
+/* ------------------------------------------------------------- icons --- */
+
+function Icon({ d, fill }: { d: string; fill?: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill={fill ? "currentColor" : "none"}
+      stroke={fill ? "none" : "currentColor"}
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={d} />
+    </svg>
+  );
+}
+
+const FIELD_ICONS: Record<FieldKey, React.ReactNode> = {
+  source: <Icon d="M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM8 8h8" />,
+  type: <Icon d="M4 6h16M4 12h16M4 18h10" />,
+  media: <Icon d="M4 5h16v14H4zM4 15l4.5-4.5 3.5 3.5 3-3L20 16" />,
+  author: <Icon d="M12 4.6a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8zM5.5 20c0-3.3 2.9-5.6 6.5-5.6s6.5 2.3 6.5 5.6" />,
+  tag: <Icon d="M4 4h7l9 9-7 7-9-9zM8 8h.01" />,
+};
+
+/* --------------------------------------------------------------- bar --- */
+
 export function FilterBar({
   filters,
   onChange,
   bySource,
-  loaded,
   matched,
 }: {
   filters: Filters;
   onChange: (next: Filters) => void;
   bySource: Record<string, number>;
-  loaded: number;
   matched: number | null;
 }) {
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<FieldKey | null>(null);
+  const [adding, setAdding] = useState(false);
   const [tags, setTags] = useState<{ label: string; count: number }[]>([]);
+  const [creators, setCreators] = useState<Creator[]>([]);
+  const barRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.tags().then((t) => setTags(t.tags.filter((x) => x.count > 0))).catch(() => {});
+    const controller = new AbortController();
+    api.tags(controller.signal).then((t) => setTags(t.tags.filter((x) => x.count > 0))).catch(() => {});
+    api.creators(300, controller.signal).then((c) => setCreators(c.creators)).catch(() => {});
+    return () => controller.abort();
   }, []);
 
+  // A click anywhere else closes the menu, which is what every other menu on
+  // the machine does.
+  useEffect(() => {
+    if (!open && !adding) return;
+    const onDown = (event: MouseEvent) => {
+      if (!barRef.current?.contains(event.target as Node)) {
+        setOpen(null);
+        setAdding(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(null);
+        setAdding(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, adding]);
+
   const present = Object.keys(bySource).filter((s) => (bySource[s] ?? 0) > 0);
-  const types = allTypes(filters.source ? [filters.source] : present.length ? present : ["x"]);
-  const set = (patch: Filters) => {
-    onChange({ ...filters, ...patch });
-    setOpen(null);
+
+  const fields: Field[] = useMemo(() => {
+    const scope = list(filters.source).length > 0 ? list(filters.source) : present;
+    const all: Field[] = [
+      {
+        key: "source",
+        label: "Platform",
+        multi: true,
+        icon: FIELD_ICONS.source,
+        options: SOURCES.filter((s) => (bySource[s.value] ?? 0) > 0).map((s) => ({
+          value: s.value,
+          label: s.label,
+          count: bySource[s.value],
+          icon: <SourceMark source={s.value} size={13} />,
+        })),
+      },
+      {
+        key: "author",
+        label: "Author",
+        multi: true,
+        icon: FIELD_ICONS.author,
+        searchable: "Search authors…",
+        options: creators
+          .filter((c) => c.authorHandle)
+          .map((c) => ({
+            value: c.authorHandle as string,
+            label: c.authorName ?? (c.authorHandle as string),
+            count: c.saves,
+            icon: <Avatar creator={c} />,
+          })),
+      },
+      {
+        key: "type",
+        label: "Content type",
+        multi: true,
+        icon: FIELD_ICONS.type,
+        options: allTypes(scope),
+      },
+      {
+        key: "media",
+        label: "Media",
+        multi: false,
+        icon: FIELD_ICONS.media,
+        options: MEDIA,
+      },
+      {
+        key: "tag",
+        label: "Tag",
+        multi: true,
+        icon: FIELD_ICONS.tag,
+        searchable: tags.length > 8 ? "Search tags…" : undefined,
+        options: tags.map((t) => ({ value: t.label, label: t.label, count: t.count })),
+      },
+    ];
+    return all.filter((f) => f.options.length > 0);
+  }, [bySource, creators, tags, filters.source, present]);
+
+  const valuesOf = (key: FieldKey): string[] => {
+    if (key === "media") return filters.media ? [filters.media] : [];
+    return list(filters[key] as string[] | undefined);
   };
 
-  const chips: { key: string; value: string; clear: Filters }[] = [];
-  if (filters.source) chips.push({ key: "source", value: filters.source, clear: { source: undefined } });
-  if (filters.type) chips.push({ key: "type", value: filters.type, clear: { type: undefined } });
-  if (filters.media) chips.push({ key: "media", value: filters.media, clear: { media: undefined } });
-  if (filters.author) chips.push({ key: "author", value: `@${filters.author}`, clear: { author: undefined } });
-  if (filters.tag) chips.push({ key: "tag", value: filters.tag, clear: { tag: undefined } });
-  if (filters.archived) chips.push({ key: "", value: "archived", clear: { archived: undefined } });
+  const setValues = (key: FieldKey, values: string[]) => {
+    if (key === "media") {
+      onChange({ ...filters, media: values[0] });
+      return;
+    }
+    onChange({ ...filters, [key]: values.length > 0 ? values : undefined });
+  };
+
+  const toggleValue = (field: Field, value: string) => {
+    const current = valuesOf(field.key);
+    if (!field.multi) {
+      setValues(field.key, current[0] === value ? [] : [value]);
+      setOpen(null);
+      return;
+    }
+    setValues(
+      field.key,
+      current.includes(value) ? current.filter((v) => v !== value) : [...current, value],
+    );
+  };
+
+  const applied = fields.filter((f) => valuesOf(f.key).length > 0);
+  const unapplied = fields.filter((f) => valuesOf(f.key).length === 0);
+  const anyApplied = applied.length > 0 || filters.archived === true;
+
+  const clearAll = () =>
+    onChange({
+      source: undefined,
+      author: undefined,
+      media: undefined,
+      type: undefined,
+      tag: undefined,
+      archived: undefined,
+    });
 
   return (
-    <div style={{ position: "relative", flexShrink: 0, borderBottom: "1px solid var(--line)" }}>
-      <div style={{ height: 42, display: "flex", alignItems: "center", gap: 7, padding: "0 20px" }}>
-        <Menu label="Source" active={!!filters.source} onClick={() => setOpen(open === "source" ? null : "source")} />
-        <Menu label="Type" active={!!filters.type} onClick={() => setOpen(open === "type" ? null : "type")} />
-        <Menu label="Media" active={!!filters.media} onClick={() => setOpen(open === "media" ? null : "media")} />
-        {tags.length > 0 && (
-          <Menu label="Tag" active={!!filters.tag} onClick={() => setOpen(open === "tag" ? null : "tag")} />
-        )}
-        <Menu
-          label="Archived"
-          active={!!filters.archived}
-          onClick={() => set({ archived: filters.archived ? undefined : true })}
-        />
+    <div ref={barRef} style={{ position: "relative", flexShrink: 0, borderBottom: "1px solid var(--line)" }}>
+      <div
+        style={{
+          minHeight: 42,
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 7,
+          padding: "8px 20px",
+        }}
+      >
+        {applied.map((field) => (
+          <Chip
+            key={field.key}
+            field={field}
+            values={valuesOf(field.key)}
+            open={open === field.key}
+            onOpen={() => {
+              setAdding(false);
+              setOpen(open === field.key ? null : field.key);
+            }}
+            onClear={() => {
+              setValues(field.key, []);
+              setOpen(null);
+            }}
+          />
+        ))}
 
-        <span style={{ width: 1, height: 18, background: "var(--line)", margin: "0 3px" }} />
-
-        {chips.map((c) => (
+        {filters.archived === true && (
           <button
-            key={c.key + c.value}
             type="button"
-            onClick={() => set(c.clear)}
-            className="mono"
+            onClick={() => onChange({ ...filters, archived: undefined })}
+            style={{ ...chipShell, borderColor: "var(--edge-strong)" }}
+          >
+            <span style={{ ...chipField, color: "var(--muted)" }}>
+              <Icon d="M4 7h16v13H4zM4 4h16v3H4zM10 12h4" />
+              Archived
+            </span>
+            <ChipX />
+          </button>
+        )}
+
+        {unapplied.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(null);
+              setAdding((a) => !a);
+            }}
+            aria-expanded={adding}
             style={{
               display: "flex",
               alignItems: "center",
               gap: 6,
-              fontSize: 11,
-              padding: "4px 8px",
-              borderRadius: 4,
-              background: "#1e2329",
-              border: "1px solid #2e373f",
-              color: "var(--text)",
+              height: 26,
+              padding: "0 9px",
+              borderRadius: 5,
+              border: "1px dashed var(--edge-strong)",
+              background: "transparent",
+              color: adding ? "var(--text)" : "var(--muted)",
+              fontSize: 11.5,
+              cursor: "pointer",
+              font: "inherit",
+            }}
+          >
+            <Icon d="M12 5v14M5 12h14" />
+            Add filter
+          </button>
+        )}
+
+        {anyApplied && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="mono"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              height: 26,
+              padding: "0 8px",
+              border: "none",
+              background: "transparent",
+              color: "var(--faint)",
+              fontSize: 10.5,
               cursor: "pointer",
               fontFamily: "var(--mono)",
             }}
           >
-            {c.key && <span style={{ color: "var(--faint)" }}>{c.key}</span>}
-            {c.value}
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
-        ))}
-
-        {chips.length > 0 && (
-          <button
-            type="button"
-            onClick={() => onChange({})}
-            className="mono"
-            style={{ fontSize: 10.5, color: "var(--fainter)", background: "none", border: "none", cursor: "pointer", fontFamily: "var(--mono)" }}
-          >
-            clear all
+            <Icon d="M4 5h16l-6.5 7.5V19l-3 2v-8.5z" />
+            Clear all
           </button>
         )}
 
-        <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: chips.length ? "var(--accent)" : "var(--fainter)" }}>
-          {loaded} loaded{matched !== null && chips.length ? ` · ${matched} match` : ""}
-        </span>
+        {matched !== null && (
+          <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faintest)" }}>
+            {matched.toLocaleString()} match{matched === 1 ? "" : "es"}
+          </span>
+        )}
       </div>
 
+      {/* the field picker */}
+      {adding && (
+        <Menu style={{ left: 20, width: 210 }}>
+          {unapplied.map((field) => (
+            <MenuRow
+              key={field.key}
+              onClick={() => {
+                setAdding(false);
+                setOpen(field.key);
+              }}
+            >
+              <span style={{ color: "var(--faint)", display: "flex" }}>{field.icon}</span>
+              <span style={{ fontSize: 12.5 }}>{field.label}</span>
+            </MenuRow>
+          ))}
+        </Menu>
+      )}
+
+      {/* the value picker for whichever chip is open */}
       {open && (
-        <>
-          <div onClick={() => setOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
-          <div
-            style={{
-              position: "absolute",
-              top: 42,
-              left: 20,
-              zIndex: 21,
-              minWidth: 220,
-              background: "#10151a",
-              border: "1px solid var(--edge-strong)",
-              borderRadius: 7,
-              padding: 6,
-              boxShadow: "0 18px 44px -14px #000000cc",
-            }}
-          >
-            {open === "source" &&
-              present.map((s) => (
-                <Option key={s} label={s} count={bySource[s]} on={filters.source === s} onClick={() => set({ source: filters.source === s ? undefined : s, type: undefined })} />
-              ))}
-            {open === "type" &&
-              types.map((t) => (
-                <Option key={t.value} label={t.label} on={filters.type === t.value} onClick={() => set({ type: filters.type === t.value ? undefined : t.value })} />
-              ))}
-            {open === "media" &&
-              MEDIA.map((m) => (
-                <Option key={m.value} label={m.label} on={filters.media === m.value} onClick={() => set({ media: filters.media === m.value ? undefined : m.value })} />
-              ))}
-            {open === "tag" &&
-              tags.map((t) => (
-                <Option key={t.label} label={t.label} count={t.count} on={filters.tag === t.label} onClick={() => set({ tag: filters.tag === t.label ? undefined : t.label })} />
-              ))}
-          </div>
-        </>
+        <ValueMenu
+          field={fields.find((f) => f.key === open) as Field}
+          values={valuesOf(open)}
+          onToggle={toggleValue}
+          onClear={() => setValues(open, [])}
+        />
       )}
     </div>
   );
 }
 
-function Menu({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+/**
+ * One field's chip and menu, on its own.
+ *
+ * Creators filters by a single dimension, and giving it a second, differently
+ * shaped control would mean the app spoke two filter languages. This is the
+ * same chip the Library bar builds, with its own open state.
+ */
+export function FieldFilter({
+  label,
+  options,
+  values,
+  onChange,
+  searchable,
+}: {
+  label: string;
+  options: Option[];
+  values: string[];
+  onChange: (values: string[]) => void;
+  searchable?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const field: Field = {
+    key: "source",
+    label,
+    multi: true,
+    icon: FIELD_ICONS.source,
+    options,
+    searchable,
+  };
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mono"
-      style={{
-        fontSize: 11,
-        padding: "4px 9px",
-        borderRadius: 4,
-        cursor: "pointer",
-        fontFamily: "var(--mono)",
-        background: active ? "#1e2329" : "transparent",
-        color: active ? "var(--text)" : "var(--muted)",
-        border: `1px solid ${active ? "#2e373f" : "var(--line)"}`,
-      }}
-    >
-      {label}
-    </button>
+    <div ref={ref} style={{ position: "relative", display: "flex", alignItems: "center" }}>
+      {values.length > 0 ? (
+        <Chip
+          field={field}
+          values={values}
+          open={open}
+          onOpen={() => setOpen((o) => !o)}
+          onClear={() => {
+            onChange([]);
+            setOpen(false);
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            height: 26,
+            padding: "0 9px",
+            borderRadius: 5,
+            border: "1px dashed var(--edge-strong)",
+            background: "transparent",
+            color: open ? "var(--text)" : "var(--muted)",
+            fontSize: 11.5,
+            cursor: "pointer",
+            font: "inherit",
+          }}
+        >
+          {FIELD_ICONS.source}
+          {label}
+        </button>
+      )}
+
+      {open && (
+        <ValueMenu
+          field={field}
+          values={values}
+          onToggle={(_f, value) =>
+            onChange(values.includes(value) ? values.filter((v) => v !== value) : [...values, value])
+          }
+          onClear={() => onChange([])}
+        />
+      )}
+    </div>
   );
 }
 
-function Option({ label, count, on, onClick }: { label: string; count?: number; on: boolean; onClick: () => void }) {
+/* -------------------------------------------------------------- chip --- */
+
+const chipShell: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  height: 26,
+  borderRadius: 5,
+  border: "1px solid #2e373f",
+  background: "#1e2329",
+  overflow: "hidden",
+  padding: 0,
+  cursor: "pointer",
+  font: "inherit",
+  color: "var(--text)",
+};
+
+const chipField: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "0 8px",
+  fontSize: 11.5,
+  color: "var(--muted)",
+  height: "100%",
+};
+
+function ChipX() {
+  return (
+    <span
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        alignSelf: "stretch",
+        borderLeft: "1px solid #2e373f",
+        color: "var(--faint)",
+      }}
+    >
+      <Icon d="M6 6l12 12M18 6 6 18" />
+    </span>
+  );
+}
+
+function Chip({
+  field,
+  values,
+  open,
+  onOpen,
+  onClear,
+}: {
+  field: Field;
+  values: string[];
+  open: boolean;
+  onOpen: () => void;
+  onClear: () => void;
+}) {
+  const chosen = field.options.filter((o) => values.includes(o.value));
+  const icons = chosen.filter((o) => o.icon).slice(0, 3);
+  const label =
+    chosen.length === 1 ? (chosen[0]?.label ?? values[0]) : `${values.length} selected`;
+
+  return (
+    <span style={{ ...chipShell, borderColor: open ? "var(--accent)" : "#2e373f" }}>
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-expanded={open}
+        style={{ display: "flex", alignItems: "center", height: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", font: "inherit", color: "inherit" }}
+      >
+        <span style={{ ...chipField, color: open ? "var(--accent-text)" : "var(--muted)" }}>
+          {field.icon}
+          {field.label}
+        </span>
+        <span
+          className="mono"
+          style={{
+            padding: "0 7px",
+            fontSize: 10.5,
+            color: "var(--faint)",
+            borderLeft: "1px solid #2e373f",
+            borderRight: "1px solid #2e373f",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          {field.multi ? "is any of" : "is"}
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 8px", fontSize: 11.5 }}>
+          {icons.length > 0 && (
+            <span style={{ display: "flex" }}>
+              {icons.map((o, i) => (
+                <span
+                  key={o.value}
+                  style={{
+                    width: 15,
+                    height: 15,
+                    borderRadius: "50%",
+                    background: "var(--ink)",
+                    border: "1px solid #2e373f",
+                    marginLeft: i === 0 ? 0 : -5,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    color: "var(--text)",
+                  }}
+                >
+                  {o.icon}
+                </span>
+              ))}
+            </span>
+          )}
+          {label}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label={`Clear ${field.label} filter`}
+        style={{ display: "flex", padding: 0, background: "none", border: "none", cursor: "pointer", alignSelf: "stretch", color: "inherit" }}
+      >
+        <ChipX />
+      </button>
+    </span>
+  );
+}
+
+/* -------------------------------------------------------------- menu --- */
+
+function Menu({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: "100%",
+        marginTop: -3,
+        background: "var(--card)",
+        border: "1px solid var(--edge-strong)",
+        borderRadius: 7,
+        boxShadow: "0 14px 34px #00000080, 0 2px 6px #0000004d",
+        zIndex: 40,
+        overflow: "hidden",
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function MenuRow({ children, onClick, active }: { children: React.ReactNode; onClick: () => void; active?: boolean }) {
   return (
     <button
       type="button"
@@ -211,33 +656,167 @@ function Option({ label, count, on, onClick }: { label: string; count?: number; 
         alignItems: "center",
         gap: 9,
         width: "100%",
-        padding: "7px 9px",
+        padding: "6px 7px",
         borderRadius: 5,
         border: "none",
-        cursor: "pointer",
-        background: on ? "var(--raised)" : "transparent",
-        color: on ? "var(--text)" : "var(--muted)",
+        background: active ? "var(--raised)" : "transparent",
+        color: "inherit",
         font: "inherit",
-        fontSize: 12.5,
         textAlign: "left",
+        cursor: "pointer",
       }}
     >
-      <span
-        style={{
-          width: 13,
-          height: 13,
-          borderRadius: 3,
-          border: `1px solid ${on ? "var(--accent)" : "var(--edge-strong)"}`,
-          background: on ? "var(--accent)" : "transparent",
-          flexShrink: 0,
-        }}
-      />
-      {label}
-      {count !== undefined && (
-        <span className="mono" style={{ marginLeft: "auto", fontSize: 10, color: "var(--fainter)" }}>
-          {count}
-        </span>
-      )}
+      {children}
     </button>
+  );
+}
+
+function ValueMenu({
+  field,
+  values,
+  onToggle,
+  onClear,
+}: {
+  field: Field;
+  values: string[];
+  onToggle: (field: Field, value: string) => void;
+  onClear: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  useEffect(() => setQuery(""), [field.key]);
+
+  const shown = field.options.filter(
+    (o) => query === "" || o.label.toLowerCase().includes(query.toLowerCase()) || o.value.toLowerCase().includes(query.toLowerCase()),
+  );
+
+  return (
+    <Menu style={{ left: 20, width: field.searchable ? 268 : 236 }}>
+      {field.searchable && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", borderBottom: "1px solid var(--line)" }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--fainter)" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.5" />
+            <path d="m20 20-4.2-4.2" />
+          </svg>
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={field.searchable}
+            style={{
+              flex: 1,
+              border: "none",
+              background: "transparent",
+              color: "var(--text)",
+              fontSize: 12,
+              fontFamily: "var(--sans)",
+              outline: "none",
+            }}
+          />
+        </div>
+      )}
+
+      <div className="scroll" style={{ maxHeight: 244, padding: 5, display: "flex", flexDirection: "column", gap: 1 }}>
+        {shown.length === 0 && (
+          <div className="mono" style={{ padding: "10px 7px", fontSize: 10.5, color: "var(--faint)" }}>
+            nothing matches
+          </div>
+        )}
+        {shown.map((option) => {
+          const on = values.includes(option.value);
+          return (
+            <MenuRow key={option.value} active={on} onClick={() => onToggle(field, option.value)}>
+              <span
+                style={{
+                  width: 14,
+                  height: 14,
+                  flexShrink: 0,
+                  borderRadius: field.multi ? 3 : "50%",
+                  border: on ? "none" : "1px solid var(--edge-strong)",
+                  background: on ? "var(--accent)" : "transparent",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {on && (
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 12l5 5L20 6" />
+                  </svg>
+                )}
+              </span>
+              {option.icon && (
+                <span style={{ display: "flex", alignItems: "center", flexShrink: 0, color: "var(--text-dim)" }}>
+                  {option.icon}
+                </span>
+              )}
+              <span
+                style={{
+                  fontSize: 12.5,
+                  color: on ? "var(--text)" : "var(--text-dim)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {option.label}
+              </span>
+              {option.count !== undefined && (
+                <span className="mono" style={{ marginLeft: "auto", fontSize: 10, color: "var(--faint)" }}>
+                  {option.count.toLocaleString()}
+                </span>
+              )}
+            </MenuRow>
+          );
+        })}
+      </div>
+
+      {values.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", padding: "8px 11px", borderTop: "1px solid var(--line)" }}>
+          <span className="mono" style={{ fontSize: 10, color: "var(--faintest)" }}>
+            {values.length} selected
+          </span>
+          <button
+            type="button"
+            onClick={onClear}
+            className="mono"
+            style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--faint)", fontSize: 10, cursor: "pointer", fontFamily: "var(--mono)" }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+    </Menu>
+  );
+}
+
+function Avatar({ creator }: { creator: Creator }) {
+  if (creator.authorAvatar) {
+    return (
+      <img
+        src={creator.authorAvatar}
+        alt=""
+        width={16}
+        height={16}
+        loading="lazy"
+        style={{ borderRadius: "50%", objectFit: "cover", background: "var(--edge-strong)" }}
+      />
+    );
+  }
+  return (
+    <span
+      style={{
+        width: 16,
+        height: 16,
+        borderRadius: "50%",
+        background: "var(--edge-strong)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 8.5,
+        color: "var(--muted)",
+      }}
+    >
+      {(creator.authorName ?? creator.authorHandle ?? "?").slice(0, 1).toUpperCase()}
+    </span>
   );
 }

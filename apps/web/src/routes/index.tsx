@@ -232,7 +232,6 @@ function Library() {
           filters={filters}
           onChange={setFilters}
           bySource={counts}
-          loaded={items.length}
           matched={done ? items.length : null}
         />
 

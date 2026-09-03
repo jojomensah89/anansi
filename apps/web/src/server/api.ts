@@ -73,11 +73,14 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
       return json(
         await listItems(env.db, {
           cursor: q.get("cursor") ?? undefined,
-          source: q.get("source") ?? undefined,
-          author: q.get("author") ?? undefined,
+          // Repeated params, so ?source=x&source=tiktok is "either of these".
+          // getAll returns [] for an absent param, which the query layer
+          // reads as no filter at all rather than as a filter matching none.
+          source: q.getAll("source"),
+          author: q.getAll("author"),
           media: q.get("media") ?? undefined,
-          contentType: q.get("type") ?? undefined,
-          tag: q.get("tag") ?? undefined,
+          contentType: q.getAll("type"),
+          tag: q.getAll("tag"),
           archived: q.get("archived") === "1",
           order: q.get("order") === "posted" ? "posted" : "saved",
           limit: num(q.get("limit"), 50),

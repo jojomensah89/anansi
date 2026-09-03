@@ -9,120 +9,349 @@
 <helmet>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
   <style>
-    body { margin: 0; background: #0b0e11; }
-    a { color: #e4a33c; text-decoration: none; }
-    a:hover { color: #f5c97e; }
+    body { margin: 0; background: #0b0e11; color: #e6ebef;
+           font-family: "Instrument Sans", system-ui, sans-serif;
+           -webkit-font-smoothing: antialiased; }
     * { box-sizing: border-box; }
+    a { color: #f5c97e; text-decoration: none; }
+    a:hover { color: #e4a33c; }
+    .m { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .card { background: #12161a; border: 1px solid #1f262d; border-radius: 8px; display: flex; flex-direction: column; }
+    .foot { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-top: 1px solid #1f262d; }
+    .act { font-size: 11.5px; color: #d5dde4; }
   </style>
 </helmet>
 
-<div style="width: 1000px; height: 720px; background: #0b0e11; color: #e6ebef; font-family: 'Instrument Sans', system-ui, sans-serif; padding: 22px; display: flex; flex-direction: column; gap: 16px;">
+<div style="width: 1440px; height: 900px; display: flex; overflow: hidden; background: #0b0e11">
 
-  <div style="display: flex; flex-direction: column; gap: 4px;">
-    <span style="font-size: 14px; font-weight: 600;">Sources</span>
-    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #5d6874;">
-      each source switchable, with what switching off actually does
-    </span>
-  </div>
-
-  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;">
-    <sc-for list="{{sources}}" as="s" hint-placeholder-count="4">
-      <div style="background: #12161a; border: 1px solid {{s.border}}; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 12px; opacity: {{s.opacity}};">
-
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid #2a333b; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #d5dde4;">{{s.tag}}</span>
-          <span style="display: flex; flex-direction: column; gap: 1px;">
-            <span style="font-size: 13.5px; font-weight: 600;">{{s.name}}</span>
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5d6874;">{{s.sub}}</span>
-          </span>
-
-          <!-- the switch -->
-          <span style="margin-left: auto; width: 36px; height: 20px; border-radius: 10px; background: {{s.track}}; border: 1px solid {{s.trackBorder}}; display: flex; align-items: center; padding: 0 2px; justify-content: {{s.knob}};">
-            <span style="width: 14px; height: 14px; border-radius: 50%; background: {{s.knobColor}};"></span>
-          </span>
-        </div>
-
-        <span style="height: 6px; border-radius: 3px; background: #1a2027; display: block; position: relative; overflow: hidden;">
-          <span style="position: absolute; inset: 0 auto 0 0; width: {{s.capturedPct}}; background: #4fbf8b;"></span>
-          <span style="position: absolute; inset: 0 auto 0 {{s.capturedPct}}; width: {{s.importedPct}}; background: {{accent}};"></span>
-        </span>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 9px;">
-          <span style="display: flex; flex-direction: column; gap: 1px;">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: {{s.liveColor}};">{{s.captured}}</span>
-            <span style="font-size: 10.5px; color: #5d6874;">captured live</span>
-          </span>
-          <span style="display: flex; flex-direction: column; gap: 1px;">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #e6ebef;">{{s.imported}}</span>
-            <span style="font-size: 10.5px; color: #5d6874;">backfilled</span>
-          </span>
-        </div>
-
-        <div style="display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid #1f262d;">
-          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; padding: 2px 6px; border-radius: 3px; border: 1px solid #232a31; color: {{s.modeColor}};">{{s.mode}}</span>
-          <span style="font-size: 11px; color: #5d6874;">{{s.modeNote}}</span>
-        </div>
-      </div>
-    </sc-for>
-  </div>
-
-  <!-- what off means, because a toggle that silently deletes is a trap -->
-  <div style="border: 1px solid #1f262d; border-radius: 6px; padding: 15px 16px; display: flex; flex-direction: column; gap: 11px;">
-    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e;">Switching a source off</span>
-    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
-      <sc-for list="{{effects}}" as="e" hint-placeholder-count="3">
-        <div style="display: flex; flex-direction: column; gap: 5px;">
-          <span style="display: flex; align-items: center; gap: 7px;">
-            <span style="width: 5px; height: 5px; border-radius: 50%; background: {{e.dot}};"></span>
-            <span style="font-size: 12px; color: #d5dde4;">{{e.what}}</span>
-          </span>
-          <span style="font-size: 11.5px; color: #5d6874; line-height: 1.55; padding-left: 12px;">{{e.why}}</span>
-        </div>
-      </sc-for>
+  <div style="width: 228px; flex-shrink: 0; background: #0e1216; border-right: 1px solid #1f262d; display: flex; flex-direction: column; padding: 16px 0">
+    <div style="display: flex; align-items: center; gap: 9px; padding: 0 16px 18px">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e4a33c" stroke-width="1.6" stroke-linecap="round">
+        <circle cx="12" cy="12" r="3.2"></circle>
+        <path d="M12 8.8V3M12 15.2V21M8.8 12H3M15.2 12H21M9.7 9.7 5.6 5.6M14.3 9.7l4.1-4.1M9.7 14.3l-4.1 4.1M14.3 14.3l4.1 4.1"></path>
+      </svg>
+      <span style="font-size: 14px; font-weight: 600; letter-spacing: -0.01em">Anansi</span>
     </div>
-    <div style="font-size: 11.5px; color: #5d6874; line-height: 1.6; padding-top: 10px; border-top: 1px solid #1f262d;">
-      The switch writes <span style="font-family: 'IBM Plex Mono', monospace; color: #8d9aa6;">enabled</span>
-      on the source row that <span style="font-family: 'IBM Plex Mono', monospace; color: #8d9aa6;">/api/extension/config</span>
-      already serves — so the extension stops capturing that platform on its next run without
-      anyone reinstalling anything. It is the same kill switch, per source.
+
+    <div style="display: flex; flex-direction: column; gap: 1px; padding: 0 8px">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; color: #8d9aa6">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5d6874" stroke-width="1.6" stroke-linejoin="round"><path d="M6 4h12v17l-6-4-6 4z"></path></svg>
+        Library<span class="m" style="margin-left: auto; font-size: 10.5px; color: #4a545e">1764</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; color: #8d9aa6">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5d6874" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="8" r="3.2"></circle>
+          <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5M16 6.2a3 3 0 0 1 0 5.6M17.5 19c0-2-.6-3.6-1.7-4.6"></path>
+        </svg>
+        Creators<span class="m" style="margin-left: auto; font-size: 10.5px; color: #4a545e">412</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; background: #171d23; color: #e6ebef; font-weight: 500">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e4a33c" stroke-width="1.6" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h9"></path></svg>
+        Sources
+      </div>
+    </div>
+
+    <div class="m" style="padding: 22px 16px 8px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e">Sources</div>
+    <div style="display: flex; flex-direction: column; gap: 1px; padding: 0 8px">
+      <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; font-size: 12.5px; color: #d5dde4">
+        <span class="m" style="font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6">x</span>
+        Bookmarks<span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">1274</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; font-size: 12.5px; color: #d5dde4">
+        <span class="m" style="font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6">gh</span>
+        Stars<span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">25</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; font-size: 12.5px; color: #d5dde4">
+        <span class="m" style="font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6">r/</span>
+        Reddit<span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">4</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; font-size: 12.5px; color: #d5dde4">
+        <span class="m" style="font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6">tt</span>
+        TikTok<span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">461</span>
+      </div>
+    </div>
+
+    <div style="margin-top: auto; padding: 12px 16px 0; border-top: 1px solid #1f262d; display: flex; flex-direction: column; gap: 5px">
+      <div class="m" style="display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: #5d6874">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: #4fbf8b"></span>local library
+      </div>
+      <div class="m" style="font-size: 10.5px; color: #414a53">1,764 items · 412 authors</div>
+    </div>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column; min-width: 0">
+
+    <div style="height: 52px; flex-shrink: 0; border-bottom: 1px solid #1f262d; display: flex; align-items: center; gap: 14px; padding: 0 22px">
+      <span style="font-size: 14px; font-weight: 600">Sources</span>
+      <span class="m" style="font-size: 11px; color: #5d6874">where everything came from, and whether it still works</span>
+
+      <div style="margin-left: auto; display: flex; gap: 2px; padding: 2px; background: #12161a; border: 1px solid #232a31; border-radius: 6px">
+        <span style="height: 24px; padding: 0 11px; border-radius: 4px; background: #171d23; color: #e6ebef; font-size: 11.5px; display: flex; align-items: center">All</span>
+        <span style="height: 24px; padding: 0 11px; border-radius: 4px; color: #8d9aa6; font-size: 11.5px; display: flex; align-items: center">Capturing</span>
+        <span style="height: 24px; padding: 0 11px; border-radius: 4px; color: #8d9aa6; font-size: 11.5px; display: flex; align-items: center">Planned</span>
+      </div>
+    </div>
+
+    <div style="flex: 1; padding: 18px 22px; overflow: hidden">
+
+      <!-- the extension is the thing every source below depends on, so it leads -->
+      <div style="display: flex; align-items: center; gap: 13px; background: #12161a; border: 1px solid #1f262d; border-radius: 8px; padding: 13px 16px; margin-bottom: 16px">
+        <span style="width: 32px; height: 32px; border-radius: 8px; background: #171d23; border: 1px solid #232a31; display: flex; align-items: center; justify-content: center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e4a33c" stroke-width="1.6" stroke-linejoin="round">
+            <path d="M10 4a2 2 0 1 1 4 0v2h3a1 1 0 0 1 1 1v3h2a2 2 0 1 1 0 4h-2v3a1 1 0 0 1-1 1h-3v-2a2 2 0 1 0-4 0v2H7a1 1 0 0 1-1-1v-3H4a2 2 0 1 1 0-4h2V7a1 1 0 0 1 1-1h3z"></path>
+          </svg>
+        </span>
+        <span style="display: flex; flex-direction: column; gap: 2px">
+          <span style="font-size: 13.5px; font-weight: 600">Anansi extension</span>
+          <span class="m" style="font-size: 10.5px; color: #5d6874">captures every source below, using the sessions your browser already has</span>
+        </span>
+        <span style="margin-left: auto; display: flex; align-items: center; gap: 12px">
+          <span class="m" style="display: flex; align-items: center; gap: 7px; font-size: 11px; color: #4fbf8b">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #4fbf8b"></span>connected
+          </span>
+          <span class="m" style="font-size: 10px; color: #414a53; border: 1px solid #232a31; border-radius: 4px; padding: 3px 7px">v0.1.0</span>
+        </span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start">
+
+        <!-- X: healthy, mostly backfilled -->
+        <div class="card">
+          <div style="padding: 16px 16px 0">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px">
+              <span style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid #2a333b; color: #d5dde4">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z"></path></svg>
+              </span>
+              <span style="display: flex; flex-direction: column; gap: 1px">
+                <span style="font-size: 13.5px; font-weight: 600">X bookmarks</span>
+                <span class="m" style="font-size: 10.5px; color: #5d6874">1,274 items · 318 authors</span>
+              </span>
+              <span style="margin-left: auto; display: flex; align-items: center; gap: 10px">
+                <span class="m" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #4fbf8b">
+                  <span style="width: 6px; height: 6px; border-radius: 50%; background: #4fbf8b"></span>healthy
+                </span>
+                <span style="width: 36px; height: 20px; border-radius: 10px; padding: 0 2px; display: flex; align-items: center; justify-content: flex-end; background: #2a3f36; border: 1px solid #3d6353">
+                  <span style="width: 14px; height: 14px; border-radius: 50%; background: #4fbf8b"></span>
+                </span>
+              </span>
+            </div>
+
+            <div style="display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #171d23">
+              <span style="width: 1%; background: #4fbf8b"></span>
+              <span style="width: 99%; background: #39434c"></span>
+            </div>
+            <div class="m" style="display: flex; gap: 14px; margin-top: 8px; font-size: 10px; color: #5d6874">
+              <span style="display: flex; align-items: center; gap: 5px"><span style="width: 6px; height: 6px; border-radius: 2px; background: #4fbf8b"></span>1 live</span>
+              <span style="display: flex; align-items: center; gap: 5px"><span style="width: 6px; height: 6px; border-radius: 2px; background: #39434c"></span>1,273 backfilled</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px">
+              <div style="display: flex; flex-direction: column; gap: 2px"><span class="m" style="font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #4a545e">media stored</span><span class="m" style="font-size: 12px; color: #d5dde4">1,246/1,251</span></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><span class="m" style="font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #4a545e">newest post</span><span class="m" style="font-size: 12px; color: #d5dde4">2h ago</span></div>
+            </div>
+          </div>
+          <div class="foot">
+            <span class="m" style="font-size: 10.5px; color: #5d6874">last capture 10h ago</span>
+            <span class="act" style="margin-left: auto">Import</span>
+            <span class="act" style="color: #f5c97e">View 1,274</span>
+          </div>
+        </div>
+
+        <!-- Reddit: healthy, live capture proving itself -->
+        <div class="card">
+          <div style="padding: 16px 16px 0">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px">
+              <span style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid #2a333b; color: #d5dde4">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M22 12.06c0-1.2-.98-2.17-2.19-2.17-.59 0-1.12.23-1.51.61-1.49-1.03-3.52-1.7-5.78-1.78l.99-4.62 3.23.69a1.56 1.56 0 1 0 .17-.95l-3.6-.77a.47.47 0 0 0-.56.36l-1.1 5.28c-2.3.06-4.37.73-5.88 1.78a2.18 2.18 0 0 0-1.51-.6A2.18 2.18 0 0 0 2 12.06c0 .87.51 1.62 1.25 1.97a3.9 3.9 0 0 0-.05.63c0 3.2 3.83 5.8 8.55 5.8s8.55-2.6 8.55-5.8c0-.21-.02-.42-.05-.62A2.18 2.18 0 0 0 22 12.06zM7.4 13.6a1.56 1.56 0 1 1 3.12 0 1.56 1.56 0 0 1-3.12 0zm8.72 4.12c-1.07 1.07-3.1 1.15-3.7 1.15-.6 0-2.64-.08-3.7-1.15a.4.4 0 0 1 .57-.57c.67.67 2.1.91 3.13.91 1.04 0 2.47-.24 3.14-.91a.4.4 0 1 1 .56.57zm-.19-2.56a1.56 1.56 0 1 1 0-3.12 1.56 1.56 0 0 1 0 3.12z"></path></svg>
+              </span>
+              <span style="display: flex; flex-direction: column; gap: 1px">
+                <span style="font-size: 13.5px; font-weight: 600">Reddit saves</span>
+                <span class="m" style="font-size: 10.5px; color: #5d6874">4 items · 4 authors</span>
+              </span>
+              <span style="margin-left: auto; display: flex; align-items: center; gap: 10px">
+                <span class="m" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #4fbf8b">
+                  <span style="width: 6px; height: 6px; border-radius: 50%; background: #4fbf8b"></span>healthy
+                </span>
+                <span style="width: 36px; height: 20px; border-radius: 10px; padding: 0 2px; display: flex; align-items: center; justify-content: flex-end; background: #2a3f36; border: 1px solid #3d6353">
+                  <span style="width: 14px; height: 14px; border-radius: 50%; background: #4fbf8b"></span>
+                </span>
+              </span>
+            </div>
+
+            <div style="display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #171d23">
+              <span style="width: 100%; background: #4fbf8b"></span>
+            </div>
+            <div class="m" style="display: flex; gap: 14px; margin-top: 8px; font-size: 10px; color: #5d6874">
+              <span style="display: flex; align-items: center; gap: 5px"><span style="width: 6px; height: 6px; border-radius: 2px; background: #4fbf8b"></span>4 live</span>
+              <span style="color: #414a53">every one caught as it happened</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px">
+              <div style="display: flex; flex-direction: column; gap: 2px"><span class="m" style="font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #4a545e">media stored</span><span class="m" style="font-size: 12px; color: #d5dde4">3/3</span></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><span class="m" style="font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #4a545e">newest post</span><span class="m" style="font-size: 12px; color: #d5dde4">6h ago</span></div>
+            </div>
+          </div>
+          <div class="foot">
+            <span class="m" style="font-size: 10.5px; color: #5d6874">last capture 6h ago</span>
+            <span class="act" style="margin-left: auto">Import</span>
+            <span class="act" style="color: #f5c97e">View 4</span>
+          </div>
+        </div>
+
+        <!-- TikTok: stale, and the card says what to do about it -->
+        <div class="card">
+          <div style="padding: 16px 16px 0">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px">
+              <span style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid #2a333b; color: #d5dde4">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06v-3.1a5.66 5.66 0 0 0-.77-.05A5.66 5.66 0 1 0 15.54 15.4V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3a4.29 4.29 0 0 1-3.24-1.48z"></path></svg>
+              </span>
+              <span style="display: flex; flex-direction: column; gap: 1px">
+                <span style="font-size: 13.5px; font-weight: 600">TikTok favourites</span>
+                <span class="m" style="font-size: 10.5px; color: #5d6874">461 items · 89 authors</span>
+              </span>
+              <span style="margin-left: auto; display: flex; align-items: center; gap: 10px">
+                <span class="m" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #e4a33c">
+                  <span style="width: 6px; height: 6px; border-radius: 50%; background: #e4a33c"></span>stale
+                </span>
+                <span style="width: 36px; height: 20px; border-radius: 10px; padding: 0 2px; display: flex; align-items: center; justify-content: flex-end; background: #2a3f36; border: 1px solid #3d6353">
+                  <span style="width: 14px; height: 14px; border-radius: 50%; background: #4fbf8b"></span>
+                </span>
+              </span>
+            </div>
+
+            <div style="display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #171d23">
+              <span style="width: 6%; background: #4fbf8b"></span>
+              <span style="width: 94%; background: #39434c"></span>
+            </div>
+            <div class="m" style="display: flex; gap: 14px; margin-top: 8px; font-size: 10px; color: #5d6874">
+              <span style="display: flex; align-items: center; gap: 5px"><span style="width: 6px; height: 6px; border-radius: 2px; background: #4fbf8b"></span>29 live</span>
+              <span style="display: flex; align-items: center; gap: 5px"><span style="width: 6px; height: 6px; border-radius: 2px; background: #39434c"></span>432 backfilled</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px">
+              <div style="display: flex; flex-direction: column; gap: 2px"><span class="m" style="font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #4a545e">media stored</span><span class="m" style="font-size: 12px; color: #d5dde4">455/461</span></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><span class="m" style="font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #4a545e">newest post</span><span class="m" style="font-size: 12px; color: #e4a33c">9d ago</span></div>
+            </div>
+
+            <div class="m" style="margin-top: 12px; padding: 9px 10px; border-radius: 6px; background: #e4a33c14; border: 1px solid #e4a33c33; font-size: 10.5px; color: #f5c97e; line-height: 1.5">
+              Nothing new in 9 days. Import opens your favourites and scrolls them for you.
+            </div>
+          </div>
+          <div class="foot">
+            <span class="m" style="font-size: 10.5px; color: #5d6874">last capture 9d ago</span>
+            <span class="act" style="margin-left: auto; color: #f5c97e">Import</span>
+            <span class="act">View 461</span>
+          </div>
+        </div>
+
+        <!-- GitHub: the one source with an exact saved-at -->
+        <div class="card">
+          <div style="padding: 16px 16px 0">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px">
+              <span style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid #2a333b; color: #d5dde4">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49l-.01-1.9c-2.78.62-3.37-1.2-3.37-1.2-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9l-.01 2.82c0 .27.18.6.69.49A10.03 10.03 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"></path></svg>
+              </span>
+              <span style="display: flex; flex-direction: column; gap: 1px">
+                <span style="font-size: 13.5px; font-weight: 600">GitHub stars</span>
+                <span class="m" style="font-size: 10.5px; color: #5d6874">25 items · 21 authors</span>
+              </span>
+              <span style="margin-left: auto; display: flex; align-items: center; gap: 10px">
+                <span class="m" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #4fbf8b">
+                  <span style="width: 6px; height: 6px; border-radius: 50%; background: #4fbf8b"></span>healthy
+                </span>
+                <span style="width: 36px; height: 20px; border-radius: 10px; padding: 0 2px; display: flex; align-items: center; justify-content: flex-end; background: #2a3f36; border: 1px solid #3d6353">
+                  <span style="width: 14px; height: 14px; border-radius: 50%; background: #4fbf8b"></span>
+                </span>
+              </span>
+            </div>
+
+            <div style="display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #171d23">
+              <span style="width: 100%; background: #39434c"></span>
+            </div>
+            <div class="m" style="display: flex; gap: 14px; margin-top: 8px; font-size: 10px; color: #5d6874">
+              <span style="display: flex; align-items: center; gap: 5px"><span style="width: 6px; height: 6px; border-radius: 2px; background: #39434c"></span>25 imported</span>
+              <span style="color: #414a53">starred_at is exact — no stamp needed</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px">
+              <div style="display: flex; flex-direction: column; gap: 2px"><span class="m" style="font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #4a545e">media stored</span><span class="m" style="font-size: 12px; color: #d5dde4">0/0</span></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><span class="m" style="font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #4a545e">newest star</span><span class="m" style="font-size: 12px; color: #d5dde4">1d ago</span></div>
+            </div>
+          </div>
+          <div class="foot">
+            <span class="m" style="font-size: 10.5px; color: #5d6874">last capture 1d ago</span>
+            <span class="act" style="margin-left: auto">Import</span>
+            <span class="act" style="color: #f5c97e">View 25</span>
+          </div>
+        </div>
+
+        <!-- the failure state, which is the one this page exists for -->
+        <div class="card" style="border-color: #4a2f28">
+          <div style="padding: 16px 16px 0">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px">
+              <span style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid #2a333b; color: #d5dde4">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="18" height="18" rx="5"></rect><circle cx="12" cy="12" r="4"></circle><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"></circle></svg>
+              </span>
+              <span style="display: flex; flex-direction: column; gap: 1px">
+                <span style="font-size: 13.5px; font-weight: 600">Instagram saves</span>
+                <span class="m" style="font-size: 10.5px; color: #5d6874">nothing captured yet</span>
+              </span>
+              <span style="margin-left: auto; display: flex; align-items: center; gap: 10px">
+                <span class="m" style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #e0714f">
+                  <span style="width: 6px; height: 6px; border-radius: 50%; background: #e0714f"></span>sign in
+                </span>
+                <span style="width: 36px; height: 20px; border-radius: 10px; padding: 0 2px; display: flex; align-items: center; justify-content: flex-end; background: #2a3f36; border: 1px solid #3d6353">
+                  <span style="width: 14px; height: 14px; border-radius: 50%; background: #4fbf8b"></span>
+                </span>
+              </span>
+            </div>
+
+            <div style="display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #171d23"></div>
+            <div class="m" style="margin-top: 8px; font-size: 10px; color: #414a53">no items yet</div>
+
+            <div class="m" style="margin-top: 12px; padding: 9px 10px; border-radius: 6px; background: #e0714f14; border: 1px solid #e0714f33; font-size: 10.5px; color: #e0714f; line-height: 1.5">
+              The last import stopped at page 1 — instagram.com was not signed in. Nothing was lost; the run resumes where it stopped.
+            </div>
+          </div>
+          <div class="foot">
+            <span class="m" style="font-size: 10.5px; color: #5d6874">attempted 3h ago</span>
+            <span class="act" style="margin-left: auto; color: #f5c97e">Open Instagram</span>
+            <span class="act">Retry</span>
+          </div>
+        </div>
+
+        <!-- planned: listed, dimmed, honest about being unbuilt -->
+        <div class="card" style="opacity: 0.55">
+          <div style="padding: 16px 16px 0">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px">
+              <span style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid #2a333b; color: #8d9aa6">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                  <circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z"></path>
+                </svg>
+              </span>
+              <span style="display: flex; flex-direction: column; gap: 1px">
+                <span style="font-size: 13.5px; font-weight: 600">Web pages &amp; clips</span>
+                <span class="m" style="font-size: 10.5px; color: #5d6874">any website</span>
+              </span>
+              <span style="margin-left: auto">
+                <span style="width: 36px; height: 20px; border-radius: 10px; padding: 0 2px; display: flex; align-items: center; justify-content: flex-start; background: #171d23; border: 1px solid #232a31">
+                  <span style="width: 14px; height: 14px; border-radius: 50%; background: #5d6874"></span>
+                </span>
+              </span>
+            </div>
+            <div style="font-size: 12px; line-height: 1.55; color: #8d9aa6">
+              Save a whole page, an image, or a selected paragraph from any site — right-click, straight into the library. No permission for sites you have not saved from.
+            </div>
+          </div>
+          <div class="foot">
+            <span class="m" style="font-size: 10.5px; color: #5d6874">next up</span>
+          </div>
+        </div>
+
+      </div>
     </div>
   </div>
 </div>
 </x-dc>
-
-<script data-dc-script data-props='{"accent":{"editor":"color","default":"#e4a33c","options":["#e4a33c","#5fd1c0","#8fa0ff","#e07a5f"],"section":"Theme"}}'>
-class Component extends DCLogic {
-  renderVals() {
-    const accent = this.props.accent ?? '#e4a33c';
-    const on  = { track: '#2a3f36', trackBorder: '#3d6353', knob: 'flex-end',   knobColor: '#4fbf8b', border: '#1f262d', opacity: '1' };
-    const off = { track: '#171d23', trackBorder: '#232a31', knob: 'flex-start', knobColor: '#5d6874', border: '#161c22', opacity: '0.55' };
-    return {
-      accent,
-      sources: [
-        { tag: 'x',  name: 'X bookmarks', sub: '1,274 items · 874 authors', captured: '0', imported: '1,274',
-          capturedPct: '0%', importedPct: '100%', liveColor: '#5d6874',
-          mode: 'page', modeColor: '#5d6874', modeNote: 'full history import', ...on },
-        { tag: 'gh', name: 'GitHub stars', sub: 'not imported yet', captured: '0', imported: '0',
-          capturedPct: '0%', importedPct: '0%', liveColor: '#5d6874',
-          mode: 'page', modeColor: '#5d6874', modeNote: 'documented API, scoped token', ...on },
-        { tag: 'r/', name: 'Reddit saves', sub: 'not imported yet', captured: '0', imported: '0',
-          capturedPct: '0%', importedPct: '0%', liveColor: '#5d6874',
-          mode: 'page', modeColor: '#5d6874', modeNote: 'session JSON endpoint', ...on },
-        { tag: 'tt', name: 'TikTok favourites', sub: 'switched off', captured: '0', imported: '0',
-          capturedPct: '0%', importedPct: '0%', liveColor: '#5d6874',
-          mode: 'observe', modeColor: accent, modeNote: 'no history endpoint — arrives as you scroll', ...off },
-      ],
-      effects: [
-        { dot: '#4fbf8b', what: 'Items stay',
-          why: 'Nothing is deleted. They stay in the library, in search, and in the MCP tools.' },
-        { dot: accent, what: 'Capture stops',
-          why: 'The extension drops that platform from its config on the next run.' },
-        { dot: '#5d6874', what: 'Row stays visible',
-          why: 'Dimmed rather than hidden, so an off source never reads as a broken one.' },
-      ],
-    };
-  }
-}
-</script>
 </body>
 </html>

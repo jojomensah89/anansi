@@ -9,167 +9,403 @@
 <helmet>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
   <style>
-    body { margin: 0; background: #0b0e11; }
-    a { color: #e4a33c; text-decoration: none; }
-    a:hover { color: #f5c97e; }
+    body { margin: 0; background: #0b0e11; color: #e6ebef;
+           font-family: "Instrument Sans", system-ui, sans-serif;
+           -webkit-font-smoothing: antialiased; }
     * { box-sizing: border-box; }
+    a { color: #f5c97e; text-decoration: none; }
+    a:hover { color: #e4a33c; }
+    .m { font-family: "IBM Plex Mono", ui-monospace, monospace; }
   </style>
 </helmet>
 
-<div style="width: 1440px; height: 900px; display: flex; background: #0b0e11; color: #e6ebef; font-family: 'Instrument Sans', system-ui, sans-serif; overflow: hidden;">
+<div style="width: 1440px; height: 900px; display: flex; overflow: hidden; background: #0b0e11">
 
-  <!-- rail -->
-  <div style="width: 228px; flex-shrink: 0; background: #0e1216; border-right: 1px solid #1f262d; display: flex; flex-direction: column; padding: 16px 0;">
-    <div style="display: flex; align-items: center; gap: 9px; padding: 0 16px 18px;">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="1.6" stroke-linecap="round">
+  <!-- rail: 228px, verbatim from rail.tsx -->
+  <div style="width: 228px; flex-shrink: 0; background: #0e1216; border-right: 1px solid #1f262d; display: flex; flex-direction: column; padding: 16px 0">
+    <div style="display: flex; align-items: center; gap: 9px; padding: 0 16px 18px">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e4a33c" stroke-width="1.6" stroke-linecap="round">
         <circle cx="12" cy="12" r="3.2"></circle>
         <path d="M12 8.8V3M12 15.2V21M8.8 12H3M15.2 12H21M9.7 9.7 5.6 5.6M14.3 9.7l4.1-4.1M9.7 14.3l-4.1 4.1M14.3 14.3l4.1 4.1"></path>
       </svg>
-      <span style="font-size: 14px; font-weight: 600; letter-spacing: -0.01em;">Anansi</span>
+      <span style="font-size: 14px; font-weight: 600; letter-spacing: -0.01em">Anansi</span>
     </div>
 
-    <div style="display: flex; flex-direction: column; gap: 1px; padding: 0 8px;">
-      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; background: #171d23; font-size: 13px; font-weight: 500;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="1.6" stroke-linejoin="round"><path d="M6 4h12v17l-6-4-6 4z"></path></svg>
+    <div style="display: flex; flex-direction: column; gap: 1px; padding: 0 8px">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; background: #171d23; color: #e6ebef; font-weight: 500">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e4a33c" stroke-width="1.6" stroke-linejoin="round"><path d="M6 4h12v17l-6-4-6 4z"></path></svg>
         Library
-        <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5d6874;">1274</span>
+        <span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">1764</span>
       </div>
-      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; color: #8d9aa6;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5d6874" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"></circle><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5M16 6.2a3 3 0 0 1 0 5.6M17.5 19c0-2-.6-3.6-1.7-4.6"></path></svg>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; color: #8d9aa6">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5d6874" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="8" r="3.2"></circle>
+          <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5M16 6.2a3 3 0 0 1 0 5.6M17.5 19c0-2-.6-3.6-1.7-4.6"></path>
+        </svg>
         Creators
-        <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #4a545e;">874</span>
+        <span class="m" style="margin-left: auto; font-size: 10.5px; color: #4a545e">412</span>
       </div>
-      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; color: #8d9aa6;">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; color: #8d9aa6">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5d6874" stroke-width="1.6" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h9"></path></svg>
         Sources
       </div>
-      <div style="display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; font-size: 13px; color: #8d9aa6;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5d6874" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="4" rx="1"></rect><path d="M5.2 8.5v10a1 1 0 0 0 1 1h11.6a1 1 0 0 0 1-1v-10M10 13h4"></path></svg>
-        Archive
-        <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #4a545e;">12</span>
+    </div>
+
+    <div class="m" style="padding: 22px 16px 8px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e">Sources</div>
+    <div style="display: flex; flex-direction: column; gap: 1px; padding: 0 8px">
+      <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 5px; font-size: 12.5px; color: #d5dde4">
+        <span class="m" style="font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6">x</span>
+        Bookmarks<span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">1274</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 5px; font-size: 12.5px; color: #d5dde4">
+        <span class="m" style="font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6">gh</span>
+        Stars<span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">25</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 5px; font-size: 12.5px; color: #d5dde4">
+        <span class="m" style="font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6">r/</span>
+        Reddit<span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">4</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 5px; font-size: 12.5px; color: #d5dde4">
+        <span class="m" style="font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6">tt</span>
+        TikTok<span class="m" style="margin-left: auto; font-size: 10.5px; color: #5d6874">461</span>
       </div>
     </div>
 
-    <div style="padding: 22px 16px 8px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a545e;">Sources</div>
-    <div style="display: flex; flex-direction: column; gap: 1px; padding: 0 8px;">
-      <sc-for list="{{sources}}" as="s" hint-placeholder-count="4">
-        <div style="display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 5px; font-size: 12.5px; color: #d5dde4;">
-          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; width: 22px; height: 16px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a333b; border-radius: 3px; color: #8d9aa6;">{{s.tag}}</span>
-          {{s.label}}
-          <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5d6874;">{{s.count}}</span>
-        </div>
-      </sc-for>
-    </div>
-
-    <div style="margin-top: auto; padding: 12px 16px 0; border-top: 1px solid #1f262d; display: flex; flex-direction: column; gap: 5px;">
-      <div style="display: flex; align-items: center; gap: 7px; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5d6874;">
-        <span style="width: 6px; height: 6px; border-radius: 50%; background: #4fbf8b;"></span>
-        local library
+    <div style="margin-top: auto; padding: 12px 16px 0; border-top: 1px solid #1f262d; display: flex; flex-direction: column; gap: 5px">
+      <div class="m" style="display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: #5d6874">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: #4fbf8b"></span>local library
       </div>
-      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #414a53;">1,274 items · 874 authors</div>
+      <div class="m" style="font-size: 10.5px; color: #414a53">1,764 items · 412 authors</div>
     </div>
   </div>
 
-  <!-- main -->
-  <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
-    <div style="height: 52px; flex-shrink: 0; border-bottom: 1px solid #1f262d; display: flex; align-items: center; gap: 14px; padding: 0 20px;">
-      <span style="font-size: 14px; font-weight: 600;">Library</span>
-      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #5d6874;">1,274 items · 874 authors</span>
+  <!-- main column -->
+  <div style="flex: 1; display: flex; flex-direction: column; min-width: 0">
 
-      <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
-        <div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 9px; border: 1px solid #232a31; border-radius: 5px; background: #12161a; width: 250px;">
+    <!-- 52px top bar -->
+    <div style="height: 52px; flex-shrink: 0; border-bottom: 1px solid #1f262d; display: flex; align-items: center; gap: 14px; padding: 0 20px">
+      <span style="font-size: 14px; font-weight: 600">Library</span>
+      <span class="m" style="font-size: 11px; color: #5d6874">184 of 1,764 shown</span>
+      <span style="width: 1px; height: 18px; background: #1f262d; margin: 0 4px"></span>
+
+      <div style="display: flex; gap: 2px">
+        <div style="height: 30px; padding: 0 11px; border-radius: 5px; background: #171d23; color: #e6ebef; font-size: 12.5px; display: flex; align-items: center">Grid</div>
+        <div style="height: 30px; padding: 0 11px; border-radius: 5px; color: #8d9aa6; font-size: 12.5px; display: flex; align-items: center">Row</div>
+        <div style="height: 30px; padding: 0 11px; border-radius: 5px; color: #8d9aa6; font-size: 12.5px; display: flex; align-items: center">Timeline</div>
+        <div style="height: 30px; padding: 0 11px; border-radius: 5px; color: #8d9aa6; font-size: 12.5px; display: flex; align-items: center">Mosaic</div>
+      </div>
+
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+        <div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 9px; border: 1px solid #232a31; border-radius: 5px; background: #12161a; width: 250px">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4a545e" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="m20 20-4.2-4.2"></path></svg>
-          <span style="font-size: 12.5px; color: #4a545e;">Search 1,274 saves</span>
-          <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #414a53; border: 1px solid #232a31; border-radius: 3px; padding: 1px 4px;">⌘K</span>
+          <span style="font-size: 12.5px; color: #4a545e">Search 1,764 saves</span>
+          <span class="m" style="margin-left: auto; font-size: 10px; color: #414a53; border: 1px solid #232a31; border-radius: 3px; padding: 1px 4px">⌘K</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border: 1px solid #232a31; border-radius: 5px; background: #12161a; font-size: 12.5px; color: #d5dde4;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8d9aa6" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>
-          Filters
-        </div>
-        <div style="display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border: 1px solid #232a31; border-radius: 5px; background: #12161a; font-size: 12.5px; color: #d5dde4;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8d9aa6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
+        <div style="display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 5px; font-size: 12.5px; background: #12161a; color: #d5dde4; border: 1px solid #232a31">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
           Select
         </div>
       </div>
     </div>
 
-    <div style="height: 42px; flex-shrink: 0; border-bottom: 1px solid #1f262d; display: flex; align-items: center; gap: 7px; padding: 0 20px;">
-      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 4px 9px; border-radius: 4px; background: #1e2329; color: #e6ebef; border: 1px solid #2e373f;">all 1274</span>
-      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 4px 9px; border-radius: 4px; color: #8d9aa6; border: 1px solid #1f262d;">x 1274</span>
-      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 4px 9px; border-radius: 4px; color: #8d9aa6; border: 1px solid #1f262d;">github 0</span>
-      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 4px 9px; border-radius: 4px; color: #8d9aa6; border: 1px solid #1f262d;">reddit 0</span>
-      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 4px 9px; border-radius: 4px; color: #8d9aa6; border: 1px solid #1f262d;">tiktok 0</span>
-      <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #4a545e;">60 loaded</span>
+    <!-- 42px filter row: the redesign -->
+    <div style="position: relative; flex-shrink: 0; border-bottom: 1px solid #1f262d">
+      <div style="height: 42px; display: flex; align-items: center; gap: 7px; padding: 0 20px">
+
+        <!-- an applied chip reads as a sentence: field · operator · value -->
+        <div style="display: flex; align-items: center; height: 26px; border-radius: 5px; border: 1px solid #2e373f; background: #1e2329; overflow: hidden">
+          <span style="display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 11.5px; color: #8d9aa6">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8"></path></svg>
+            Platform
+          </span>
+          <span class="m" style="padding: 0 7px; font-size: 10.5px; color: #5d6874; border-left: 1px solid #2e373f; border-right: 1px solid #2e373f; height: 100%; display: flex; align-items: center">is any of</span>
+          <span style="display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 11.5px; color: #e6ebef">
+            <span style="display: flex">
+              <span style="width: 15px; height: 15px; border-radius: 50%; background: #0b0e11; border: 1px solid #2e373f; display: flex; align-items: center; justify-content: center">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="#e6ebef"><path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z"></path></svg>
+              </span>
+              <span style="width: 15px; height: 15px; border-radius: 50%; background: #0b0e11; border: 1px solid #2e373f; margin-left: -5px; display: flex; align-items: center; justify-content: center">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="#e6ebef"><path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06v-3.1a5.66 5.66 0 0 0-.77-.05A5.66 5.66 0 1 0 15.54 15.4V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3a4.29 4.29 0 0 1-3.24-1.48z"></path></svg>
+              </span>
+            </span>
+            2 selected
+          </span>
+          <span style="display: flex; align-items: center; justify-content: center; width: 22px; height: 100%; border-left: 1px solid #2e373f; color: #5d6874">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+          </span>
+        </div>
+
+        <!-- the open one: multi-select, searchable, counted -->
+        <div style="display: flex; align-items: center; height: 26px; border-radius: 5px; border: 1px solid #e4a33c; background: #1e2329; overflow: hidden">
+          <span style="display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 11.5px; color: #f5c97e">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"></circle><path d="M5.5 20c0-3.3 2.9-5.6 6.5-5.6s6.5 2.3 6.5 5.6"></path></svg>
+            Author
+          </span>
+          <span class="m" style="padding: 0 7px; font-size: 10.5px; color: #5d6874; border-left: 1px solid #2e373f; border-right: 1px solid #2e373f; height: 100%; display: flex; align-items: center">is any of</span>
+          <span style="display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 11.5px; color: #e6ebef">
+            <span style="width: 15px; height: 15px; border-radius: 50%; background: #3a4a5c; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #d5dde4">A</span>
+            3 selected
+          </span>
+          <span style="display: flex; align-items: center; justify-content: center; width: 22px; height: 100%; border-left: 1px solid #2e373f; color: #5d6874">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+          </span>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 5px; border: 1px dashed #2a333b; color: #8d9aa6; font-size: 11.5px">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+          Add filter
+        </div>
+
+        <div class="m" style="display: flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; font-size: 10.5px; color: #5d6874">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 5h16l-6.5 7.5V19l-3 2v-8.5z"></path></svg>
+          Clear all
+        </div>
+
+        <span class="m" style="margin-left: auto; font-size: 10.5px; color: #414a53">184 match</span>
+      </div>
+
+      <!-- the dropdown, anchored under the Author chip -->
+      <div style="position: absolute; top: 38px; left: 292px; width: 268px; background: #12161a; border: 1px solid #2a333b; border-radius: 7px; box-shadow: 0 14px 34px #00000080, 0 2px 6px #0000004d; z-index: 5; overflow: hidden">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-bottom: 1px solid #1f262d">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4a545e" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="m20 20-4.2-4.2"></path></svg>
+          <span style="font-size: 12px; color: #5d6874">Search 412 authors…</span>
+        </div>
+
+        <div style="padding: 5px; display: flex; flex-direction: column; gap: 1px">
+          <div style="display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: 5px; background: #171d23">
+            <span style="width: 14px; height: 14px; border-radius: 3px; background: #e4a33c; display: flex; align-items: center; justify-content: center">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#0b0e11" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
+            </span>
+            <span style="width: 18px; height: 18px; border-radius: 50%; background: #3a4a5c; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #d5dde4">A</span>
+            <span style="font-size: 12.5px; color: #e6ebef">Ada Okonjo</span>
+            <span class="m" style="margin-left: auto; font-size: 10px; color: #5d6874">47</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: 5px">
+            <span style="width: 14px; height: 14px; border-radius: 3px; background: #e4a33c; display: flex; align-items: center; justify-content: center">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#0b0e11" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
+            </span>
+            <span style="width: 18px; height: 18px; border-radius: 50%; background: #4c3f5a; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #d5dde4">K</span>
+            <span style="font-size: 12.5px; color: #e6ebef">Kwame Boateng</span>
+            <span class="m" style="margin-left: auto; font-size: 10px; color: #5d6874">31</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: 5px">
+            <span style="width: 14px; height: 14px; border-radius: 3px; background: #e4a33c; display: flex; align-items: center; justify-content: center">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#0b0e11" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
+            </span>
+            <span style="width: 18px; height: 18px; border-radius: 50%; background: #2f5147; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #d5dde4">R</span>
+            <span style="font-size: 12.5px; color: #e6ebef">rendercore</span>
+            <span class="m" style="margin-left: auto; font-size: 10px; color: #5d6874">22</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: 5px">
+            <span style="width: 14px; height: 14px; border-radius: 3px; border: 1px solid #2a333b"></span>
+            <span style="width: 18px; height: 18px; border-radius: 50%; background: #56413a; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #d5dde4">M</span>
+            <span style="font-size: 12.5px; color: #d5dde4">Maya Lindqvist</span>
+            <span class="m" style="margin-left: auto; font-size: 10px; color: #5d6874">18</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: 5px">
+            <span style="width: 14px; height: 14px; border-radius: 3px; border: 1px solid #2a333b"></span>
+            <span style="width: 18px; height: 18px; border-radius: 50%; background: #3f4a34; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #d5dde4">T</span>
+            <span style="font-size: 12.5px; color: #d5dde4">thelocalfirst</span>
+            <span class="m" style="margin-left: auto; font-size: 10px; color: #5d6874">14</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: 5px">
+            <span style="width: 14px; height: 14px; border-radius: 3px; border: 1px solid #2a333b"></span>
+            <span style="width: 18px; height: 18px; border-radius: 50%; background: #43384f; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #d5dde4">D</span>
+            <span style="font-size: 12.5px; color: #d5dde4">Dara Mensah</span>
+            <span class="m" style="margin-left: auto; font-size: 10px; color: #5d6874">11</span>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; padding: 8px 11px; border-top: 1px solid #1f262d">
+          <span class="m" style="font-size: 10px; color: #414a53">3 selected · 184 match</span>
+          <span class="m" style="margin-left: auto; font-size: 10px; color: #5d6874">Clear</span>
+        </div>
+      </div>
     </div>
 
-    <!-- grid: media leads, text supports -->
-    <div style="flex: 1; overflow: hidden; padding: 16px 20px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-content: start;">
-      <sc-for list="{{cards}}" as="c" hint-placeholder-count="8">
-        <div style="background: #12161a; border: 1px solid #1f262d; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; height: 372px;">
+    <!-- the grid -->
+    <div style="flex: 1; padding: 16px 20px; overflow: hidden">
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: start">
 
-          <div style="position: relative; height: 196px; flex-shrink: 0; background: #0e1216;">
-            <img src="{{c.thumb}}" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block;">
-            <sc-if value="{{c.isVideo}}" hint-placeholder-val="{{ true }}">
-              <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;">
-                <span style="width: 38px; height: 38px; border-radius: 50%; background: #0b0e11b3; display: flex; align-items: center; justify-content: center;">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="#e6ebef"><path d="M8 5v14l11-7z"></path></svg>
-                </span>
+        <!-- column 1 -->
+        <div style="display: flex; flex-direction: column; gap: 14px">
+          <div style="background: #12161a; border: 1px solid #1f262d; border-radius: 8px; overflow: hidden">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 11px 12px 8px">
+              <span style="width: 24px; height: 24px; border-radius: 50%; background: #3a4a5c; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #d5dde4">A</span>
+              <span style="display: flex; flex-direction: column; min-width: 0">
+                <span style="font-size: 12.5px; font-weight: 500">Ada Okonjo</span>
+                <span class="m" style="font-size: 10px; color: #5d6874">@adaokonjo</span>
               </span>
-            </sc-if>
-            <span style="position: absolute; top: 8px; right: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: #d5dde4; background: #0b0e11cc; border: 1px solid #2a333b; border-radius: 3px; padding: 2px 5px;">{{c.badge}}</span>
-          </div>
-
-          <div style="padding: 11px; display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0;">
-            <div style="display: flex; align-items: center; gap: 7px;">
-              <img src="{{c.avatar}}" alt="" style="width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; object-fit: cover;">
-              <span style="display: flex; flex-direction: column; min-width: 0;">
-                <span style="font-size: 11.5px; color: #e6ebef; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{c.name}}</span>
-                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #5d6874;">{{c.handle}}</span>
+              <span style="margin-left: auto; color: #414a53">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z"></path></svg>
               </span>
             </div>
-            <div style="flex: 1; min-height: 0; font-size: 12.5px; line-height: 1.5; color: #d5dde4; overflow: hidden;">{{c.body}}</div>
-            <div style="display: flex; align-items: center; gap: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #5d6874;">
-              <span>{{c.likes}} ♥</span>
-              <span style="margin-left: auto;">{{c.when}}</span>
+            <div style="padding: 0 12px 10px; font-size: 12.5px; line-height: 1.55; color: #d5dde4">
+              The thing nobody tells you about SQLite FTS5 external-content tables: the three sync triggers are not optional. Miss the delete trigger and search quietly returns rows that no longer exist.
+            </div>
+            <div style="height: 132px; background: linear-gradient(148deg, #1b2530 0%, #232f3d 46%, #14202b 100%); border-top: 1px solid #1f262d"></div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 9px 12px">
+              <span class="m" style="font-size: 10px; color: #5d6874; border: 1px dashed #232a31; border-radius: 4px; padding: 2px 7px">+ tag</span>
+              <span class="m" style="margin-left: auto; font-size: 10px; color: #414a53">Sep 2</span>
+            </div>
+          </div>
+
+          <div style="background: #12161a; border: 1px solid #1f262d; border-radius: 8px; overflow: hidden">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 11px 12px 8px">
+              <span style="width: 24px; height: 24px; border-radius: 50%; background: #2f5147; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #d5dde4">R</span>
+              <span style="display: flex; flex-direction: column; min-width: 0">
+                <span style="font-size: 12.5px; font-weight: 500">rendercore</span>
+                <span class="m" style="font-size: 10px; color: #5d6874">@rendercore</span>
+              </span>
+              <span style="margin-left: auto; color: #414a53">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z"></path></svg>
+              </span>
+            </div>
+            <div style="padding: 0 12px 10px; font-size: 12.5px; line-height: 1.55; color: #d5dde4">
+              Keyset pagination on a composite key, or your timeline repeats a header every time someone posts while you scroll.
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid #1f262d">
+              <span class="m" style="font-size: 10px; color: #f5c97e; background: #e4a33c1f; border: 1px solid #e4a33c33; border-radius: 4px; padding: 2px 7px">sqlite</span>
+              <span class="m" style="margin-left: auto; font-size: 10px; color: #414a53">Aug 31</span>
             </div>
           </div>
         </div>
-      </sc-for>
+
+        <!-- column 2 -->
+        <div style="display: flex; flex-direction: column; gap: 14px">
+          <div style="background: #12161a; border: 1px solid #1f262d; border-radius: 8px; overflow: hidden">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 11px 12px 8px">
+              <span style="width: 24px; height: 24px; border-radius: 50%; background: #56413a; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #d5dde4">M</span>
+              <span style="display: flex; flex-direction: column; min-width: 0">
+                <span style="font-size: 12.5px; font-weight: 500">Maya Lindqvist</span>
+                <span class="m" style="font-size: 10px; color: #5d6874">@mlindqvist</span>
+              </span>
+              <span style="margin-left: auto; color: #414a53">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06v-3.1a5.66 5.66 0 0 0-.77-.05A5.66 5.66 0 1 0 15.54 15.4V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3a4.29 4.29 0 0 1-3.24-1.48z"></path></svg>
+              </span>
+            </div>
+            <div style="padding: 0 12px 10px; font-size: 12.5px; line-height: 1.55; color: #d5dde4">
+              three things I wish I knew before shipping a browser extension
+            </div>
+            <div style="position: relative; height: 214px; background: linear-gradient(196deg, #2a1f2b 0%, #3a2836 52%, #1d1620 100%); border-top: 1px solid #1f262d">
+              <span style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 38px; height: 38px; border-radius: 50%; background: #0b0e1199; display: flex; align-items: center; justify-content: center">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="#e6ebef"><path d="M8 5v14l11-7z"></path></svg>
+              </span>
+              <span class="m" style="position: absolute; right: 8px; bottom: 8px; font-size: 9.5px; color: #e6ebef; background: #0b0e11b3; border-radius: 3px; padding: 2px 5px">0:47</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 9px 12px">
+              <span class="m" style="font-size: 10px; color: #5d6874; border: 1px dashed #232a31; border-radius: 4px; padding: 2px 7px">+ tag</span>
+              <span class="m" style="margin-left: auto; font-size: 10px; color: #414a53">Sep 1</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- column 3 -->
+        <div style="display: flex; flex-direction: column; gap: 14px">
+          <div style="background: #12161a; border: 1px solid #1f262d; border-radius: 8px; overflow: hidden">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 11px 12px 8px">
+              <span style="width: 24px; height: 24px; border-radius: 50%; background: #4c3f5a; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #d5dde4">K</span>
+              <span style="display: flex; flex-direction: column; min-width: 0">
+                <span style="font-size: 12.5px; font-weight: 500">Kwame Boateng</span>
+                <span class="m" style="font-size: 10px; color: #5d6874">@kboateng</span>
+              </span>
+              <span style="margin-left: auto; color: #414a53">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z"></path></svg>
+              </span>
+            </div>
+            <div style="padding: 0 12px 10px; font-size: 12.5px; line-height: 1.55; color: #d5dde4">
+              A save that arrives without its content is not a save. Queue the page that carries it first, then the event — the ordering is the whole design.
+            </div>
+            <!-- a quote, nested rather than flattened -->
+            <div style="margin: 0 12px 11px; border: 1px solid #1f262d; border-radius: 7px; overflow: hidden; background: #0e1216">
+              <div style="display: flex; align-items: center; gap: 7px; padding: 9px 10px 6px">
+                <span style="width: 17px; height: 17px; border-radius: 50%; background: #3f4a34; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #d5dde4">T</span>
+                <span style="font-size: 11.5px; color: #d5dde4">thelocalfirst</span>
+                <span class="m" style="font-size: 9.5px; color: #5d6874">@thelocalfirst</span>
+              </div>
+              <div style="padding: 0 10px 10px; font-size: 11.5px; line-height: 1.5; color: #8d9aa6">
+                every sync bug I have ever shipped was an ordering bug wearing a costume
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid #1f262d">
+              <span class="m" style="font-size: 10px; color: #f5c97e; background: #e4a33c1f; border: 1px solid #e4a33c33; border-radius: 4px; padding: 2px 7px">sync</span>
+              <span class="m" style="margin-left: auto; font-size: 10px; color: #414a53">Aug 29</span>
+            </div>
+          </div>
+
+          <div style="background: #12161a; border: 1px solid #1f262d; border-radius: 8px; overflow: hidden">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 11px 12px 9px">
+              <span style="width: 24px; height: 24px; border-radius: 50%; background: #3a4a5c; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #d5dde4">A</span>
+              <span style="display: flex; flex-direction: column; min-width: 0">
+                <span style="font-size: 12.5px; font-weight: 500">Ada Okonjo</span>
+                <span class="m" style="font-size: 10px; color: #5d6874">@adaokonjo</span>
+              </span>
+              <span style="margin-left: auto; color: #414a53">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z"></path></svg>
+              </span>
+            </div>
+            <div style="padding: 0 12px 10px; font-size: 12.5px; line-height: 1.55; color: #d5dde4">
+              reminder that MV3 kills your service worker after ~30s idle, so any watchdog you set with setTimeout will simply never fire
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid #1f262d">
+              <span class="m" style="font-size: 10px; color: #5d6874; border: 1px dashed #232a31; border-radius: 4px; padding: 2px 7px">+ tag</span>
+              <span class="m" style="margin-left: auto; font-size: 10px; color: #414a53">Aug 28</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- column 4 -->
+        <div style="display: flex; flex-direction: column; gap: 14px">
+          <div style="background: #12161a; border: 1px solid #1f262d; border-radius: 8px; overflow: hidden">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 11px 12px 8px">
+              <span style="width: 24px; height: 24px; border-radius: 50%; background: #43384f; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #d5dde4">D</span>
+              <span style="display: flex; flex-direction: column; min-width: 0">
+                <span style="font-size: 12.5px; font-weight: 500">Dara Mensah</span>
+                <span class="m" style="font-size: 10px; color: #5d6874">@daramensah</span>
+              </span>
+              <span style="margin-left: auto; color: #414a53">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06v-3.1a5.66 5.66 0 0 0-.77-.05A5.66 5.66 0 1 0 15.54 15.4V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3a4.29 4.29 0 0 1-3.24-1.48z"></path></svg>
+              </span>
+            </div>
+            <div style="padding: 0 12px 10px; font-size: 12.5px; line-height: 1.55; color: #d5dde4">
+              the two-minute version of keyset pagination
+            </div>
+            <div style="position: relative; height: 178px; background: linear-gradient(160deg, #1f2a24 0%, #2b3a31 55%, #16201b 100%); border-top: 1px solid #1f262d">
+              <span style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 38px; height: 38px; border-radius: 50%; background: #0b0e1199; display: flex; align-items: center; justify-content: center">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="#e6ebef"><path d="M8 5v14l11-7z"></path></svg>
+              </span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 9px 12px">
+              <span class="m" style="font-size: 10px; color: #5d6874; border: 1px dashed #232a31; border-radius: 4px; padding: 2px 7px">+ tag</span>
+              <span class="m" style="margin-left: auto; font-size: 10px; color: #414a53">Aug 27</span>
+            </div>
+          </div>
+
+          <div style="background: #12161a; border: 1px solid #1f262d; border-radius: 8px; overflow: hidden">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 11px 12px 9px">
+              <span style="width: 24px; height: 24px; border-radius: 50%; background: #3f4a34; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #d5dde4">T</span>
+              <span style="display: flex; flex-direction: column; min-width: 0">
+                <span style="font-size: 12.5px; font-weight: 500">thelocalfirst</span>
+                <span class="m" style="font-size: 10px; color: #5d6874">@thelocalfirst</span>
+              </span>
+              <span style="margin-left: auto; color: #414a53">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z"></path></svg>
+              </span>
+            </div>
+            <div style="padding: 0 12px 10px; font-size: 12.5px; line-height: 1.55; color: #d5dde4">
+              a bookmark you cannot find again is just a bookmark-shaped hole in your memory
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid #1f262d">
+              <span class="m" style="font-size: 10px; color: #5d6874; border: 1px dashed #232a31; border-radius: 4px; padding: 2px 7px">+ tag</span>
+              <span class="m" style="margin-left: auto; font-size: 10px; color: #414a53">Aug 26</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
     </div>
   </div>
 </div>
 </x-dc>
-
-<script data-dc-script data-props='{"accent":{"editor":"color","default":"#e4a33c","options":["#e4a33c","#5fd1c0","#8fa0ff","#e07a5f"],"section":"Theme"}}'>
-class Component extends DCLogic {
-  renderVals() {
-    const cards = [
-      { thumb: 'thumb4.webp', avatar: 'av4.jpg', name: '也无风雨也雾晴', handle: '@t20000622yy', badge: 'x', isVideo: false, likes: '4.8K',
-        body: '卧槽，一觉醒来自己的项目干到 Github Trending 第一了，非常的开心。很高兴这个项目能被这么多的人喜欢。', when: '2 Sept' },
-      { thumb: 'thumb2.webp', avatar: 'av2.jpg', name: 'Ernesto Lopez', handle: '@ErnestoSOFTWARE', badge: 'x', isVideo: true, likes: '915',
-        body: 'This app idea got 1M views on X. This prompt will 1 shot it in 5 minutes.', when: '1 Sept' },
-      { thumb: 'thumb9.webp', avatar: 'av9.jpg', name: 'Inspora', handle: '@insporadesign', badge: 'x', isVideo: true, likes: '3.4K',
-        body: 'Date Range Picker by @jeetnirnejak — more on inspora.design', when: '31 Aug' },
-      { thumb: 'thumb1.webp', avatar: 'av1.jpg', name: 'm11h', handle: '@momotarabitch', badge: 'x', isVideo: false, likes: '820',
-        body: '気づいてしまったかもなのだが、AIでUIデザインするとき、手書きスケッチにするとAI臭いビジュアルが消える。', when: '2 Sept' },
-      { thumb: 'thumb8.webp', avatar: 'av8.jpg', name: 'Bryl Lim', handle: '@bryllim_', badge: 'x', isVideo: true, likes: '3.0K',
-        body: 'Generated over a 1000 svgs on my workout app with @thsottiaux ‘s codex with Image Gen', when: '29 Aug' },
-      { thumb: 'thumb3.webp', avatar: 'av3.jpg', name: '沐阳', handle: '@yyyole', badge: 'x', isVideo: true, likes: '2.0K',
-        body: '最近看到很多人都在 Vibe 类似的工具！实时同步手机陀螺仪数据和屏幕显示，很适合做产品 UI 演示的 3D 录屏。', when: '30 Aug' },
-      { thumb: 'thumb6.webp', avatar: 'av6.jpg', name: 'lumxss', handle: '@bkdgiffug', badge: 'x', isVideo: false, likes: '286',
-        body: '设计师和产品经理看过来，Peek Paper 这网站值得存一下。作品质量高得离谱，每天更新。', when: '28 Aug' },
-      { thumb: 'thumb5.webp', avatar: 'av5.jpg', name: 'Sac', handle: '@Saccc_c', badge: 'x', isVideo: true, likes: '245',
-        body: '用 Codex + Opus 5 做了一个「中国山河册」，绘制了 34 个省份行政区的地标建筑。', when: '27 Aug' },
-    ];
-    const sources = [
-      { tag: 'x',  label: 'Bookmarks', count: '1274' },
-      { tag: 'gh', label: 'Stars',     count: '0' },
-      { tag: 'r/', label: 'Reddit',    count: '0' },
-      { tag: 'tt', label: 'TikTok',    count: '0' },
-    ];
-    return { accent: this.props.accent ?? '#e4a33c', cards, sources };
-  }
-}
-</script>
 </body>
 </html>

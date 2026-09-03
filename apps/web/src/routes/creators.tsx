@@ -2,7 +2,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Rail } from "../components/rail.tsx";
 import { Detail } from "../components/detail.tsx";
+import { FieldFilter } from "../components/filters.tsx";
+import { SourceMark } from "../components/sourcemark.tsx";
 import { api, type Creator, type ItemRow } from "../lib/api.ts";
+
+/** The same order and labels the Library bar offers. */
+const PLATFORMS = [
+  { value: "x", label: "X" },
+  { value: "github", label: "GitHub" },
+  { value: "reddit", label: "Reddit" },
+  { value: "tiktok", label: "TikTok" },
+];
 
 export const Route = createFileRoute("/creators")({ component: Creators });
 
@@ -18,6 +28,7 @@ function Creators() {
   const [creators, setCreators] = useState<Creator[]>([]);
   const [stats, setStats] = useState<{ items: number; authors: number; bySource: Record<string, number> }>({ items: 0, authors: 0, bySource: {} });
   const [filter, setFilter] = useState("");
+  const [platforms, setPlatforms] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [posts, setPosts] = useState<ItemRow[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -40,7 +51,7 @@ function Creators() {
     }
     const controller = new AbortController();
     api
-      .items({ author: selected, limit: 50 }, controller.signal)
+      .items({ author: [selected], limit: 50 }, controller.signal)
       .then((p) => setPosts(p.items))
       .catch(() => {});
     return () => controller.abort();
@@ -48,11 +59,27 @@ function Creators() {
 
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return q ? creators.filter((c) => (c.authorHandle ?? "").toLowerCase().includes(q)) : creators;
-  }, [creators, filter]);
+    return creators.filter((c) => {
+      // Values within the field are ORed, exactly as the chip says.
+      if (platforms.length > 0 && !platforms.includes(c.source)) return false;
+      if (!q) return true;
+      return (
+        (c.authorHandle ?? "").toLowerCase().includes(q) ||
+        (c.authorName ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [creators, filter, platforms]);
+
+  /**
+   * The share bar is a share of what is shown.
+   *
+   * Filtering to one platform and leaving the bars scaled to the unfiltered
+   * leader would draw every remaining creator as a stub, which reads as "these
+   * people barely matter" rather than "you filtered".
+   */
+  const top = shown[0]?.saves ?? 1;
 
   const once = creators.filter((c) => c.saves === 1).length;
-  const top = creators[0]?.saves ?? 1;
   const topTenShare = stats.items
     ? Math.round((creators.slice(0, 10).reduce((n, c) => n + c.saves, 0) / stats.items) * 100)
     : 0;
@@ -78,12 +105,28 @@ function Creators() {
           <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
             {stats.authors} authors · {stats.items.toLocaleString()} saves
           </span>
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+            <FieldFilter
+              label="Platform"
+              values={platforms}
+              onChange={setPlatforms}
+              options={PLATFORMS.filter((p) => (stats.bySource[p.value] ?? 0) > 0).map((p) => ({
+                ...p,
+                count: creators.filter((c) => c.source === p.value).length,
+                icon: <SourceMark source={p.value} size={13} />,
+              }))}
+            />
+            {(platforms.length > 0 || filter.trim() !== "") && (
+              <span className="mono" style={{ fontSize: 10.5, color: "var(--faintest)" }}>
+                {shown.length.toLocaleString()} of {creators.length.toLocaleString()}
+              </span>
+            )}
+          </span>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter creators"
             style={{
-              marginLeft: "auto",
               height: 30,
               width: 210,
               padding: "0 10px",
@@ -186,6 +229,11 @@ function Creators() {
                     <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
                       @{c.authorHandle}
                     </span>
+                  </span>
+                  {/* Which platform this handle is on: two people can share a
+                      name across sites, and the count alone hides that. */}
+                  <span style={{ display: "flex", color: "var(--fainter)", flexShrink: 0 }}>
+                    <SourceMark source={c.source} size={12} />
                   </span>
                 </span>
                 <span style={{ height: 6, borderRadius: 3, background: "#1a2027", display: "block", position: "relative" }}>

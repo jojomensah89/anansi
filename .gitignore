@@ -9,3 +9,11 @@ data/
 # Fixtures ARE committed (they are the regression suite), but only after
 # being scrubbed. See fixtures/README.md.
 apps/web/.env.local
+
+# turbo build cache
+.turbo/
+
+# seeded design canvas: 2.5MB of editor payload, regenerated from the
+# .dc.html working files beside it
+design/*.html
+!design/*.dc.html

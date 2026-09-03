@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { AnansiDb } from "./types.ts";
 
 /**
@@ -48,8 +48,9 @@ export function toFtsQuery(input: string): string {
 
 export interface SearchOptions {
   query: string;
-  source?: string;
-  author?: string;
+  /** One value or several. Several means "is any of". */
+  source?: string | string[];
+  author?: string | string[];
   /** unix seconds; posts newer than this */
   since?: number;
   limit?: number;
@@ -111,8 +112,8 @@ export async function searchItems(db: AnansiDb, opts: SearchOptions): Promise<Se
     from items_fts
     join items i on i.rowid = items_fts.rowid
     where items_fts match ${match}
-      and (${opts.source ?? null} is null or i.source = ${opts.source ?? null})
-      and (${opts.author ?? null} is null or i.author_handle = ${opts.author ?? null})
+      ${anyOf(sql`i.source`, opts.source)}
+      ${anyOf(sql`i.author_handle`, opts.author)}
       and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
     order by score
     limit ${limit}
@@ -289,6 +290,40 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
 }
 
 /**
+ * One value, several, or none.
+ *
+ * A filter with nothing selected is not a filter matching nothing — it is an
+ * absent filter. Returning an empty clause for an empty list is what makes
+ * clearing the last value out of a chip behave the way the chip looks.
+ */
+function toList(value: string | string[] | undefined): string[] {
+  if (value === undefined || value === null) return [];
+  const list = Array.isArray(value) ? value : [value];
+  return [...new Set(list.filter((v) => typeof v === "string" && v.length > 0))];
+}
+
+/** `is any of`, as SQL. Every value is bound; nothing is interpolated. */
+function anyOf(column: SQL, value: string | string[] | undefined): SQL {
+  const list = toList(value);
+  if (list.length === 0) return sql``;
+  return sql`and ${column} in (${sql.join(
+    list.map((v) => sql`${v}`),
+    sql`, `,
+  )})`;
+}
+
+function tagClause(value: string | string[] | undefined): SQL {
+  const list = toList(value);
+  if (list.length === 0) return sql``;
+  return sql`and exists (
+    select 1 from item_tags it join tags t on t.id = it.tag_id
+     where it.item_id = i.id and t.label in (${sql.join(
+       list.map((v) => sql`${v}`),
+       sql`, `,
+     )}))`;
+}
+
+/**
  * Archived items are out of the library unless you ask for them. The flag is
  * the whole point of Archive being a flag: the row is still there for search
  * to find when you go looking for it deliberately.
@@ -316,25 +351,40 @@ function mediaClause(media: string | undefined) {
  * recorded rather than flattened into a column that would need backfilling
  * every time a source is added.
  */
-function typeClause(type: string | undefined) {
+function typePredicate(type: string): SQL | null {
   switch (type) {
     case "video":
-      return sql`and exists (select 1 from media m where m.item_id = i.id and m.kind = 'video_poster')`;
+      return sql`exists (select 1 from media m where m.item_id = i.id and m.kind = 'video_poster')`;
     case "article":
-      return sql`and json_array_length(coalesce(json_extract(i.raw, '$.links'), '[]')) > 0`;
+      return sql`json_array_length(coalesce(json_extract(i.raw, '$.links'), '[]')) > 0`;
     case "comment":
-      return sql`and json_extract(i.raw, '$.isComment') = 1`;
+      return sql`json_extract(i.raw, '$.isComment') = 1`;
     case "repo":
-      return sql`and i.kind = 'repo'`;
+      return sql`i.kind = 'repo'`;
     case "thread":
-      return sql`and json_extract(i.raw, '$.inReplyToStatusId') is not null`;
+      return sql`json_extract(i.raw, '$.inReplyToStatusId') is not null`;
     case "post":
-      return sql`and i.kind = 'post'
-                 and not exists (select 1 from media m
-                                  where m.item_id = i.id and m.kind = 'video_poster')`;
+      return sql`(i.kind = 'post'
+                  and not exists (select 1 from media m
+                                   where m.item_id = i.id and m.kind = 'video_poster'))`;
     default:
-      return sql``;
+      return null;
   }
+}
+
+/**
+ * Several types mean "any of them", not "all of them".
+ *
+ * Anded together they are a contradiction — nothing is both a repo and a
+ * comment — and a two-type filter returning an empty grid looks exactly like
+ * a broken library.
+ */
+function typeClause(type: string | string[] | undefined): SQL {
+  const parts = toList(type)
+    .map(typePredicate)
+    .filter((p): p is SQL => p !== null);
+  if (parts.length === 0) return sql``;
+  return sql`and (${sql.join(parts, sql` or `)})`;
 }
 
 export type ListOrder = "saved" | "posted";
@@ -353,14 +403,15 @@ export interface ListOptions {
    * makes both orders total when timestamps or source keys tie.
    */
   cursor?: string;
-  source?: string;
-  author?: string;
+  /** One value or several. Several means "is any of". */
+  source?: string | string[];
+  author?: string | string[];
   limit?: number;
-  /** "any" | "image" | "video" | "none" */
+  /** "any" | "image" | "video" | "none". Single: these are exclusive. */
   media?: string;
   /** post | video | article | comment | repo | thread */
-  contentType?: string;
-  tag?: string;
+  contentType?: string | string[];
+  tag?: string | string[];
   /** Archived items are excluded unless asked for. */
   archived?: boolean;
   /** Bookmark order by default; "posted" is chronological by the post's date. */
@@ -437,12 +488,11 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
            json_extract(i.raw, '$.quoted') as quotedJson,
            i.metrics as metricsJson
     from items i
-    where (${opts.source ?? null} is null or i.source = ${opts.source ?? null})
-      and (${opts.author ?? null} is null or i.author_handle = ${opts.author ?? null})
+    where 1 = 1
+      ${anyOf(sql`i.source`, opts.source)}
+      ${anyOf(sql`i.author_handle`, opts.author)}
       ${keyset}
-      and (${opts.tag ?? null} is null or exists (
-            select 1 from item_tags it join tags t on t.id = it.tag_id
-             where it.item_id = i.id and t.label = ${opts.tag ?? null}))
+      ${tagClause(opts.tag)}
       ${archiveClause(opts.archived)}
       ${mediaClause(opts.media)}
       ${typeClause(opts.contentType)}

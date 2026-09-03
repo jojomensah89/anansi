@@ -49,11 +49,13 @@ export function mediaUrl(key: string): string {
 export interface ItemQuery {
   /** Opaque; its shape depends on `order`. Pass back what the page returned. */
   cursor?: string | null;
-  source?: string;
-  author?: string;
+  /** "is any of": several values on one field widen it, they do not narrow it. */
+  source?: string[];
+  author?: string[];
+  /** Single, because "has media" and "no media" cannot both be true. */
   media?: string;
-  type?: string;
-  tag?: string;
+  type?: string[];
+  tag?: string[];
   archived?: boolean;
   order?: "saved" | "posted";
   limit?: number;
@@ -99,11 +101,11 @@ export const api = {
   items: (opts: ItemQuery = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (opts.cursor != null) q.set("cursor", String(opts.cursor));
-    if (opts.source) q.set("source", opts.source);
-    if (opts.author) q.set("author", opts.author);
+    for (const s of opts.source ?? []) q.append("source", s);
+    for (const a of opts.author ?? []) q.append("author", a);
     if (opts.media) q.set("media", opts.media);
-    if (opts.type) q.set("type", opts.type);
-    if (opts.tag) q.set("tag", opts.tag);
+    for (const t of opts.type ?? []) q.append("type", t);
+    for (const t of opts.tag ?? []) q.append("tag", t);
     if (opts.archived) q.set("archived", "1");
     if (opts.order === "posted") q.set("order", "posted");
     q.set("limit", String(opts.limit ?? 60));

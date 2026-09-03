@@ -238,3 +238,82 @@ describe("handleApi", () => {
     expect((await get("/api/nope")).status).toBe(404);
   });
 });
+
+describe("repeated filter params", () => {
+  beforeAll(async () => {
+    await upsertItems(db, [
+      {
+        source: "reddit",
+        externalId: "r-1",
+        url: "https://www.reddit.com/r/x/comments/r1/",
+        kind: "post",
+        authorHandle: "redditor",
+        body: "a reddit save",
+        postedAt: 1_788_380_000,
+        savedAt: 1_788_380_000,
+        savedAtIsExact: false,
+        metrics: {},
+        media: [],
+        links: [],
+        raw: {},
+      },
+      {
+        source: "github",
+        externalId: "g-1",
+        url: "https://github.com/anansi/anansi",
+        kind: "repo",
+        authorHandle: "anansi",
+        body: "a starred repo",
+        postedAt: 1_788_370_000,
+        savedAt: 1_788_370_000,
+        savedAtIsExact: true,
+        metrics: {},
+        media: [],
+        links: [],
+        raw: {},
+      },
+    ]);
+  });
+
+  test("?source=a&source=b returns both, not neither", async () => {
+    const body = await readJson(get("/api/items?source=reddit&source=github&limit=50"));
+    const sources = [...new Set(body.items.map((i: any) => i.source))].sort();
+
+    expect(sources).toEqual(["github", "reddit"]);
+  });
+
+  test("the first value is not the only one used", async () => {
+    // github alone matches one item; if only the first param were read this
+    // would return that one item rather than both.
+    const body = await readJson(get("/api/items?source=github&source=reddit&limit=50"));
+
+    expect(body.items.length).toBe(2);
+  });
+
+  test("one value still behaves exactly as before", async () => {
+    const body = await readJson(get("/api/items?source=reddit&limit=50"));
+
+    expect(body.items.length).toBe(1);
+    expect(body.items[0].source).toBe("reddit");
+  });
+
+  test("no filter param is no filter, not an empty library", async () => {
+    const body = await readJson(get("/api/items?limit=50"));
+
+    expect(body.items.length).toBeGreaterThan(12);
+  });
+
+  test("content types are ORed across the wire too", async () => {
+    const body = await readJson(get("/api/items?type=repo&type=comment&limit=50"));
+
+    expect(body.items.map((i: any) => i.source)).toEqual(["github"]);
+  });
+
+  test("a hostile value is bound, not interpolated", async () => {
+    const hostile = encodeURIComponent("x') or 1=1 --");
+    const res = await get(`/api/items?source=reddit&source=${hostile}&limit=50`);
+
+    expect(res.status).toBe(200);
+    expect((await res.json() as any).items.length).toBe(1);
+  });
+});
