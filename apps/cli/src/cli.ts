@@ -1,5 +1,7 @@
 import { parseArgs } from "node:util";
 import { createXAdapter } from "./adapters/x/adapter.ts";
+import { createGithubAdapter } from "./adapters/github/adapter.ts";
+import type { CaptureAdapter } from "./adapters/types.ts";
 import { envCookies, envSession } from "./session/env.ts";
 import { reparse, runImport, summarize } from "./core/import.ts";
 import type { ImportSummary } from "./core/import.ts";
@@ -26,6 +28,10 @@ const USAGE = `anansi — day 1: the importer
       Read a JSON file the snippet downloaded, for when the bridge popup
       was blocked. Same destination, different courier.
 
+
+  anansi import github [--incremental] [--pages N]
+      Your starred repos. Documented API, a scoped token, and a real
+      starred_at — the only exact saved-at in the library.
 
   anansi import x [--incremental] [--pages N] [--resume] [--dry-run]
       Headless capture for YOUR OWN machine, using cookies in .env. Useful
@@ -90,9 +96,22 @@ function report(summary: ImportSummary): void {
   }
 }
 
+/**
+ * The only place that knows which sources exist.
+ *
+ * `capture: false` builds a parse-only adapter — reparse and the ingest
+ * server both need to normalize payloads already on disk, and neither should
+ * be able to demand a credential to do it.
+ */
+function adapterFor(source: string, capture = false): CaptureAdapter | undefined {
+  if (source === "x") return createXAdapter(capture ? { session: envSession } : {});
+  if (source === "github") return createGithubAdapter();
+  return undefined;
+}
+
 async function ingest(port?: number): Promise<void> {
   const startedAt = Date.now();
-  const adapter = createXAdapter({});   // parse only; no session, by design
+  const adapter = adapterFor("x")!;   // parse only; no session, by design
 
   const server = await startIngestServer({
     source: "x",
@@ -154,7 +173,7 @@ async function ingestFile(path: string): Promise<void> {
   }
   console.log(`  wrote ${pages.length} raw pages. Parsing…`);
 
-  const summary = await reparseFromDisk(createXAdapter({}));
+  const summary = await reparseFromDisk(adapterFor("x")!);
   const alarm = await recordRun("x", { pages: pages.length, items: summary.itemsTotal }, startedAt);
   report({ ...summary, zeroItemAlarm: alarm });
 }
@@ -289,28 +308,28 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (target !== "x") {
-    // github lands on day 5; the adapter directory is already waiting for it.
-    console.error(`Unknown or unimplemented source: ${target ?? "(none)"} — only "x" exists today.`);
+  const source = target ?? "x";
+  if (!adapterFor(source)) {
+    console.error(`Unknown source: ${source}. Try "x" or "github".`);
     process.exitCode = 1;
     return;
   }
 
   if (command === "stats") {
-    const items = await readJsonl<NormalizedItem>("items-x.jsonl");
+    const items = await readJsonl<NormalizedItem>(`items-${source}.jsonl`);
     console.log(JSON.stringify(summarize(items), null, 2));
     return;
   }
 
-  const adapter = createXAdapter({ session: envSession });
+  const adapter = adapterFor(source, true)!;
 
   if (command === "reparse") {
     console.log("  reparsing raw pages from disk…");
     return report(await reparse(adapter));
   }
 
-  const checkpoint = await loadCheckpoint("x");
-  console.log(`  importing x bookmarks${values.incremental ? " (incremental)" : ""}…`);
+  const checkpoint = await loadCheckpoint(source as "x" | "github");
+  console.log(`  importing ${source}${values.incremental ? " (incremental)" : ""}…`);
   report(
     await runImport(adapter, {
       incremental: values.incremental,

@@ -61,6 +61,7 @@ the extension's CSP, not the page's. This is the zero-install path until then.
 | `anansi stats x` | authors, media, date range, top ten |
 | `anansi search "<q>"` | bm25-ranked keyword search, snippet highlighted |
 | `anansi recent` | newest saves first |
+| `anansi import github` | your starred repos, with a real `starred_at` |
 | `anansi serve --mcp` | the four MCP tools over stdio, for your agent |
 | `anansi db migrate` | create or update `data/anansi.db` |
 | `anansi db creators` | top authors, as a group-by |
@@ -203,10 +204,33 @@ it. Everything raw is actually consulted for — links, thread siblings, media �
 is extracted instead. `apps/cli/scripts/mcp-smoke.ts` drives the whole thing
 over real stdio and fails if any of that regresses.
 
+### GitHub, and what it proved
+
+Adding a second source touched **no file** in `core/`, `packages/db`,
+`packages/mcp` or `store/` — only a parser, a client, an adapter and one line
+of dispatch. That is what the `CaptureAdapter` seam was for, and it is the
+reason GitHub is second rather than tenth.
+
+It is a genuine contrast with X. A documented endpoint, real pagination
+(`Link: rel="next"`, with page number carried in the same `cursor` field the X
+adapter fills with an opaque string), and `Accept:
+application/vnd.github.star+json`, which is the whole reason to bother early:
+without it you get a bare repo list, with it every entry carries `starred_at`.
+**That is the first exact saved-at in the library**, and currently the only
+thing exercising `saved_at_exact`.
+
+`GITHUB_TOKEN` in `.env` is fine to ask for, unlike the X cookies: a
+fine-grained PAT is purpose-scoped, read-only, revocable from a settings page,
+and carries no session.
+
+One honest limit. Cross-source recency is approximate until X can produce real
+timestamps — backfilled X items are stamped with import time, so they outrank
+stars you added months ago. Within a source the ordering is correct, and
+`recent_saves(source: "github")` is exact.
+
 ## What is deliberately not here yet
 
-GitHub (day 5), media to R2 (day 6-7).
-`apps/cli/src/adapters/github/` is an empty directory waiting.
+Media to R2 (day 6-7), the edge deploy (day 8-9).
 
 ## Terms
 

@@ -1,0 +1,51 @@
+{
+  "starred": [
+    {
+      "starred_at": "2026-07-12T09:14:03Z",
+      "repo": {
+        "id": 812345678,
+        "node_id": "R_kgDOMHgQ7g",
+        "name": "firecrawl",
+        "full_name": "firecrawl/firecrawl",
+        "html_url": "https://github.com/firecrawl/firecrawl",
+        "description": "Turn entire websites into LLM-ready markdown or structured data. Scrape, crawl and extract with a single API.",
+        "homepage": "https://firecrawl.dev",
+        "language": "TypeScript",
+        "stargazers_count": 63400,
+        "forks_count": 5210,
+        "open_issues_count": 187,
+        "subscribers_count": 402,
+        "topics": ["scraping", "llm", "markdown"],
+        "archived": false,
+        "created_at": "2024-04-15T11:02:00Z",
+        "pushed_at": "2026-08-30T18:44:12Z",
+        "owner": { "login": "firecrawl", "type": "Organization" }
+      }
+    },
+    {
+      "starred_at": "2026-05-04T21:00:00Z",
+      "repo": {
+        "id": 799000111,
+        "node_id": "R_kgDOL9AAAA",
+        "name": "mastra",
+        "full_name": "mastra-ai/mastra",
+        "html_url": "https://github.com/mastra-ai/mastra",
+        "description": "The TypeScript AI agent framework. Assistants, RAG, observability. Supports any LLM.",
+        "homepage": null,
+        "language": "TypeScript",
+        "stargazers_count": 17200,
+        "forks_count": 980,
+        "open_issues_count": 64,
+        "watchers_count": 120,
+        "topics": ["agents", "typescript"],
+        "archived": false,
+        "created_at": "2024-08-01T00:00:00Z",
+        "pushed_at": "2026-08-29T07:11:00Z",
+        "owner": { "login": "mastra-ai", "type": "Organization" }
+      }
+    }
+  ],
+  "readmes": {
+    "firecrawl/firecrawl": "# Firecrawl\n\nEmpower your AI apps with clean data from any website.\n\n## Installation\n\nnpm install @mendable/firecrawl-js"
+  }
+}
