@@ -114,18 +114,14 @@ export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemR
  */
 export function TimelineView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemRow) => void }) {
   /**
-   * Sorted here, not by the query.
-   *
-   * The list arrives in bookmark order, which is the right order for every
-   * other view and the wrong one for this: consecutive saves jump between
-   * months, so grouping the sequence as it comes produces "September",
-   * "August", "September" again. A timeline has to be chronological before
-   * it can be grouped.
+   * The query returns these in date order (`order=posted`), so grouping the
+   * sequence as it arrives is correct and, unlike a client-side sort, stays
+   * correct as more pages load: page two continues where page one ended
+   * rather than reshuffling everything above it.
    */
   const groups: { label: string; items: ItemRow[] }[] = [];
-  const ordered = [...items].sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0));
 
-  for (const item of ordered) {
+  for (const item of items) {
     const label = item.postedAt
       ? new Date(item.postedAt * 1000).toLocaleDateString("en-GB", { month: "long", year: "numeric" })
       : "undated";

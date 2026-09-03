@@ -67,6 +67,7 @@ export const items = sqliteTable(
     uniqueIndex("items_source_external").on(t.source, t.externalId),
     index("items_saved").on(t.savedAt),
     index("items_save_order").on(t.saveOrder),
+    index("items_posted").on(t.postedAt),
     index("items_archived").on(t.archivedAt),
     index("items_author").on(t.authorHandle),
   ],

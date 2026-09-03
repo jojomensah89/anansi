@@ -47,19 +47,21 @@ export function mediaUrl(key: string): string {
 }
 
 export interface ItemQuery {
-  cursor?: number | null;
+  /** Opaque; its shape depends on `order`. Pass back what the page returned. */
+  cursor?: string | null;
   source?: string;
   author?: string;
   media?: string;
   type?: string;
   tag?: string;
   archived?: boolean;
+  order?: "saved" | "posted";
   limit?: number;
 }
 
 export interface Page {
   items: ItemRow[];
-  nextCursor: number | null;
+  nextCursor: string | null;
 }
 
 export interface Creator {
@@ -103,6 +105,7 @@ export const api = {
     if (opts.type) q.set("type", opts.type);
     if (opts.tag) q.set("tag", opts.tag);
     if (opts.archived) q.set("archived", "1");
+    if (opts.order === "posted") q.set("order", "posted");
     q.set("limit", String(opts.limit ?? 60));
     return get<Page>(`/api/items?${q}`, signal);
   },

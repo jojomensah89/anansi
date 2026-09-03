@@ -337,9 +337,16 @@ function typeClause(type: string | undefined) {
   }
 }
 
+export type ListOrder = "saved" | "posted";
+
 export interface ListOptions {
-  /** The save_order of the last item on the previous page. */
-  cursor?: number;
+  /**
+   * Opaque, and shaped by `order`. Saved order carries a save_order; posted
+   * order carries "postedAt.id", because two posts can share a second and a
+   * cursor that cannot break that tie drops or repeats items at every page
+   * boundary it lands on.
+   */
+  cursor?: string;
   source?: string;
   author?: string;
   limit?: number;
@@ -350,6 +357,8 @@ export interface ListOptions {
   tag?: string;
   /** Archived items are excluded unless asked for. */
   archived?: boolean;
+  /** Bookmark order by default; "posted" is chronological by the post's date. */
+  order?: ListOrder;
 }
 
 /**
@@ -360,6 +369,34 @@ export interface ListOptions {
  */
 export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
   const limit = Math.min(opts.limit ?? 50, 200);
+  const posted = opts.order === "posted";
+
+  /**
+   * Keyset paging in whichever order was asked for.
+   *
+   * `coalesce(posted_at, 0)` rather than `nulls last`: an undated item has to
+   * sit at one consistent end for the cursor comparison to stay total, and a
+   * source without a posted date (a Reddit save has one, a future source may
+   * not) would otherwise fall out of paging entirely.
+   */
+  const [cursorAt, cursorId] = posted
+    ? [Number(opts.cursor?.split(".")[0] ?? NaN), opts.cursor?.split(".").slice(1).join(".") ?? ""]
+    : [Number(opts.cursor ?? NaN), ""];
+  const hasCursor = Number.isFinite(cursorAt);
+
+  const keyset = posted
+    ? hasCursor
+      ? sql`and (coalesce(i.posted_at, 0) < ${cursorAt}
+                 or (coalesce(i.posted_at, 0) = ${cursorAt} and i.id > ${cursorId}))`
+      : sql``
+    : hasCursor
+      ? sql`and i.save_order < ${cursorAt}`
+      : sql``;
+
+  const ordering = posted
+    ? sql`order by coalesce(i.posted_at, 0) desc, i.id asc`
+    : sql`order by i.save_order desc nulls last, i.saved_at desc`;
+
   const rows = await db.all<SearchHit & { saveOrder: number | null }>(sql`
     select i.id, i.url, i.author_handle as author, i.author_name as authorName,
            i.author_avatar as authorAvatar,
@@ -378,14 +415,14 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
     from items i
     where (${opts.source ?? null} is null or i.source = ${opts.source ?? null})
       and (${opts.author ?? null} is null or i.author_handle = ${opts.author ?? null})
-      and (${opts.cursor ?? null} is null or i.save_order < ${opts.cursor ?? null})
+      ${keyset}
       and (${opts.tag ?? null} is null or exists (
             select 1 from item_tags it join tags t on t.id = it.tag_id
              where it.item_id = i.id and t.label = ${opts.tag ?? null}))
       ${archiveClause(opts.archived)}
       ${mediaClause(opts.media)}
       ${typeClause(opts.contentType)}
-    order by i.save_order desc nulls last, i.saved_at desc
+    ${ordering}
     limit ${limit + 1}
   `);
 
@@ -422,7 +459,14 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
       quoted: quoted ? { ...quoted, media: all.filter((m) => quotedUrls.has(m.url)) } : null,
     };
   });
-  return { items: page, nextCursor: hasMore ? (page.at(-1)?.saveOrder ?? null) : null };
+  const last = page.at(-1);
+  const nextCursor = !hasMore || !last
+    ? null
+    : posted
+      ? `${last.postedAt ?? 0}.${last.id}`
+      : String(last.saveOrder ?? "");
+
+  return { items: page, nextCursor };
 }
 
 /**

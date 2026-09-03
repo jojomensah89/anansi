@@ -76,13 +76,14 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
   if (request.method === "GET" && path === "/api/items") {
     return json(
       await listItems(env.db, {
-        cursor: num(q.get("cursor")),
+        cursor: q.get("cursor") ?? undefined,
         source: q.get("source") ?? undefined,
         author: q.get("author") ?? undefined,
         media: q.get("media") ?? undefined,
         contentType: q.get("type") ?? undefined,
         tag: q.get("tag") ?? undefined,
         archived: q.get("archived") === "1",
+        order: q.get("order") === "posted" ? "posted" : "saved",
         limit: num(q.get("limit"), 50),
       }),
     );

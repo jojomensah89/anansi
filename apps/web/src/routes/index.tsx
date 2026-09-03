@@ -24,7 +24,7 @@ export const Route = createFileRoute("/")({ component: Library });
  */
 function Library() {
   const [items, setItems] = useState<ItemRow[]>([]);
-  const [cursor, setCursor] = useState<number | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,18 +53,28 @@ function Library() {
 
   useEffect(() => refreshStats(), [refreshStats]);
 
-  // A filter change is a different query, not more of the same one.
+  // A filter change is a different query, not more of the same one — and so
+  // is switching to or from Timeline, which changes the sort order.
+  const ordering = view === "timeline" ? "posted" : "saved";
   useEffect(() => {
     setItems([]);
     setCursor(null);
     setDone(false);
-  }, [filters]);
+  }, [filters, ordering]);
 
   const loadMore = useCallback(async () => {
     if (done) return;
     setLoading(true);
     try {
-      const page = await api.items({ ...filters, cursor, limit: 60 });
+      const page = await api.items({
+        ...filters,
+        cursor,
+        // Timeline needs the whole library in date order, not the loaded page
+        // re-sorted — otherwise its groups are only true of what you happen
+        // to have scrolled past.
+        order: view === "timeline" ? "posted" : "saved",
+        limit: 60,
+      });
       setItems((prev) => [...prev, ...page.items]);
       setCursor(page.nextCursor);
       if (page.nextCursor === null) setDone(true);
@@ -75,7 +85,7 @@ function Library() {
     } finally {
       setLoading(false);
     }
-  }, [cursor, done, filters]);
+  }, [cursor, done, filters, view]);
 
   useEffect(() => {
     if (items.length === 0 && !done) void loadMore();

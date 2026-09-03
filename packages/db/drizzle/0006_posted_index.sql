@@ -1,0 +1,1 @@
+CREATE INDEX `items_posted` ON `items` (`posted_at`);

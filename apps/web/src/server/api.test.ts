@@ -28,12 +28,44 @@ describe("handleApi", () => {
   test("GET /api/items paginates by keyset, not offset", async () => {
     const first = await readJson(get("/api/items?limit=5"));
     expect(first.items).toHaveLength(5);
-    expect(first.nextCursor).toBeNumber();
+    // Opaque on purpose: its shape depends on the order asked for.
+    expect(first.nextCursor).toBeString();
 
     const second = await readJson(get(`/api/items?limit=5&cursor=${first.nextCursor}`));
     const overlap = second.items.filter((i: { id: string }) =>
       first.items.some((f: { id: string }) => f.id === i.id));
     expect(overlap).toHaveLength(0);
+  });
+
+  /**
+   * The property that matters for Timeline: paging the whole library in date
+   * order reaches every item exactly once. Two posts can share a second, so a
+   * cursor that cannot break that tie drops or repeats items at any page
+   * boundary that lands on one.
+   */
+  test("order=posted walks the whole library, in order, without repeats", async () => {
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    let previous = Infinity;
+    let pages = 0;
+
+    do {
+      const q = new URLSearchParams({ order: "posted", limit: "200" });
+      if (cursor) q.set("cursor", cursor);
+      const page = await readJson(get(`/api/items?${q}`));
+      pages++;
+      for (const item of page.items) {
+        expect(seen.has(item.id)).toBe(false);
+        seen.add(item.id);
+        const at = item.postedAt ?? 0;
+        expect(at).toBeLessThanOrEqual(previous);
+        previous = at;
+      }
+      cursor = page.nextCursor;
+    } while (cursor && pages < 25);
+
+    const stats = await readJson(get("/api/stats"));
+    expect(seen.size).toBe(stats.items);
   });
 
   test("GET /api/search returns bm25-ranked hits", async () => {
