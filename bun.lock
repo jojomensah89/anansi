@@ -36,6 +36,7 @@
       "name": "@anansi/extension",
       "version": "0.0.0",
       "dependencies": {
+        "@anansi/sources": "workspace:*",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",
       },
@@ -43,6 +44,7 @@
         "@types/react": "^19.2.14",
         "@types/react-dom": "^19.2.3",
         "@wxt-dev/module-react": "^1.1.5",
+        "fake-indexeddb": "^6.2.5",
         "typescript": "^5.9.3",
         "web-ext": "^10.5.0",
         "wxt": "^0.21.3",
@@ -1303,6 +1305,8 @@
     "express-rate-limit": ["express-rate-limit@8.7.0", "", { "dependencies": { "debug": "^4.4.3", "ip-address": "^10.2.0" }, "peerDependencies": { "express": ">= 4.11" } }, "sha512-hOwV7WOxXfjRpAM1DSJWZDXx3GhplwD8IfwuwvogD8i1Qnkgosw/H45s4ZnFAUHDAhPjlY9hLBvJhKmGMyY26g=="],
 
     "exsolve": ["exsolve@1.1.1", "", {}, "sha512-9U/jZUgjnSGyntRr6y5Muu1MJcwFl6kPu7k8qLF0IMNfLqvw0NZ4nnVDq0RVoZ0RvCyumib4Ez3KYrVfilrw+g=="],
+
+    "fake-indexeddb": ["fake-indexeddb@6.2.5", "", {}, "sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w=="],
 
     "fast-check": ["fast-check@4.9.0", "", { "dependencies": { "pure-rand": "^8.0.0" } }, "sha512-7ms6T7SybUev/PQITciI0yLM2pOSFy5zpG8Ty7tQofcVaQUvrMXp6CBwqF6fThLCLOrfBtuHAtwq6Yu4XPCllg=="],
 
