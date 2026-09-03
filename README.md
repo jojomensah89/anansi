@@ -390,12 +390,19 @@ bun run dev:web    # with VITE_API_BASE=http://127.0.0.1:8788 in apps/web/.env.l
 automatic — and the thing that deletes the bridge window, because a content
 script's fetches are bound by the **extension's** CSP, not the page's.
 
-Two content scripts, and both halves are load-bearing:
+Four content scripts:
 
 ```
-x-main    MAIN world, document_start   — X's own JS context
-x-relay   isolated,   document_start   — extension APIs
+x-main       MAIN     document_start   x.com       pages the timeline
+tiktok-main  MAIN     document_start   tiktok.com  observes only
+relay        isolated document_start   both        MAIN <-> background
+reddit       isolated document_idle    reddit.com  pages saved.json
 ```
+
+Reddit needs no MAIN world: there is no queryId buried in a lazy chunk, a
+content script's same-origin fetch already carries the session, and extension
+APIs are there — so it talks to the background worker directly. X and TikTok
+both need it, for opposite halves of the same reason.
 
 `MAIN` because the isolated world cannot see
 `window.webpackChunk_twitter_responsive_web`, where the Bookmarks queryId
@@ -425,6 +432,18 @@ is the failure the whole project exists to notice.
 Permissions are `storage`, `tabs`, and three hosts. No `<all_urls>` — broad
 permissions are the biggest driver of review scrutiny, and this needs exactly
 what it asks for.
+
+### Automatic sync
+
+`chrome.alarms`, set from the popup: off, 1h, 2h, 6h or daily. Every capture
+path stops at the first thing it has already seen and the ingest upsert is
+idempotent, so a repeated run costs one request and changes nothing.
+
+**A sync needs the relevant tab open.** Capture runs in your own logged-in tab
+rather than from the background worker, which would mean taking the `cookies`
+permission and rebuilding a session the page already has. That is a far broader
+grant than the convenience is worth, and the cost of not taking it is stated in
+the popup rather than hidden.
 
 ### Load it
 
