@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { Source } from "../core/item.ts";
 import { dataPath, ensureDir } from "../store/files.ts";
 import { loadCheckpoint, saveCheckpoint, zeroItemRegression } from "../store/checkpoint.ts";
@@ -115,7 +114,11 @@ function bridgeHtml(token: string): string {
 
 export async function startIngestServer(opts: IngestOptions): Promise<IngestServer> {
   const port = opts.port ?? 8787;
-  const token = randomBytes(16).toString("hex");
+  // Web Crypto rather than node:crypto — one fewer node builtin in a file
+  // whose logic moves into a Worker on day 8.
+  const token = [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
   const runId = Date.now();
   const dir = dataPath("raw", opts.source);
   await ensureDir(dir);

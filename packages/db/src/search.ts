@@ -235,3 +235,37 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     thread,
   };
 }
+
+export interface ListOptions {
+  /** The save_order of the last item on the previous page. */
+  cursor?: number;
+  source?: string;
+  author?: string;
+  limit?: number;
+}
+
+/**
+ * The grid's query. Keyset pagination on save_order rather than offset,
+ * because offset pagination silently drops or repeats items whenever the set
+ * changes underneath it — and an importer running while someone scrolls is
+ * exactly that.
+ */
+export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
+  const limit = Math.min(opts.limit ?? 50, 200);
+  const rows = await db.all<SearchHit & { saveOrder: number | null }>(sql`
+    select i.id, i.url, i.author_handle as author, i.author_name as authorName,
+           i.title, i.posted_at as postedAt, i.saved_at as savedAt,
+           i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
+           substr(coalesce(i.body, ''), 1, 300) as excerpt, 0 as score
+    from items i
+    where (${opts.source ?? null} is null or i.source = ${opts.source ?? null})
+      and (${opts.author ?? null} is null or i.author_handle = ${opts.author ?? null})
+      and (${opts.cursor ?? null} is null or i.save_order < ${opts.cursor ?? null})
+    order by i.save_order desc nulls last, i.saved_at desc
+    limit ${limit + 1}
+  `);
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  return { items: page, nextCursor: hasMore ? (page.at(-1)?.saveOrder ?? null) : null };
+}

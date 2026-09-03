@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ESNext",
     "module": "Preserve",
     "moduleResolution": "bundler",
@@ -15,7 +15,7 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
 
-    "types": ["bun"]
+    "types": ["bun", "node"]
   },
   "include": ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts", "packages/*/*.config.ts", "packages/*/scripts/**/*.ts", "apps/*/scripts/**/*.ts"]
 }

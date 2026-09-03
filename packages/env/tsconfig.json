@@ -1,0 +1,3 @@
+{
+  "extends": "@anansi/config/tsconfig.base.json"
+}

@@ -10,7 +10,11 @@ FTS5 already indexed.
 
 ```
 apps/cli/        the importer, adapters, ingest receiver
+apps/web/        TanStack Start on Workers: the JSON API and /mcp
 packages/db/     schema, migrations, the driver-taking db module
+packages/mcp/    the four tools, transport-agnostic
+packages/infra/  D1 + R2 + the Worker, as Alchemy resources
+packages/env/    the Worker's bindings, typed from infra
 ```
 
 Bun workspaces, laid out the way Better-T-Stack does, so day 8-9 adds
@@ -261,9 +265,37 @@ carried across on `(item_id, origin_url)`.
 The R2 path is wired but **unverified against a live bucket** — that needs a
 Cloudflare account, which days 1-7 deliberately do not require.
 
+### The edge
+
+Generated with Better-T-Stack and merged, rather than hand-rolled:
+
+```bash
+bun create better-t-stack@latest anansi-web   --frontend tanstack-start --backend self --runtime none   --database sqlite --orm drizzle --db-setup d1   --api none --auth none --addons none --examples none   --web-deploy cloudflare --package-manager bun
+```
+
+Two flags were found by running it rather than reading about it.
+`--backend self` means the fullstack framework hosts its own backend and
+**requires `--runtime none`** — it produces `apps/web` and no `apps/server`,
+which is what the "MCP tools call the same functions the HTTP routes call"
+rule wants. And `--database sqlite` alone means *Turso*; `--db-setup d1` is
+what actually produces `drizzle-orm/d1` and a `Cloudflare.D1.Database`.
+
+The API is a plain `Request -> Response` function with the TanStack route as a
+three-line wrapper, so it is tested against the real library with no framework
+in the way. `/mcp` uses the SDK's `WebStandardStreamableHTTPServerTransport` —
+a Worker has `Request` and `Response`, not node req/res streams — and serves
+the identical `createAnansiServer` the stdio CLI does.
+
+Both `/api/ingest` and `/mcp` are **closed unless a token is configured**. An
+open ingest on a public URL is an invitation to have someone else's library
+merged into yours.
+
+**Not yet deployed.** `bun run deploy` needs a Cloudflare account, which
+nothing before this point required.
+
 ## What is deliberately not here yet
 
-The edge deploy (day 8-9).
+The interface (day 10-11) and the extension (day 13).
 
 ## Terms
 
