@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ItemDetail } from "@anansi/db";
-import { api, compact } from "../lib/api.ts";
+import { api, compact, mediaUrl } from "../lib/api.ts";
 
 /**
  * The item detail, as a drawer rather than a route.
@@ -76,15 +76,30 @@ export function Detail({ id, onClose }: { id: string | null; onClose: () => void
         {item && (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 20 }}>
-              <span
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: item.source === "github" ? 6 : "50%",
-                  background: "var(--edge-strong)",
-                  flexShrink: 0,
-                }}
-              />
+              {item.authorAvatar ? (
+                <img
+                  src={item.authorAvatar}
+                  alt=""
+                  width={38}
+                  height={38}
+                  style={{
+                    borderRadius: item.source === "github" ? 6 : "50%",
+                    flexShrink: 0,
+                    objectFit: "cover",
+                    background: "var(--edge-strong)",
+                  }}
+                />
+              ) : (
+                <span
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: item.source === "github" ? 6 : "50%",
+                    background: "var(--edge-strong)",
+                    flexShrink: 0,
+                  }}
+                />
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                 <span style={{ fontSize: 14.5, fontWeight: 600 }}>
                   {item.authorName ?? item.author ?? "unknown"}
@@ -125,23 +140,52 @@ export function Detail({ id, onClose }: { id: string | null; onClose: () => void
             </div>
 
             {item.media.length > 0 && (
-              <Section label="Media">
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+              <Section label={item.media.length === 1 ? "Media" : `Media · ${item.media.length}`}>
+                <div
+                  style={{
+                    display: "grid",
+                    // One image gets the full width; several share a row.
+                    gridTemplateColumns: item.media.length === 1 ? "1fr" : "repeat(2, 1fr)",
+                    gap: 8,
+                  }}
+                >
                   {item.media.map((m) => (
-                    <div
+                    <a
                       key={m.originUrl}
-                      className="mono"
+                      href={m.storedKey ? mediaUrl(m.storedKey) : m.originUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       style={{
+                        display: "block",
                         border: "1px solid var(--line)",
-                        borderRadius: 5,
-                        padding: 9,
-                        fontSize: 10,
-                        color: "var(--faint)",
-                        background: "var(--card)",
+                        borderRadius: 6,
+                        overflow: "hidden",
+                        background: "var(--rail)",
+                        position: "relative",
                       }}
                     >
-                      {m.kind} · {m.width ?? "?"}×{m.height ?? "?"}
-                    </div>
+                      {m.storedKey ? (
+                        <img
+                          src={mediaUrl(m.storedKey)}
+                          alt=""
+                          loading="lazy"
+                          style={{ width: "100%", display: "block", objectFit: "cover" }}
+                        />
+                      ) : (
+                        /* Never fetched, so there is nothing of ours to show —
+                           say that rather than hot-linking the platform. */
+                        <div className="mono" style={{ padding: 12, fontSize: 10.5, color: "var(--faint)" }}>
+                          {m.kind} · not stored
+                        </div>
+                      )}
+                      {m.kind === "video_poster" && m.storedKey && (
+                        <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <span style={{ width: 42, height: 42, borderRadius: "50%", background: "#0b0e11b3", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--text)"><path d="M8 5v14l11-7z" /></svg>
+                          </span>
+                        </span>
+                      )}
+                    </a>
                   ))}
                 </div>
               </Section>

@@ -154,13 +154,21 @@ export interface ItemDetail {
   source: string;
   author: string | null;
   authorName: string | null;
+  authorAvatar: string | null;
   title: string | null;
   fullText: string;
   postedAt: number | null;
   savedAt: number;
   savedAtExact: boolean;
   metrics: Record<string, number>;
-  media: { kind: string; originUrl: string; width: number | null; height: number | null }[];
+  media: {
+    kind: string;
+    originUrl: string;
+    /** Our stored copy. Null means it was never fetched; render nothing. */
+    storedKey: string | null;
+    width: number | null;
+    height: number | null;
+  }[];
   links: string[];
   /** Other saved posts from the same conversation, if any. */
   thread: { id: string; url: string; author: string | null; excerpt: string }[];
@@ -178,10 +186,12 @@ export interface ItemDetail {
 export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | null> {
   const rows = await db.all<{
     id: string; url: string; source: string; author: string | null; authorName: string | null;
+    authorAvatar: string | null;
     title: string | null; body: string | null; postedAt: number | null; savedAt: number;
     savedAtExact: number; metrics: string; raw: string;
   }>(sql`
     select id, url, source, author_handle as author, author_name as authorName,
+           author_avatar as authorAvatar,
            title, body, posted_at as postedAt, saved_at as savedAt,
            saved_at_exact as savedAtExact, metrics, raw
     from items where id = ${id} limit 1
@@ -198,9 +208,10 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
   }
 
   const mediaRows = await db.all<{
-    kind: string; originUrl: string; width: number | null; height: number | null;
+    kind: string; originUrl: string; storedKey: string | null;
+    width: number | null; height: number | null;
   }>(sql`
-    select kind, origin_url as originUrl, width, height
+    select kind, origin_url as originUrl, stored_key as storedKey, width, height
     from media where item_id = ${id}
   `);
 
@@ -228,6 +239,7 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     source: row.source,
     author: row.author,
     authorName: row.authorName,
+    authorAvatar: row.authorAvatar,
     title: row.title,
     fullText: row.body ?? "",
     postedAt: row.postedAt,
