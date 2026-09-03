@@ -31,6 +31,7 @@ interface SourceConfig {
 
 type Outbound =
   | { anansi: "ready"; queryId: string | null }
+  | { anansi: "saved"; source: "x" }
   | { anansi: "page"; raw: unknown; page: number; items: number }
   | { anansi: "observed"; operation: string; raw: unknown }
   | { anansi: "done"; pages: number; items: number }
@@ -84,15 +85,12 @@ export default defineContentScript({
         const input = args[0];
         const url =
           typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
-        const operation = matchOp(url);
-        if (operation) {
-          // Cloned so the app still gets its body intact.
-          res
-            .clone()
-            .json()
-            .then((raw) => send({ anansi: "observed", operation, raw }))
-            .catch(() => {});
-        }
+        // A signal, not a payload. CreateBookmark answers
+        // {"data":{"tweet_bookmark_put":"Done"}} — it says that something was
+        // bookmarked and nothing about what, so uploading it would parse to
+        // zero items and 422 on every save. The background pulls the top of
+        // the timeline instead, which arrives with the whole post.
+        if (matchOp(url) && res.ok) send({ anansi: "saved", source: "x" });
       } catch {
         // Observation must never break the page.
       }
@@ -109,14 +107,9 @@ export default defineContentScript({
       ...rest: unknown[]
     ) {
       try {
-        const operation = matchOp(String(url));
-        if (operation) {
+        if (matchOp(String(url))) {
           this.addEventListener("load", () => {
-            try {
-              send({ anansi: "observed", operation, raw: JSON.parse(this.responseText) });
-            } catch {
-              /* not json, not ours */
-            }
+            if (this.status >= 200 && this.status < 300) send({ anansi: "saved", source: "x" });
           });
         }
       } catch {

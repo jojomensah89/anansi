@@ -17,6 +17,9 @@ export default defineContentScript({
     "https://twitter.com/*",
     "https://www.tiktok.com/*",
     "https://tiktok.com/*",
+    "https://www.reddit.com/*",
+    "https://old.reddit.com/*",
+    "https://reddit.com/*",
   ],
   runAt: "document_start",
 

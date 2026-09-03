@@ -390,14 +390,32 @@ bun run dev:web    # with VITE_API_BASE=http://127.0.0.1:8788 in apps/web/.env.l
 automatic — and the thing that deletes the bridge window, because a content
 script's fetches are bound by the **extension's** CSP, not the page's.
 
-Four content scripts:
+Five content scripts:
 
 ```
-x-main       MAIN     document_start   x.com       pages the timeline
-tiktok-main  MAIN     document_start   tiktok.com  observes only
-relay        isolated document_start   both        MAIN <-> background
+x-main       MAIN     document_start   x.com       pages, and watches saves
+reddit-main  MAIN     document_start   reddit.com  watches saves
+tiktok-main  MAIN     document_start   tiktok.com  observes item lists
+relay        isolated document_start   all three   MAIN <-> background
 reddit       isolated document_idle    reddit.com  pages saved.json
 ```
+
+Reddit needs both worlds for opposite reasons: the isolated one can fetch
+saved.json with your session and reach extension APIs, while only the MAIN one
+can see the page's own `fetch` and notice a save happening.
+
+### Save something, and it is just there
+
+Saving a post on X or Reddit syncs it within a couple of seconds, which is the
+one behaviour that makes a library feel live rather than imported.
+
+The mutation's own response is useless for this — X answers
+`{"data":{"tweet_bookmark_put":"Done"}}` and Reddit's `/api/save` is no better.
+Uploading that would parse to zero items and **422 on every single save**. So a
+watched save is treated as a *signal*: the background pulls the top twenty
+items of the listing instead, which arrives with the whole post. One request,
+debounced so three saves in a row cost one sync, and the upsert makes the
+nineteen you already have free — verified as `0 inserted, 20 updated`.
 
 Reddit needs no MAIN world: there is no queryId buried in a lazy chunk, a
 content script's same-origin fetch already carries the session, and extension

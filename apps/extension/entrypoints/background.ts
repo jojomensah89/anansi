@@ -53,9 +53,9 @@ export type Status = Record<string, SourceStatus>;
 
 const CONFIG_TTL_MS = 60 * 60 * 1000;
 const ALARM = "anansi-sync";
-const DEFAULT_SYNC_MINUTES = 120;
 
 let cached: { at: number; config: RemoteConfig } | null = null;
+const savedTimers = new Map<string, number>();
 
 async function settings(): Promise<Settings | null> {
   const stored = await browser.storage.local.get(["server", "token", "syncEvery"]);
@@ -154,7 +154,7 @@ async function findTab(source: string) {
  * page already has. That is a much broader grant for a convenience, and the
  * cost of not taking it is stated plainly: no open tab, no sync.
  */
-async function startCapture(source: string, quiet = false): Promise<void> {
+async function startCapture(source: string, quiet = false, live = false): Promise<void> {
   const config = await loadConfig(true);
   if (!config?.enabled) {
     if (!quiet) await patchStatus(source, { message: "server has capture disabled" });
@@ -181,9 +181,19 @@ async function startCapture(source: string, quiet = false): Promise<void> {
     return;
   }
 
-  await patchStatus(source, { pages: 0, items: 0, uploaded: 0, failed: 0, message: "running…" });
-  await browser.tabs.sendMessage(tab.id, { anansi: "configure", config: entry }).catch(() => {});
-  await browser.tabs.sendMessage(tab.id, { anansi: "backfill", config: entry }).catch(() => {});
+  /**
+   * A live sync is one small page, not a whole run. The thing you just saved
+   * is at the top of the listing, so twenty items reaches it with room to
+   * spare — and the upsert makes the nineteen you already have free.
+   */
+  const job = live
+    ? { ...entry, pageLimit: 1, variables: { ...(entry.variables ?? {}), count: 20 } }
+    : entry;
+  if (!quiet) {
+    await patchStatus(source, { pages: 0, items: 0, uploaded: 0, failed: 0, message: "running…" });
+  }
+  await browser.tabs.sendMessage(tab.id, { anansi: "configure", config: job }).catch(() => {});
+  await browser.tabs.sendMessage(tab.id, { anansi: "backfill", config: job }).catch(() => {});
 }
 
 async function rescheduleAlarm(): Promise<void> {
@@ -214,6 +224,31 @@ export default defineBackground(() => {
             items: Number(msg.items ?? 0),
           });
           break;
+
+        /**
+         * Something was just saved in the UI.
+         *
+         * The mutation's own response carries no content — X answers
+         * {"data":{"tweet_bookmark_put":"Done"}} and Reddit's /api/save is no
+         * better — so this pulls the top page of the timeline instead, which
+         * arrives with the whole item. One request, and the upsert makes the
+         * overlap free.
+         *
+         * Debounced because saving three things in a row should cost one
+         * sync, not three.
+         */
+        case "saved": {
+          const pending = savedTimers.get(source);
+          if (pending) clearTimeout(pending);
+          savedTimers.set(
+            source,
+            setTimeout(() => {
+              savedTimers.delete(source);
+              void startCapture(source, true, true);
+            }, 2500) as unknown as number,
+          );
+          break;
+        }
 
         case "observed": {
           // A save happened in the UI, or a favourites page loaded a batch.
