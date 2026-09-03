@@ -22,6 +22,7 @@ export interface IngestItem {
   savedAtIsExact: boolean;
   metrics: Record<string, number>;
   media: { kind: string; originUrl: string; width?: number; height?: number }[];
+  links: string[];
   raw: unknown;
 }
 
@@ -104,7 +105,15 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
       savedAt,
       savedAtExact: item.savedAtIsExact || was?.savedAtExact === 1 ? 1 : 0,
       metrics: JSON.stringify(item.metrics),
-      raw: JSON.stringify(item.raw),
+      // links ride inside raw rather than earning a column: the spec's schema
+      // has none, and they are read only when one item is opened. Folded in
+      // here because the row shape drops every NormalizedItem field that has
+      // no column, and get_item promises links.
+      raw: JSON.stringify(
+        item.raw && typeof item.raw === "object"
+          ? { ...(item.raw as Record<string, unknown>), links: item.links }
+          : { raw: item.raw, links: item.links },
+      ),
     });
 
     for (const m of item.media) {

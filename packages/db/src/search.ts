@@ -140,3 +140,95 @@ export async function findByAuthor(db: AnansiDb, handle: string, limit = 20) {
     limit ${limit}
   `);
 }
+
+export interface ItemDetail {
+  id: string;
+  url: string;
+  source: string;
+  author: string | null;
+  authorName: string | null;
+  title: string | null;
+  fullText: string;
+  postedAt: number | null;
+  savedAt: number;
+  savedAtExact: boolean;
+  metrics: Record<string, number>;
+  media: { kind: string; originUrl: string; width: number | null; height: number | null }[];
+  links: string[];
+  /** Other saved posts from the same conversation, if any. */
+  thread: { id: string; url: string; author: string | null; excerpt: string }[];
+}
+
+/**
+ * The full object, called after a search to pull one thing into context.
+ *
+ * `raw` is deliberately not returned. The spec's sketch includes it, but a
+ * single raw tweet payload is 5-15KB of nested JSON, and an agent that
+ * fetched three of them would have spent its context on `__typename` fields.
+ * Everything raw is actually consulted for — links, thread, media — is
+ * extracted here instead.
+ */
+export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | null> {
+  const rows = await db.all<{
+    id: string; url: string; source: string; author: string | null; authorName: string | null;
+    title: string | null; body: string | null; postedAt: number | null; savedAt: number;
+    savedAtExact: number; metrics: string; raw: string;
+  }>(sql`
+    select id, url, source, author_handle as author, author_name as authorName,
+           title, body, posted_at as postedAt, saved_at as savedAt,
+           saved_at_exact as savedAtExact, metrics, raw
+    from items where id = ${id} limit 1
+  `);
+
+  const row = rows[0];
+  if (!row) return null;
+
+  let parsed: { links?: string[]; conversationId?: string } = {};
+  try {
+    parsed = JSON.parse(row.raw) as typeof parsed;
+  } catch {
+    // A payload we cannot parse should cost the extras, not the item.
+  }
+
+  const mediaRows = await db.all<{
+    kind: string; originUrl: string; width: number | null; height: number | null;
+  }>(sql`
+    select kind, origin_url as originUrl, width, height
+    from media where item_id = ${id}
+  `);
+
+  const conversationId = parsed.conversationId ?? null;
+  const thread = conversationId
+    ? await db.all<{ id: string; url: string; author: string | null; excerpt: string }>(sql`
+        select id, url, author_handle as author, substr(coalesce(body,''), 1, 200) as excerpt
+        from items
+        where json_extract(raw, '$.conversationId') = ${conversationId}
+          and id != ${id}
+        limit 10
+      `)
+    : [];
+
+  let metrics: Record<string, number> = {};
+  try {
+    metrics = JSON.parse(row.metrics) as Record<string, number>;
+  } catch {
+    /* metrics are decoration; never fail an item for them */
+  }
+
+  return {
+    id: row.id,
+    url: row.url,
+    source: row.source,
+    author: row.author,
+    authorName: row.authorName,
+    title: row.title,
+    fullText: row.body ?? "",
+    postedAt: row.postedAt,
+    savedAt: row.savedAt,
+    savedAtExact: row.savedAtExact === 1,
+    metrics,
+    media: mediaRows,
+    links: parsed.links ?? [],
+    thread,
+  };
+}

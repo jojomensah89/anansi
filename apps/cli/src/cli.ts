@@ -11,6 +11,8 @@ import { dataPath, ensureDir, readJsonl } from "./store/files.ts";
 import type { NormalizedItem } from "./core/item.ts";
 import { countItems, creators, findByAuthor, recentSaves, searchItems } from "@anansi/db";
 import { HIT, OFF, parseSince, printHits } from "./format.ts";
+import { createAnansiServer } from "@anansi/mcp";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { db, dbPath, ensureMigrated } from "./store/db.ts";
 
 const USAGE = `anansi — day 1: the importer
@@ -47,6 +49,10 @@ const USAGE = `anansi — day 1: the importer
 
   anansi recent [--limit N]
       Newest saves first.
+
+  anansi serve --mcp
+      Serve the four MCP tools over stdio, for your own agent. Speaks
+      JSON-RPC on stdout; point Claude Code at it, do not run it by hand.
 
   anansi db migrate
       Create or update the local SQLite library at data/anansi.db.
@@ -197,6 +203,20 @@ async function search(
   );
 }
 
+/**
+ * stdio MCP over the local file. The daily driver, and it needs no deploy.
+ *
+ * Nothing may be written to stdout here: stdout IS the JSON-RPC channel, and
+ * a stray console.log corrupts the stream in a way that presents as the
+ * client silently failing to connect. Diagnostics go to stderr.
+ */
+async function serveMcp(): Promise<void> {
+  ensureMigrated();
+  const server = createAnansiServer(db());
+  console.error(`anansi mcp: ${await countItems(db())} items from ${dbPath()}`);
+  await server.connect(new StdioServerTransport());
+}
+
 async function doctor(): Promise<void> {
   console.log("  session provider  env (.env cookies)");
   const hasCookies = !!process.env.X_AUTH_TOKEN?.trim() && !!process.env.X_CSRF_TOKEN?.trim();
@@ -231,6 +251,7 @@ async function main(): Promise<void> {
       author: { type: "string" },
       source: { type: "string" },
       since: { type: "string" },
+      mcp: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -257,6 +278,7 @@ async function main(): Promise<void> {
   if (command === "recent") {
     return printHits(await recentSaves(db(), values.source, Number(values.limit ?? 20)), false);
   }
+  if (command === "serve") return serveMcp();
   if (command === "db") return dbCommand(target);
   if (command === "doctor") return doctor();
 

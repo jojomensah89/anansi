@@ -61,6 +61,7 @@ the extension's CSP, not the page's. This is the zero-install path until then.
 | `anansi stats x` | authors, media, date range, top ten |
 | `anansi search "<q>"` | bm25-ranked keyword search, snippet highlighted |
 | `anansi recent` | newest saves first |
+| `anansi serve --mcp` | the four MCP tools over stdio, for your agent |
 | `anansi db migrate` | create or update `data/anansi.db` |
 | `anansi db creators` | top authors, as a group-by |
 | `anansi doctor` | endpoint resolution, last run, saved cursor |
@@ -170,9 +171,41 @@ The fix is either a second FTS table using the `trigram` tokenizer, or the
 vectors the spec defers to phase 2 — this is the "keyword search visibly
 fails" trigger it describes, arriving earlier than expected.
 
+## The MCP server
+
+Four tools, reading the same database through the same functions the HTTP
+routes will call — registered against a server rather than wired to a
+transport, so the same four run over stdio today and over HTTP from a Worker
+later. There is no second implementation to drift.
+
+```
+search_memory(query, source?, author?, since?, limit)
+get_item(id)
+recent_saves(source?, limit)
+find_by_author(handle, limit)
+```
+
+To use it from any project, once:
+
+```bash
+claude mcp add anansi --scope user -- bun run <path to anansi>/apps/cli/src/cli.ts serve --mcp
+```
+
+Inside this repo, `.mcp.json` already does it.
+
+Two rules the tools enforce. **Excerpts, never full bodies** — capped at 300
+characters, because ten full posts with their payloads would spend an agent's
+context on `__typename` fields. And **every result carries its url**, because
+an unattributed memory is a hallucination waiting to happen.
+
+`get_item` deliberately does not return `raw`, though the spec's sketch lists
+it. Everything raw is actually consulted for — links, thread siblings, media —
+is extracted instead. `apps/cli/scripts/mcp-smoke.ts` drives the whole thing
+over real stdio and fails if any of that regresses.
+
 ## What is deliberately not here yet
 
-The MCP server (day 4), GitHub (day 5), media to R2 (day 6-7).
+GitHub (day 5), media to R2 (day 6-7).
 `apps/cli/src/adapters/github/` is an empty directory waiting.
 
 ## Terms

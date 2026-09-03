@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "anansi": {
+      "command": "bun",
+      "args": ["run", "apps/cli/src/cli.ts", "serve", "--mcp"]
+    }
+  }
+}

@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "anansi": "./src/cli.ts" },
+  "bin": {
+    "anansi": "./src/cli.ts"
+  },
   "dependencies": {
-    "@anansi/db": "workspace:*"
+    "@anansi/db": "workspace:*",
+    "@anansi/mcp": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0"
   }
 }
