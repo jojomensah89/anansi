@@ -57,11 +57,15 @@ export interface SearchOptions {
   mark?: [string, string];
 }
 
+export interface CardMedia {
+  key: string;
+  kind: string;
+  url: string;
+}
+
 export interface SearchHit {
   id: string;
   authorAvatar?: string | null;
-  thumbKey?: string | null;
-  thumbKind?: string | null;
   mediaCount?: number;
   url: string;
   author: string | null;
@@ -363,13 +367,13 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
            i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
            substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
            0 as score,
-           -- One representative thumbnail per card. A stored key only, so the
-           -- grid never falls back to hot-linking the platform.
-           (select m.stored_key from media m
-             where m.item_id = i.id and m.stored_key is not null limit 1) as thumbKey,
-           (select m.kind from media m
-             where m.item_id = i.id and m.stored_key is not null limit 1) as thumbKind,
+           -- Every stored image, not one representative. A card that shows
+           -- one of four is a card that misrepresents the post. Stored keys
+           -- only, so the grid never hot-links the platform.
+           (select json_group_array(json_object('key', m.stored_key, 'kind', m.kind, 'url', m.origin_url))
+              from media m where m.item_id = i.id and m.stored_key is not null) as mediaJson,
            (select count(*) from media m where m.item_id = i.id) as mediaCount,
+           json_extract(i.raw, '$.quoted') as quotedJson,
            i.metrics as metricsJson
     from items i
     where (${opts.source ?? null} is null or i.source = ${opts.source ?? null})
@@ -387,14 +391,36 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
 
   const hasMore = rows.length > limit;
   const page = (hasMore ? rows.slice(0, limit) : rows).map((row) => {
-    const { metricsJson, ...rest } = row as typeof row & { metricsJson?: string };
-    let metrics: Record<string, number> = {};
-    try {
-      metrics = JSON.parse(metricsJson ?? "{}") as Record<string, number>;
-    } catch {
-      /* metrics are decoration; never fail a row for them */
-    }
-    return { ...rest, metrics };
+    const { metricsJson, mediaJson, quotedJson, ...rest } = row as typeof row & {
+      metricsJson?: string;
+      mediaJson?: string;
+      quotedJson?: string;
+    };
+
+    const parse = <T,>(text: string | undefined, fallback: T): T => {
+      try {
+        return (JSON.parse(text ?? "") as T) ?? fallback;
+      } catch {
+        // Decoration, all of it. A malformed blob costs the extras, not the row.
+        return fallback;
+      }
+    };
+
+    const all = parse<{ key: string; kind: string; url: string }[]>(mediaJson, []);
+    const quoted = parse<{
+      handle: string | null; name: string | null; avatar: string | null;
+      text: string; url: string | null; mediaUrls: string[];
+    } | null>(quotedJson, null);
+
+    // A quote's images live on the parent row; split them back apart so the
+    // card can nest them where they belong.
+    const quotedUrls = new Set(quoted?.mediaUrls ?? []);
+    return {
+      ...rest,
+      metrics: parse<Record<string, number>>(metricsJson, {}),
+      media: all.filter((m) => !quotedUrls.has(m.url)),
+      quoted: quoted ? { ...quoted, media: all.filter((m) => quotedUrls.has(m.url)) } : null,
+    };
   });
   return { items: page, nextCursor: hasMore ? (page.at(-1)?.saveOrder ?? null) : null };
 }

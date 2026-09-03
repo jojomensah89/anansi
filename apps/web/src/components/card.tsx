@@ -1,16 +1,20 @@
-import { compact, mediaUrl, shortDate, type ItemRow } from "../lib/api.ts";
+import { compact, mediaUrl, shortDate, type CardMedia, type ItemRow } from "../lib/api.ts";
+import { SourceMark } from "./sourcemark.tsx";
 
 /**
  * One grid card.
  *
- * Media leads when there is media. A wall of text is what the library looked
- * like before thumbnails were served, and it made a visual medium unbrowsable
- * — you cannot recognise the post you are looking for from its first line.
+ * Media leads, and all of it. Showing one image from a four-image post
+ * misrepresents the post — and a wall of text is what the library looked like
+ * before thumbnails were served, which made a visual medium unbrowsable.
  *
- * Thumbnails come from our own copy, never hot-linked: a deleted post still
- * renders, and no request from the library tells the platform what you are
- * looking at. Avatars are still remote, because we store the url and not the
- * image; they fail soft to a blank circle.
+ * A quote-tweet is nested rather than flattened, for the same reason the
+ * drawer nests it: a quote's images are its own, and putting them in the
+ * parent's grid makes it look like the parent posted them.
+ *
+ * Thumbnails come from our own copy, never hot-linked, so a deleted post still
+ * renders and no request from the library tells the platform what you are
+ * looking at.
  */
 export function Card({
   item,
@@ -26,9 +30,8 @@ export function Card({
   onToggle?: (item: ItemRow) => void;
 }) {
   const isRepo = item.source === "github";
-  const thumb = item.thumbKey ? mediaUrl(item.thumbKey) : null;
-  const isVideo = item.thumbKind === "video_poster";
-  const badge = ({ github: "gh", reddit: "r/", tiktok: "tt" } as Record<string, string>)[item.source] ?? "x";
+  const media = item.media ?? [];
+  const quoted = item.quoted;
 
   return (
     <div
@@ -36,14 +39,13 @@ export function Card({
       style={{
         background: "var(--card)",
         border: `1px solid ${selected ? "var(--accent)" : "var(--line)"}`,
-        borderRadius: 6,
+        borderRadius: 8,
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         // Height follows content. A text-only save is a short card and a
-        // media one is tall; forcing them equal pads the short ones with
-        // dead space and is a worse trade than an uneven bottom edge.
-        height: thumb ? 372 : 268,
+        // four-image one is tall; forcing them equal pads the short ones with
+        // dead space, and an uneven bottom edge is the better trade.
         cursor: "pointer",
         position: "relative",
         animation: "rise 160ms ease-out both",
@@ -74,109 +76,181 @@ export function Card({
         </span>
       )}
 
-      {thumb && (
-        <div style={{ position: "relative", height: 196, flexShrink: 0, background: "var(--rail)" }}>
-          <img
-            src={thumb}
-            alt=""
-            loading="lazy"
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              display: "block",
-              opacity: selectable && !selected ? 0.55 : 1,
-            }}
-          />
-          {isVideo && (
-            <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ width: 38, height: 38, borderRadius: "50%", background: "#0b0e11b3", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--text)"><path d="M8 5v14l11-7z" /></svg>
-              </span>
-            </span>
-          )}
-          <span
-            className="mono"
-            style={{
-              position: "absolute",
-              top: 8,
-              right: 8,
-              fontSize: 9.5,
-              color: "var(--text-dim)",
-              background: "#0b0e11cc",
-              border: "1px solid var(--edge-strong)",
-              borderRadius: 3,
-              padding: "2px 5px",
-            }}
-          >
-            {badge}
-          </span>
-        </div>
-      )}
+      {media.length > 0 && <MediaGrid media={media} dim={selectable && !selected} />}
 
-      <div style={{ padding: 11, display: "flex", flexDirection: "column", gap: 9, flex: 1, minHeight: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          {item.authorAvatar ? (
-            <img
-              src={item.authorAvatar}
-              alt=""
-              width={20}
-              height={20}
-              loading="lazy"
-              style={{ borderRadius: isRepo ? 4 : "50%", flexShrink: 0, objectFit: "cover", background: "var(--edge-strong)" }}
-            />
-          ) : (
-            <span style={{ width: 20, height: 20, borderRadius: isRepo ? 4 : "50%", background: "var(--edge-strong)", flexShrink: 0 }} />
-          )}
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Avatar src={item.authorAvatar} square={isRepo} size={22} />
           <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
             {item.authorName && item.authorName !== item.author && (
-              <span style={{ fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {item.authorName}
               </span>
             )}
-            <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
+            <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
               {item.author ?? "unknown"}
             </span>
           </span>
-          {!thumb && (
-            <span
-              className="mono"
-              style={{
-                marginLeft: "auto",
-                fontSize: 9.5,
-                color: "var(--faint)",
-                border: "1px solid var(--edge)",
-                borderRadius: 3,
-                padding: "1px 4px",
-              }}
-            >
-              {badge}
-            </span>
-          )}
         </div>
 
         {isRepo && item.title && (
           <div className="mono" style={{ fontSize: 12.5, color: "var(--text)" }}>{item.title}</div>
         )}
 
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            fontSize: 12.5,
-            lineHeight: 1.5,
-            color: isRepo ? "var(--muted)" : "var(--text-dim)",
-            overflow: "hidden",
-          }}
-        >
-          {item.excerpt}
-        </div>
+        {item.excerpt.trim() && (
+          <div
+            style={{
+              fontSize: 13,
+              lineHeight: 1.55,
+              color: isRepo ? "var(--muted)" : "var(--text-dim)",
+              display: "-webkit-box",
+              WebkitLineClamp: media.length > 0 ? 4 : 8,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {item.excerpt}
+          </div>
+        )}
 
+        {quoted && (
+          <div
+            style={{
+              border: "1px solid var(--edge)",
+              borderRadius: 8,
+              padding: 10,
+              background: "#0e1216",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <Avatar src={quoted.avatar} size={17} />
+              <span style={{ fontSize: 11.5, fontWeight: 600 }}>{quoted.name ?? quoted.handle}</span>
+              <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
+                @{quoted.handle ?? "unknown"}
+              </span>
+            </div>
+            {quoted.text.trim() && (
+              <div
+                style={{
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  color: "var(--muted)",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+              >
+                {quoted.text}
+              </div>
+            )}
+            {quoted.media.length > 0 && <MediaGrid media={quoted.media} inset />}
+          </div>
+        )}
+
+        {/* The platform mark sits here, not in the top-right corner where a
+            close button lives — up there it reads as "dismiss this". */}
         <div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)" }}>
           {item.metrics?.likes ? <span>{compact(item.metrics.likes)} ♥</span> : null}
-          <span style={{ marginLeft: "auto" }}>{shortDate(item.postedAt)}</span>
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            {shortDate(item.postedAt)}
+            <span style={{ color: "var(--fainter)", display: "flex" }}>
+              <SourceMark source={item.source} size={12} />
+            </span>
+          </span>
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * All of it, laid out by how many there are.
+ *
+ * One fills the width, two share a row, three puts the first above the other
+ * two, four goes 2×2. Past four X itself stops showing them, so neither does
+ * this — it counts the rest instead.
+ */
+function MediaGrid({ media, dim, inset }: { media: CardMedia[]; dim?: boolean; inset?: boolean }) {
+  const shown = media.slice(0, 4);
+  const single = shown.length === 1;
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        display: "grid",
+        gridTemplateColumns: single ? "1fr" : "repeat(2, 1fr)",
+        gap: inset ? 4 : 2,
+        background: "var(--rail)",
+        borderRadius: inset ? 6 : 0,
+        overflow: "hidden",
+        opacity: dim ? 0.55 : 1,
+      }}
+    >
+      {shown.map((m, i) => (
+        <div
+          key={m.key}
+          style={{
+            position: "relative",
+            // A lone image keeps a readable shape; a set is squared off so
+            // rows line up rather than stair-stepping.
+            aspectRatio: single ? "16 / 10" : "1 / 1",
+            gridColumn: shown.length === 3 && i === 0 ? "span 2" : undefined,
+          }}
+        >
+          <img
+            src={mediaUrl(m.key)}
+            alt=""
+            loading="lazy"
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
+          {m.kind === "video_poster" && (
+            <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ width: 34, height: 34, borderRadius: "50%", background: "#0b0e11b3", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="var(--text)"><path d="M8 5v14l11-7z" /></svg>
+              </span>
+            </span>
+          )}
+        </div>
+      ))}
+      {media.length > 4 && (
+        <span
+          className="mono"
+          style={{
+            position: "absolute",
+            right: 8,
+            bottom: 8,
+            fontSize: 10,
+            padding: "2px 6px",
+            borderRadius: 3,
+            background: "#0b0e11cc",
+            color: "var(--text-dim)",
+          }}
+        >
+          +{media.length - 4}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Avatar({ src, size, square }: { src?: string | null; size: number; square?: boolean }) {
+  const radius = square ? 4 : "50%";
+  if (!src) {
+    return <span style={{ width: size, height: size, borderRadius: radius, background: "var(--edge-strong)", flexShrink: 0 }} />;
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      loading="lazy"
+      style={{ borderRadius: radius, flexShrink: 0, objectFit: "cover", background: "var(--edge-strong)" }}
+    />
   );
 }

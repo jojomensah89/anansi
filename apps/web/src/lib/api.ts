@@ -1,4 +1,4 @@
-import type { ItemDetail, SearchHit } from "@anansi/db";
+import type { CardMedia, ItemDetail, SearchHit } from "@anansi/db";
 
 /**
  * The browser's view of the API.
@@ -30,6 +30,15 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 export interface ItemRow extends SearchHit {
   saveOrder: number | null;
   metrics?: Record<string, number>;
+  media?: CardMedia[];
+  quoted?: {
+    handle: string | null;
+    name: string | null;
+    avatar: string | null;
+    text: string;
+    url: string | null;
+    media: CardMedia[];
+  } | null;
 }
 
 /** Thumbnails come from our own copy; the key is a path, so it is not escaped. */
@@ -142,3 +151,5 @@ export function compact(n: number | undefined): string {
   if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
   return String(n);
 }
+
+export type { CardMedia } from "@anansi/db";
