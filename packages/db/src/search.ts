@@ -600,10 +600,10 @@ export async function libraryStats(db: AnansiDb) {
     select sum(case when archived_at is null then 1 else 0 end) as items,
            count(distinct case when archived_at is null then author_handle end) as authors,
            sum(case when archived_at is null then 0 else 1 end) as archived,
-           -- Captured live today. Backfilled items all share one import
-           -- stamp, so counting those would call the whole library "today".
-           sum(case when saved_at_exact = 1
-                     and saved_at >= ${Math.floor(new Date().setHours(0, 0, 0, 0) / 1000)}
+           -- First captured today, excluding imports and legacy rows whose
+           -- arrival path predates explicit provenance.
+           sum(case when capture_origin not in ('platform_import', 'legacy_unknown')
+                      and saved_at >= ${Math.floor(new Date().setHours(0, 0, 0, 0) / 1000)}
                     then 1 else 0 end) as today
     from items
   `);
@@ -628,19 +628,23 @@ export async function libraryStats(db: AnansiDb) {
 /**
  * Per-source health.
  *
- * `saved_at_exact` earns a second job here. It was added so a query could not
- * lie about when something was saved; it also happens to separate the two ways
- * an item can arrive — a backfill stamps import time, while the extension
- * watching CreateBookmark produces a real one. So the split between "imported"
- * and "captured live" falls out of a column that already exists rather than
- * needing a provenance field.
+ * Timestamp precision and capture provenance are deliberately independent.
+ * An API import can carry an exact historical timestamp, while a live event
+ * can enrich an item with an inexact provider date. `capture_origin` records
+ * the first arrival path and is therefore the only honest source for these
+ * counters.
  */
 export interface SourceHealth {
   source: string;
   items: number;
-  captured: number;
+  live: number;
   imported: number;
+  toolbar: number;
+  contextMenu: number;
+  chromeBookmarks: number;
+  legacyUnknown: number;
   authors: number;
+  lastCaptureAt: number | null;
   lastSavedAt: number | null;
   lastPostedAt: number | null;
   media: number;
@@ -652,9 +656,17 @@ export async function sourceHealth(db: AnansiDb): Promise<SourceHealth[]> {
     select
       i.source                                                    as source,
       count(*)                                                    as items,
-      sum(case when i.saved_at_exact = 1 then 1 else 0 end)        as captured,
-      sum(case when i.saved_at_exact = 0 then 1 else 0 end)        as imported,
+      sum(case when i.capture_origin = 'platform_event' then 1 else 0 end) as live,
+      sum(case when i.capture_origin = 'platform_import' then 1 else 0 end) as imported,
+      sum(case when i.capture_origin = 'toolbar' then 1 else 0 end) as toolbar,
+      sum(case when i.capture_origin = 'context_menu' then 1 else 0 end) as contextMenu,
+      sum(case when i.capture_origin = 'chrome_bookmark' then 1 else 0 end) as chromeBookmarks,
+      sum(case when i.capture_origin = 'legacy_unknown' then 1 else 0 end) as legacyUnknown,
       count(distinct i.author_handle)                              as authors,
+      (select max(ce.received_at) from capture_events ce
+        where ce.source = i.source
+          and ce.action in ('save', 'snapshot')
+          and ce.outcome in ('created', 'updated', 'duplicate'))   as lastCaptureAt,
       max(i.saved_at)                                              as lastSavedAt,
       max(i.posted_at)                                             as lastPostedAt,
       (select count(*) from media m

@@ -79,15 +79,55 @@ export interface Creator {
 
 export interface SourceRow {
   source: string;
+  name: string;
+  host: string;
+  note: string;
+  support: "supported" | "experimental" | "coming_next";
+  mode: "page" | "observe" | "manual";
+  toggleable: boolean;
+  requiresExtension: boolean;
   enabled: boolean;
   items: number;
-  captured: number;
+  live: number;
   imported: number;
+  toolbar: number;
+  contextMenu: number;
+  chromeBookmarks: number;
+  legacyUnknown: number;
   authors: number;
+  lastCaptureAt: number | null;
   lastSavedAt: number | null;
   lastPostedAt: number | null;
   media: number;
   mediaStored: number;
+  runtime: SourceRuntime | null;
+}
+
+export interface QueueCounts {
+  queued: number;
+  uploading: number;
+  retrying: number;
+  failed: number;
+}
+
+export interface SourceRuntime extends QueueCounts {
+  phase: "idle" | "running";
+  paused?: boolean;
+  lastErrorCode?: string;
+}
+
+export interface ExtensionHealth {
+  connection: "never_connected" | "connected" | "disconnected";
+  extensionVersion: string | null;
+  lastSeenAt: number | null;
+  activeClients: number;
+  queue: QueueCounts;
+  sources: Record<string, SourceRuntime>;
+}
+
+export interface SourcesResponse {
+  extension: ExtensionHealth;
+  sources: SourceRow[];
 }
 
 export const api = {
@@ -137,7 +177,7 @@ export const api = {
   creators: (limit = 200, signal?: AbortSignal) =>
     get<{ creators: Creator[] }>(`/api/creators?limit=${limit}`, signal),
 
-  sources: (signal?: AbortSignal) => get<{ sources: SourceRow[] }>("/api/sources", signal),
+  sources: (signal?: AbortSignal) => get<SourcesResponse>("/api/sources", signal),
 
   toggleSource: (source: string, enabled: boolean) =>
     post<{ source: string; enabled: boolean }>(`/api/sources/${source}`, { enabled }),

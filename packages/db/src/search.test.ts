@@ -1,6 +1,8 @@
-import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { toFtsQuery } from "./search.ts";
+import { describe, expect, test } from "bun:test";
+import { type IngestItem, upsertItems } from "./queries.ts";
+import { sourceHealth, toFtsQuery } from "./search.ts";
+import { openTestDb } from "./test-db.ts";
 
 /**
  * The spec names three inputs that throw or silently return nothing if bound
@@ -67,5 +69,44 @@ describe("toFtsQuery", () => {
 
   test("a bare * is not a match-everything wildcard", () => {
     expect(runs("*")).toBe("empty");
+  });
+});
+
+const sourceItem = (externalId: string, savedAtIsExact: boolean): IngestItem => ({
+  source: "x",
+  externalId,
+  url: `https://x.com/i/status/${externalId}`,
+  kind: "post",
+  body: externalId,
+  savedAt: 1_788_390_000,
+  savedAtIsExact,
+  metrics: {},
+  media: [],
+  links: [],
+  raw: {},
+});
+
+describe("sourceHealth", () => {
+  test("counts first-arrival provenance independently of timestamp precision", async () => {
+    const db = openTestDb();
+    await upsertItems(db, [sourceItem("import-exact", true)], {
+      captureOrigin: "platform_import",
+    });
+    await upsertItems(db, [sourceItem("live-inexact", false)], {
+      captureOrigin: "platform_event",
+    });
+    await upsertItems(db, [sourceItem("legacy", true)]);
+
+    const [health] = await sourceHealth(db);
+    expect(health).toMatchObject({
+      source: "x",
+      items: 3,
+      live: 1,
+      imported: 1,
+      toolbar: 0,
+      contextMenu: 0,
+      chromeBookmarks: 0,
+      legacyUnknown: 1,
+    });
   });
 });
