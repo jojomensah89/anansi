@@ -146,6 +146,27 @@ export default defineContentScript({
 
     // ---- the scan ----------------------------------------------------------
 
+    /**
+     * There is no body yet.
+     *
+     * This runs at document_start — not optional, since patching fetch after
+     * the app has cached its own reference patches nothing — and a scan can be
+     * commanded while the tab is still navigating. `document.body` is null
+     * until the parser reaches it, and reading scrollHeight off null throws.
+     */
+    const waitForBody = async (timeoutMs = 15_000): Promise<boolean> => {
+      const deadline = Date.now() + timeoutMs;
+      while (!document.body) {
+        if (Date.now() >= deadline) return false;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return true;
+    };
+
+    /** documentElement exists from the first byte; body does not. */
+    const pageHeight = (): number =>
+      document.body?.scrollHeight ?? document.documentElement?.scrollHeight ?? 0;
+
     const clickFavouritesTab = async (): Promise<boolean> => {
       const deadline = Date.now() + 8_000;
       for (;;) {
@@ -175,10 +196,10 @@ export default defineContentScript({
     const scan = async () => {
       let stalled = 0;
       for (let step = 0; step < 400 && stalled < 4 && moreToLoad; step++) {
-        const before = document.body.scrollHeight;
+        const before = pageHeight();
         window.scrollTo({ top: before, behavior: "auto" });
         await new Promise((r) => setTimeout(r, 1_200));
-        stalled = document.body.scrollHeight > before ? 0 : stalled + 1;
+        stalled = pageHeight() > before ? 0 : stalled + 1;
       }
     };
 
@@ -220,10 +241,28 @@ export default defineContentScript({
         scanning = true;
         moreToLoad = true;
         void (async () => {
-          await clickFavouritesTab();
-          await scan();
-          scanning = false;
-          send({ action: "scanned" });
+          /**
+           * Whatever happens, say so and let the next run start.
+           *
+           * Without the finally, one thrown error left `scanning` true for the
+           * life of the page: every later Import returned early, and the
+           * background never heard "scanned", so the run sat there until it
+           * timed out. One exception became a permanently dead tab — which is
+           * what "TikTok worked once and then stopped" actually was.
+           */
+          try {
+            if (!(await waitForBody())) {
+              send({ action: "error", errorCode: "capture_failed" });
+              return;
+            }
+            await clickFavouritesTab();
+            await scan();
+            send({ action: "scanned" });
+          } catch {
+            send({ action: "error", errorCode: "capture_failed" });
+          } finally {
+            scanning = false;
+          }
         })();
       }
     });
