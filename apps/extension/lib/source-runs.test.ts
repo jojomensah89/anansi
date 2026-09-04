@@ -241,3 +241,46 @@ describe("resume cursor", () => {
 		expect(next.run.cursor).toBeUndefined();
 	});
 });
+
+describe("initial import completion", () => {
+	test("is due until successful completion survives a restart", async () => {
+		const { runs, store, setNow } = setup();
+		expect(await runs.initialImportDue("github")).toBe(true);
+
+		await runs.begin("github");
+		await runs.finish("github");
+		expect(await runs.initialImportDue("github")).toBe(true);
+
+		setNow(25_000);
+		await runs.completeInitialImport("github");
+		const revived = createSourceRuns({
+			store,
+			now: () => 30_000,
+			createId: () => "run-revived",
+		});
+		expect(await revived.initialImportDue("github")).toBe(false);
+		expect((await revived.current("github")).initialImportCompletedAt).toBe(
+			25_000,
+		);
+	});
+
+	test("failure, pause, and re-enable do not fabricate completion", async () => {
+		const { runs } = setup();
+		await runs.begin("github");
+		await runs.noteError("github", "not_signed_in");
+		await runs.stop("github");
+		expect(await runs.initialImportDue("github")).toBe(true);
+
+		await runs.begin("github");
+		await runs.completeInitialImport("github");
+		await runs.stop("github");
+		expect(await runs.initialImportDue("github")).toBe(false);
+	});
+
+	test("manual runs remain allowed after the initial import", async () => {
+		const { runs } = setup();
+		await runs.completeInitialImport("github");
+		const manual = await runs.begin("github");
+		expect(manual.started).toBe(true);
+	});
+});

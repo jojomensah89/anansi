@@ -25,6 +25,8 @@ export interface SourceRunState extends SyncStateRecord {
 	paused?: boolean;
 	/** The last thing the page said went wrong, as a code rather than prose. */
 	lastErrorCode?: string;
+	/** Set only after the one-time history walk reaches its genuine end. */
+	initialImportCompletedAt?: number;
 }
 
 export interface ActiveSourceRunState extends SourceRunState {
@@ -60,6 +62,8 @@ export interface SourceRuns {
 	setHandle(source: CaptureSource, handle: string): Promise<void>;
 	/** Record why a run ended badly, so the popup can offer the right fix. */
 	noteError(source: CaptureSource, code: string): Promise<void>;
+	initialImportDue(source: CaptureSource): Promise<boolean>;
+	completeInitialImport(source: CaptureSource): Promise<void>;
 	setOwnedTab(source: CaptureSource, tabId: number): Promise<void>;
 	takeOwnedTab(
 		source: CaptureSource,
@@ -105,6 +109,12 @@ function asRunState(
 					(id): id is string => typeof id === "string" && id.length > 0,
 				)
 			: [],
+		initialImportCompletedAt:
+			typeof value.initialImportCompletedAt === "number" &&
+			Number.isSafeInteger(value.initialImportCompletedAt) &&
+			value.initialImportCompletedAt > 0
+				? value.initialImportCompletedAt
+				: undefined,
 	};
 }
 
@@ -251,6 +261,25 @@ export function createSourceRuns(
 			return serialize(source, async () => {
 				const current = await read(source);
 				await write({ ...current, lastErrorCode: code, updatedAt: now() });
+			});
+		},
+
+		initialImportDue(source) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				return current.initialImportCompletedAt === undefined;
+			});
+		},
+
+		completeInitialImport(source) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				if (current.initialImportCompletedAt !== undefined) return;
+				await write({
+					...current,
+					initialImportCompletedAt: now(),
+					updatedAt: now(),
+				});
 			});
 		},
 

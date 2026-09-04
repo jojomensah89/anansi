@@ -19,6 +19,7 @@ export interface SyncStateRecord {
 	handle?: string;
 	paused?: boolean;
 	lastErrorCode?: string;
+	initialImportCompletedAt?: number;
 }
 
 export interface IndexedDbOutbox extends OutboxStore {
