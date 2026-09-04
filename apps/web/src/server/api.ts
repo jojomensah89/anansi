@@ -1,5 +1,6 @@
 import {
   creators,
+  extensionHealth,
   findByAuthor,
   getItem,
   disabledSources,
@@ -11,12 +12,15 @@ import {
   tagItems,
   sourceHealth,
   recentSaves,
+  recordExtensionHeartbeat,
   searchItems,
   InvalidListCursorError,
 } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
+import { parseExtensionHeartbeat } from "@anansi/sources";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import { ingestCapture } from "./ingest.ts";
+import { isToggleableSource, sourceCatalogueResponse } from "./source-catalog.ts";
 
 /**
  * The HTTP surface, as plain Request -> Response.
@@ -75,6 +79,12 @@ interface Route {
   /** An exact path, or a pattern whose captures become `params`. */
   path: string | RegExp;
   handle: (ctx: Ctx) => Response | Promise<Response>;
+}
+
+function authorizeExtension(env: ApiEnv, request: Request): Response | null {
+  if (!env.ingestToken) return json({ error: "extension access is not configured" }, 503);
+  const auth = request.headers.get("authorization") ?? "";
+  return auth === `Bearer ${env.ingestToken}` ? null : json({ error: "unauthorized" }, 401);
 }
 
 /* --------------------------------------------------------- handlers --- */
@@ -201,11 +211,13 @@ const sourcesRoute: Route = {
   method: "GET",
   path: "/api/sources",
   handle: async ({ env }) => {
-    const [health, off] = await Promise.all([sourceHealth(env.db), disabledSources(env.db)]);
-    return json({
-      sources: health.map((s) => ({ ...s, enabled: !off.includes(s.source) })),
-      disabled: off,
-    });
+    const now = Math.floor(Date.now() / 1000);
+    const [health, off, extension] = await Promise.all([
+      sourceHealth(env.db),
+      disabledSources(env.db),
+      extensionHealth(env.db, now),
+    ]);
+    return json(sourceCatalogueResponse(health, off, extension));
   },
 };
 
@@ -215,8 +227,23 @@ const toggleSourceRoute: Route = {
   handle: async ({ env, request, params }) => {
     const body = (await request.json().catch(() => ({}))) as { enabled?: boolean };
     const source = params[0] ?? "";
+    if (!isToggleableSource(source)) return json({ error: "source cannot be toggled" }, 400);
     await setSourceEnabled(env.db, source, body.enabled !== false);
     return json({ source, enabled: body.enabled !== false });
+  },
+};
+
+const extensionHeartbeatRoute: Route = {
+  method: "POST",
+  path: "/api/extension/heartbeat",
+  handle: async ({ env, request }) => {
+    const denied = authorizeExtension(env, request);
+    if (denied) return denied;
+    const parsed = parseExtensionHeartbeat(await request.json().catch(() => null));
+    if (!parsed.ok) return json({ error: parsed.error.message }, 400);
+    const receivedAt = Math.floor(Date.now() / 1000);
+    await recordExtensionHeartbeat(env.db, parsed.heartbeat, receivedAt);
+    return json({ ok: true, receivedAt });
   },
 };
 
@@ -348,9 +375,8 @@ const ingestRoute: Route = {
   method: "POST",
   path: "/api/ingest",
   handle: async ({ env, request }) => {
-    if (!env.ingestToken) return json({ error: "ingest is not configured" }, 503);
-    const auth = request.headers.get("authorization") ?? "";
-    if (auth !== `Bearer ${env.ingestToken}`) return json({ error: "unauthorized" }, 401);
+    const denied = authorizeExtension(env, request);
+    if (denied) return denied;
 
     const result = await ingestCapture(env.db, request);
 
@@ -390,6 +416,7 @@ const ROUTES: Route[] = [
   creatorsRoute,
   statsRoute,
   extensionConfigRoute,
+  extensionHeartbeatRoute,
   ingestRoute,
 ];
 

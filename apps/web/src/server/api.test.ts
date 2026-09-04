@@ -217,6 +217,60 @@ describe("handleApi", () => {
     expect(tiktok.watchUrls).toEqual(["/api/user/collect/item_list"]);
   });
 
+  test("extension heartbeat requires auth and updates connection health", async () => {
+    const heartbeat = {
+      schemaVersion: 1,
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      extensionVersion: "0.1.0",
+      queue: { queued: 1, uploading: 0, retrying: 0, failed: 0 },
+      sources: {
+        x: {
+          phase: "idle",
+          queued: 1,
+          uploading: 0,
+          retrying: 0,
+          failed: 0,
+        },
+      },
+    };
+    const send = (body: unknown, authorized = true) =>
+      handleApi(env, new Request("https://anansi.test/api/extension/heartbeat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(authorized ? { authorization: "Bearer test-token" } : {}),
+        },
+        body: JSON.stringify(body),
+      }));
+
+    expect((await send(heartbeat, false)).status).toBe(401);
+    expect((await send({ ...heartbeat, token: "must-not-pass" })).status).toBe(400);
+    expect((await send(heartbeat)).status).toBe(200);
+
+    const sources = await readJson(get("/api/sources"));
+    expect(sources.extension).toMatchObject({
+      connection: "connected",
+      extensionVersion: "0.1.0",
+      activeClients: 1,
+    });
+    expect(sources.sources).toHaveLength(5);
+    expect(sources.sources.find((source: { source: string }) => source.source === "github")).toMatchObject({
+      support: "coming_next",
+      toggleable: false,
+    });
+  });
+
+  test("planned and unknown sources cannot be toggled", async () => {
+    for (const source of ["github", "unknown"]) {
+      const response = await handleApi(env, new Request(`https://anansi.test/api/sources/${source}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      }));
+      expect(response.status).toBe(400);
+    }
+  });
+
   test("ingest parses a raw payload server-side", async () => {
     const raw = await Bun.file("data/raw/x/page-1788389226894-0001.json").json();
     const res = await handleApi(env, new Request("https://anansi.test/api/ingest", {
