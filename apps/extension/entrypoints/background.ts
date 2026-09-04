@@ -45,6 +45,12 @@ import {
   UNSUPPORTED_MESSAGES,
   type PageDetails,
 } from "../lib/page-capture.ts";
+import {
+  importCaptures,
+  removalCaptures,
+  toBookmarkCapture,
+  type BookmarkNode,
+} from "../lib/chrome-bookmarks.ts";
 import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
 import { tweetUrl } from "../lib/platforms/x.ts";
 import type {
@@ -480,6 +486,121 @@ async function capturePage(
 }
 
 type MenuSpec = Parameters<typeof browser.contextMenus.create>[0];
+
+/* ------------------------------------------------- chrome bookmarks --- */
+
+const MIRROR_KEY = "mirrorChromeBookmarks";
+
+async function mirroringOn(): Promise<boolean> {
+  const stored = await browser.storage.local.get(MIRROR_KEY);
+  if (stored[MIRROR_KEY] !== true) return false;
+  // The setting is not the authority; the grant is. A permission revoked from
+  // Chrome's own settings would otherwise leave this claiming to mirror.
+  return browser.permissions.contains({ permissions: ["bookmarks"] }).catch(() => false);
+}
+
+async function enqueueBookmarks(captures: Awaited<ReturnType<typeof importCaptures>>) {
+  if (captures.length === 0) return;
+  for (const capture of captures) await queue().enqueue(capture).catch(() => undefined);
+  await wakeDurableQueue();
+  const current = await readStatus("web");
+  await patchStatus("web", {
+    lastRun: Date.now(),
+    items: current.items + captures.length,
+    message: null,
+  });
+}
+
+/**
+ * Listeners exist only while the permission does.
+ *
+ * Registering them regardless and checking inside would mean the extension
+ * asks Chrome for bookmark events it has no right to, and gets them the
+ * moment someone grants the permission for something else.
+ */
+let bookmarkListeners: null | {
+  created: Parameters<typeof browser.bookmarks.onCreated.addListener>[0];
+  changed: Parameters<typeof browser.bookmarks.onChanged.addListener>[0];
+  removed: Parameters<typeof browser.bookmarks.onRemoved.addListener>[0];
+} = null;
+
+async function startMirroring(): Promise<void> {
+  if (bookmarkListeners || !(await mirroringOn())) return;
+
+  const now = () => Math.floor(Date.now() / 1000);
+
+  const created = async (_id: string, node: BookmarkNode) => {
+    const capture = await toBookmarkCapture(node, "save", now());
+    if (capture) await enqueueBookmarks([capture]);
+  };
+
+  const changed = async (id: string, info: { title?: string; url?: string }) => {
+    // onChanged carries only what changed, so the node is read back for the
+    // url — a rename with no url would otherwise identify nothing.
+    const [node] = await browser.bookmarks.get(id).catch(() => []);
+    if (!node) return;
+    const capture = await toBookmarkCapture(
+      { ...(node as BookmarkNode), title: info.title ?? node.title },
+      "save",
+      now(),
+    );
+    if (capture) await enqueueBookmarks([capture]);
+  };
+
+  const removed = async (_id: string, info: { node: BookmarkNode }) => {
+    await enqueueBookmarks(await removalCaptures(info.node, now()));
+  };
+
+  bookmarkListeners = {
+    created: created as never,
+    changed: changed as never,
+    removed: removed as never,
+  };
+  browser.bookmarks.onCreated.addListener(bookmarkListeners.created);
+  browser.bookmarks.onChanged.addListener(bookmarkListeners.changed);
+  browser.bookmarks.onRemoved.addListener(bookmarkListeners.removed);
+}
+
+function stopMirroring(): void {
+  if (!bookmarkListeners) return;
+  browser.bookmarks.onCreated.removeListener(bookmarkListeners.created);
+  browser.bookmarks.onChanged.removeListener(bookmarkListeners.changed);
+  browser.bookmarks.onRemoved.removeListener(bookmarkListeners.removed);
+  bookmarkListeners = null;
+}
+
+/**
+ * Turning mirroring on, which is when the permission is asked for.
+ *
+ * Denial is not an error state: nothing else in the extension depends on
+ * this, so it simply stays off and says so.
+ */
+async function setMirroring(on: boolean): Promise<BackgroundResult> {
+  if (!on) {
+    stopMirroring();
+    await browser.storage.local.set({ [MIRROR_KEY]: false });
+    // Handed back rather than kept for later. Items already mirrored stay:
+    // the library keeps what you saved.
+    await browser.permissions.remove({ permissions: ["bookmarks"] }).catch(() => false);
+    await patchStatus("web", { message: null });
+    return { ok: true, mirroring: false };
+  }
+
+  const granted = await browser.permissions
+    .request({ permissions: ["bookmarks"] })
+    .catch(() => false);
+  if (!granted) {
+    await browser.storage.local.set({ [MIRROR_KEY]: false });
+    return { ok: false, error: "Chrome did not grant access to your bookmarks" };
+  }
+
+  await browser.storage.local.set({ [MIRROR_KEY]: true });
+  await startMirroring();
+
+  const tree = (await browser.bookmarks.getTree().catch(() => [])) as BookmarkNode[];
+  await enqueueBookmarks(await importCaptures(tree, Math.floor(Date.now() / 1000)));
+  return { ok: true, mirroring: true };
+}
 
 const MENUS: MenuSpec[] = [
   { id: "anansi-save-page", title: "Save page to Anansi", contexts: ["page"] },
@@ -923,7 +1044,12 @@ async function durableSnapshot() {
 }
 
 type BackgroundResult =
-  | { ok: true; snapshot?: Awaited<ReturnType<typeof durableSnapshot>> }
+  | {
+      ok: true;
+      snapshot?: Awaited<ReturnType<typeof durableSnapshot>>;
+      /** Whether Chrome bookmark mirroring is on and still permitted. */
+      mirroring?: boolean;
+    }
   | { ok: false; error: string };
 
 interface RuntimeMessageSender {
@@ -987,6 +1113,12 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
     case "retry-queue":
       await wakeDurableQueue(true, msg.source);
       return { ok: true, snapshot: await durableSnapshot() };
+    case "mirror-status":
+      return { ok: true, mirroring: await mirroringOn() };
+    case "mirror-on":
+      return await setMirroring(true);
+    case "mirror-off":
+      return await setMirroring(false);
     case "save-page": {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) return { ok: false, error: "no active tab" };
@@ -1161,6 +1293,8 @@ export default defineBackground(() => {
 
   void rescheduleAlarm();
   void wakeDurableQueue().then(processPendingRefreshes);
+  // The worker restarts constantly; the listeners have to come back with it.
+  void startMirroring();
   browser.runtime.onStartup.addListener(() => {
     void wakeDurableQueue().then(processPendingRefreshes);
   });

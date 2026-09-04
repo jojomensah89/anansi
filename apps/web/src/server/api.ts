@@ -330,7 +330,9 @@ const extensionConfigRoute: Route = {
           // nothing to stage.
           web: true,
         },
-        chromeBookmarks: false,
+        // Mirroring is a per-install choice made in the popup, behind an
+        // optional permission — this only says the build supports it.
+        chromeBookmarks: true,
       },
       sources: EXTENSION_SOURCES.filter((s) => !off.has(s.source)),
     });

@@ -18,6 +18,11 @@ export default defineConfig({
     // lapses. <all_urls> would buy the same feature by letting it read every
     // page you ever open, which is not a trade worth making for a button.
     permissions: ["storage", "tabs", "alarms", "activeTab", "scripting", "contextMenus"],
+    // Optional, and asked for only when Chrome mirroring is switched on. Your
+    // whole browsing life is legible from a bookmark tree; an extension that
+    // reads it because it might one day be asked to is taking far more than it
+    // needs. Turning mirroring off hands the permission back.
+    optional_permissions: ["bookmarks"],
     host_permissions: [
       "https://x.com/*",
       "https://twitter.com/*",

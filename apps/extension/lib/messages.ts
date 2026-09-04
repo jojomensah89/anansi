@@ -114,7 +114,13 @@ export type PopupCommandMessage = MessageBase &
 	(
 		| {
 				anansi: "popup-command";
-				action: "queue-status" | "reschedule" | "save-page";
+				action:
+					| "queue-status"
+					| "reschedule"
+					| "save-page"
+					| "mirror-status"
+					| "mirror-on"
+					| "mirror-off";
 		  }
 		| {
 				anansi: "popup-command";
@@ -519,7 +525,10 @@ function validatePopupCommandShape(
 	if (
 		value.action === "queue-status" ||
 		value.action === "reschedule" ||
-		value.action === "save-page"
+		value.action === "save-page" ||
+		value.action === "mirror-status" ||
+		value.action === "mirror-on" ||
+		value.action === "mirror-off"
 	) {
 		return hasOnlyKeys(value, ["anansi", "messageVersion", "action"]);
 	}

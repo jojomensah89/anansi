@@ -132,6 +132,9 @@ const pause = (source: string) => command({ action: "stop", source });
 
 const savePage = () => command({ action: "save-page" });
 
+const mirror = (action: "mirror-status" | "mirror-on" | "mirror-off") =>
+  command({ action }) as Promise<{ ok?: boolean; mirroring?: boolean; error?: string } | undefined>;
+
 const retry = (source?: string) =>
   command(source ? { action: "retry-queue", source } : { action: "retry-queue" });
 
@@ -147,6 +150,12 @@ export default function App() {
   const [saved, setSaved] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [saving, setSaving] = useState<null | "saving" | "saved" | string>(null);
+  const [mirroring, setMirroring] = useState<boolean | null>(null);
+  const [mirrorNote, setMirrorNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    void mirror("mirror-status").then((r) => setMirroring(r?.mirroring ?? false));
+  }, []);
 
   useEffect(() => {
     void browser.storage.local.get(["server", "token", "syncEvery", "status"]).then((s) => {
@@ -441,6 +450,76 @@ export default function App() {
               style={{ ...button, height: 27, padding: "0 12px", fontSize: 11.5, flexShrink: 0 }}
             >
               Save
+            </button>
+          </div>
+
+          {/*
+            Chrome, kept separate from the sources above and from "This page".
+            It is not a platform being watched and not a page being clipped —
+            it is the browser's own list, mirrored only if you ask, and the
+            permission arrives when you do.
+          */}
+          <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
+            <span style={{ width: 26, height: 26, borderRadius: 7, background: S.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: S.muted }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 4h12v17l-6-4-6 4z" />
+              </svg>
+            </span>
+            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Chrome bookmarks</span>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: mirrorNote ? S.warn : mirroring ? S.faint : S.muted,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {mirrorNote ??
+                  (mirroring === null
+                    ? "Checking…"
+                    : mirroring
+                      ? "Mirroring — new bookmarks arrive as you make them"
+                      : "Off. Turning it on asks Chrome for access")}
+              </span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={mirroring === true}
+              aria-label="Mirror Chrome bookmarks"
+              disabled={mirroring === null}
+              onClick={async () => {
+                setMirrorNote(null);
+                const next = !mirroring;
+                const result = await mirror(next ? "mirror-on" : "mirror-off");
+                setMirroring(result?.mirroring ?? false);
+                if (result?.error) setMirrorNote(result.error);
+                refresh();
+              }}
+              style={{
+                width: 36,
+                height: 20,
+                flexShrink: 0,
+                borderRadius: 10,
+                padding: "0 2px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: mirroring ? "flex-end" : "flex-start",
+                background: mirroring ? "#2a3f36" : S.raised,
+                border: `1px solid ${mirroring ? "#3d6353" : S.edge}`,
+                cursor: mirroring === null ? "default" : "pointer",
+              }}
+            >
+              <span
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  background: mirroring ? S.ok : S.faint,
+                }}
+              />
             </button>
           </div>
         </div>

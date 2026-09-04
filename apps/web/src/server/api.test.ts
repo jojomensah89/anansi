@@ -211,7 +211,7 @@ describe("handleApi", () => {
       tiktok: false,
       web: true,
     });
-    expect(body.features.chromeBookmarks).toBe(false);
+    expect(body.features.chromeBookmarks).toBe(true);
 
     const tiktok = body.sources.find((source: { source: string }) => source.source === "tiktok");
     expect(tiktok.watchUrls).toEqual(["/api/user/collect/item_list"]);
