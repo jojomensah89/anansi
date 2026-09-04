@@ -29,8 +29,6 @@ export function clientSnippet(client: McpClientId, endpoint: string): string {
       return JSON.stringify({ mcpServers: { anansi: { url: endpoint, headers: authHeaders } } }, null, 2);
     case "vscode":
       return JSON.stringify({ servers: { anansi: { type: "http", url: endpoint, headers: authHeaders } } }, null, 2);
-    case "windsurf":
-      return JSON.stringify({ mcpServers: { anansi: { serverUrl: endpoint, headers: authHeaders } } }, null, 2);
     case "zed":
       return JSON.stringify({ context_servers: { anansi: { source: "custom", url: endpoint, headers: authHeaders } } }, null, 2);
   }
