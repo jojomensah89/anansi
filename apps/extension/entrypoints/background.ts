@@ -1166,6 +1166,8 @@ const SAFE_PLATFORM_ERRORS: Record<PlatformErrorCode, string> = {
   not_signed_in: "the platform tab is not signed in",
   query_unavailable: "the bookmark query is unavailable; open the bookmarks page and retry",
   capture_failed: "capture failed inside the platform tab",
+  page_shape_changed: "GitHub's stars page changed; update the extension before retrying",
+  rate_limited: "GitHub temporarily limited the stars import; retry later",
 };
 
 async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundResult> {

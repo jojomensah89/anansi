@@ -1,5 +1,5 @@
 /**
- * Pure validation for the three extension message directions.
+ * Pure validation for the extension's three message directions.
  *
  * The caller supplies trusted delivery context (the current page URL, runtime
  * sender kind, and the nonce established for that tab). The effective source
@@ -12,7 +12,7 @@
 
 export const MESSAGE_PROTOCOL_VERSION = 1 as const;
 
-export type PlatformSource = "x" | "reddit" | "tiktok";
+export type PlatformSource = "x" | "reddit" | "tiktok" | "github";
 export type MessagePath =
 	| "page-to-relay"
 	| "runtime-to-background"
@@ -106,7 +106,9 @@ export type PageEventMessage = PageTrafficBase &
 					| "platform_request_failed"
 					| "not_signed_in"
 					| "query_unavailable"
-					| "capture_failed";
+					| "capture_failed"
+					| "page_shape_changed"
+					| "rate_limited";
 		  }
 	);
 
@@ -181,24 +183,21 @@ const SOURCE_HOSTS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["x.com", "twitter.com"]),
 	reddit: new Set(["www.reddit.com", "old.reddit.com", "reddit.com"]),
 	tiktok: new Set(["www.tiktok.com", "tiktok.com"]),
+	github: new Set(["github.com"]),
 };
 
 const PAGE_EVENT_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
 	reddit: new Set(["saved", "bookmark", "page", "done", "error"]),
-	tiktok: new Set([
-		"observed",
-		"scanned",
-		"identified",
-		"bookmark",
-		"error",
-	]),
+	tiktok: new Set(["observed", "scanned", "identified", "bookmark", "error"]),
+	github: new Set(["page", "done", "bookmark", "error"]),
 };
 
 const PAGE_COMMAND_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["configure", "backfill"]),
 	reddit: new Set(["configure", "backfill"]),
 	tiktok: new Set(["configure", "identify", "scan"]),
+	github: new Set(["configure", "backfill"]),
 };
 
 const ERROR_CODES = new Set([
@@ -206,6 +205,8 @@ const ERROR_CODES = new Set([
 	"not_signed_in",
 	"query_unavailable",
 	"capture_failed",
+	"page_shape_changed",
+	"rate_limited",
 ]);
 
 const SENSITIVE_KEYS = new Set([
@@ -322,7 +323,7 @@ function deriveSource(urlValue: string): PlatformSource | null {
 	try {
 		const url = new URL(urlValue);
 		if (url.protocol !== "https:" || url.username || url.password) return null;
-		for (const source of ["x", "reddit", "tiktok"] as const) {
+		for (const source of ["x", "reddit", "tiktok", "github"] as const) {
 			if (SOURCE_HOSTS[source].has(url.hostname.toLowerCase())) return source;
 		}
 	} catch {
@@ -340,7 +341,12 @@ function hasOnlyKeys(
 }
 
 function isSource(value: unknown): value is PlatformSource {
-	return value === "x" || value === "reddit" || value === "tiktok";
+	return (
+		value === "x" ||
+		value === "reddit" ||
+		value === "tiktok" ||
+		value === "github"
+	);
 }
 
 /**
@@ -376,8 +382,13 @@ function isHandle(value: unknown): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9_.]{1,32}$/.test(value);
 }
 
-function isExternalId(value: unknown): value is string {
-	return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+function isExternalId(value: unknown, source: PlatformSource): value is string {
+	if (typeof value !== "string") return false;
+	return source === "github"
+		? /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9._-]{1,100}$/.test(
+				value,
+			)
+		: /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }
 
 function isNonce(value: unknown): value is string {
@@ -424,7 +435,7 @@ function validatePageEventShape(
 				]) &&
 				(value.bookmarkAction === "save" ||
 					value.bookmarkAction === "unsave") &&
-				isExternalId(value.externalId) &&
+				isExternalId(value.externalId, source) &&
 				(value.canonicalUrl === undefined ||
 					isSourceUrl(value.canonicalUrl, source))
 			);
@@ -449,9 +460,7 @@ function validatePageEventShape(
 				isNonNegativeInteger(value.items)
 			);
 		case "identified":
-			return (
-				hasOnlyKeys(value, [...base, "handle"]) && isHandle(value.handle)
-			);
+			return hasOnlyKeys(value, [...base, "handle"]) && isHandle(value.handle);
 		case "done":
 			return (
 				hasOnlyKeys(value, [...base, "pages", "items"]) &&

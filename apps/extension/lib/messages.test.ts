@@ -24,7 +24,10 @@ const extensionRuntimeContext: MessageContext = {
 	sender: { kind: "extension" },
 };
 
-const pageEvent = (source: "x" | "reddit" | "tiktok", action: string) => ({
+const pageEvent = (
+	source: "x" | "reddit" | "tiktok" | "github",
+	action: string,
+) => ({
 	anansi: "page-event",
 	messageVersion: MESSAGE_PROTOCOL_VERSION,
 	source,
@@ -49,6 +52,20 @@ describe("parseExtensionMessage", () => {
 			},
 		],
 		["https://tiktok.com/@example/favorites", pageEvent("tiktok", "scanned")],
+		[
+			"https://github.com/stars",
+			{
+				...pageEvent("github", "page"),
+				page: 1,
+				items: 1,
+				cursor: "https://github.com/stars?after=cursor_2",
+				raw: {
+					schemaVersion: 1,
+					pageType: "github_stars",
+					repositories: [],
+				},
+			},
+		],
 	])("accepts the expected message family for %s", (url, message) => {
 		const result = parseExtensionMessage(message, pageContext(url));
 
@@ -76,7 +93,7 @@ describe("parseExtensionMessage", () => {
 
 	test.each([
 		{ ...pageEvent("x", "saved"), anansi: "mystery" },
-		{ ...pageEvent("x", "saved"), source: "github" },
+		{ ...pageEvent("x", "saved"), source: "instagram" },
 		{ ...pageEvent("x", "mystery") },
 		{ ...pageEvent("x", "saved"), messageVersion: 99 },
 	])("rejects unknown names, sources, actions, and versions", (message) => {
@@ -158,6 +175,36 @@ describe("parseExtensionMessage", () => {
 			path: "relay-to-page",
 			source: "tiktok",
 		});
+	});
+
+	test("accepts GitHub backfill commands and stable extraction errors", () => {
+		const context: MessageContext = {
+			path: "relay-to-page",
+			pageUrl: "https://github.com/stars",
+			expectedNonce: NONCE,
+		};
+		expect(
+			parseExtensionMessage(
+				{
+					anansi: "page-command",
+					messageVersion: MESSAGE_PROTOCOL_VERSION,
+					source: "github",
+					nonce: NONCE,
+					action: "backfill",
+					config: { source: "github", pageLimit: 40 },
+				},
+				context,
+			),
+		).toMatchObject({ ok: true, source: "github" });
+
+		for (const errorCode of ["page_shape_changed", "rate_limited"]) {
+			expect(
+				parseExtensionMessage(
+					{ ...pageEvent("github", "error"), errorCode },
+					pageContext("https://github.com/stars"),
+				),
+			).toMatchObject({ ok: true, source: "github" });
+		}
 	});
 
 	test("rejects an incorrect page correlation nonce", () => {
@@ -310,8 +357,10 @@ describe("parseExtensionMessage", () => {
 			];
 			for (const message of rejected) {
 				expect(
-					parseExtensionMessage(message, pageContext("https://x.com/i/bookmarks"))
-						.ok,
+					parseExtensionMessage(
+						message,
+						pageContext("https://x.com/i/bookmarks"),
+					).ok,
 				).toBe(false);
 			}
 		});
@@ -329,6 +378,27 @@ describe("parseExtensionMessage", () => {
 				pageContext("https://www.reddit.com/user/example/saved"),
 			);
 			expect(result.ok).toBe(true);
+		});
+
+		test("accepts a GitHub repository identity only on GitHub", () => {
+			const githubBookmark = {
+				...pageEvent("github", "bookmark"),
+				bookmarkAction: "unsave",
+				externalId: "vyom-26/bmx_racer",
+				canonicalUrl: "https://github.com/Vyom-26/BMX_Racer",
+			};
+			expect(
+				parseExtensionMessage(
+					githubBookmark,
+					pageContext("https://github.com/Vyom-26/BMX_Racer"),
+				),
+			).toMatchObject({ ok: true, source: "github" });
+			expect(
+				parseExtensionMessage(
+					{ ...githubBookmark, externalId: "profile-only" },
+					pageContext("https://github.com/stars"),
+				).ok,
+			).toBe(false);
 		});
 
 		test("refuses a link that points off the platform it came from", () => {
