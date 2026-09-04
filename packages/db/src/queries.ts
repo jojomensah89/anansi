@@ -2,6 +2,19 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { itemTags, items, media, sourceSettings, tags } from "./schema.ts";
 import type { AnansiDb, NewDbItem } from "./types.ts";
 
+export type CaptureOrigin =
+  | "platform_event"
+  | "platform_import"
+  | "toolbar"
+  | "context_menu"
+  | "chrome_bookmark"
+  | "legacy_unknown";
+
+export interface UpsertOptions {
+  /** Set only when an item is first inserted. */
+  captureOrigin?: CaptureOrigin;
+}
+
 /**
  * The shape the adapters produce. Structurally identical to the CLI's
  * NormalizedItem, restated here so packages/db does not depend on apps/cli —
@@ -34,10 +47,14 @@ export interface UpsertResult {
   mediaRows: number;
 }
 
-export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<UpsertResult> {
+export async function upsertItems(
+  db: AnansiDb,
+  batch: IngestItem[],
+  options: UpsertOptions = {},
+): Promise<UpsertResult> {
   if (batch.length === 0) return { inserted: 0, updated: 0, mediaRows: 0 };
   return await db.transaction(async (transaction) =>
-    upsertItemsInTransaction(transaction as unknown as AnansiDb, batch),
+    upsertItemsInTransaction(transaction as unknown as AnansiDb, batch, options),
   );
 }
 
@@ -69,6 +86,7 @@ export async function upsertItems(db: AnansiDb, batch: IngestItem[]): Promise<Up
 export async function upsertItemsInTransaction(
   db: AnansiDb,
   batch: IngestItem[],
+  options: UpsertOptions = {},
 ): Promise<UpsertResult> {
   if (batch.length === 0) return { inserted: 0, updated: 0, mediaRows: 0 };
 
@@ -138,6 +156,7 @@ export async function upsertItemsInTransaction(
       postedAt: item.postedAt ?? null,
       savedAt,
       savedAtExact: item.savedAtIsExact || was?.savedAtExact === 1 ? 1 : 0,
+      captureOrigin: options.captureOrigin ?? "legacy_unknown",
       saveOrder: item.saveOrder ?? null,
       metrics: JSON.stringify(item.metrics),
       // links ride inside raw rather than earning a column: the spec's schema
@@ -188,6 +207,8 @@ export async function upsertItemsInTransaction(
           postedAt: sql`excluded.posted_at`,
           savedAt: sql`excluded.saved_at`,
           savedAtExact: sql`excluded.saved_at_exact`,
+          // Provenance describes first arrival, not the latest refresh.
+          captureOrigin: sql`${items.captureOrigin}`,
           // Keep the first key we ever saw. X's sortIndex is stable per
           // item, and sources without a real one (Reddit gives no saved-at)
           // derive theirs from listing position at import time — which must

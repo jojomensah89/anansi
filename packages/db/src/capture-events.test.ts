@@ -60,6 +60,8 @@ describe("applyCapture", () => {
 		expect(replay).toEqual(first);
 		expect(storedItems).toHaveLength(1);
 		expect(storedEvents).toHaveLength(1);
+		expect(storedItems[0]?.captureOrigin).toBe("platform_event");
+		expect(storedEvents[0]?.captureMethod).toBe("platform_event");
 	});
 
 	test("retains an unsaved item and ignores an older delayed save", async () => {
@@ -215,6 +217,29 @@ describe("applyCapture", () => {
 		});
 		expect(replay).toEqual(first);
 		expect(await db.select().from(items)).toHaveLength(2);
+		expect((await db.select().from(items)).every((item) => item.captureOrigin === "platform_import")).toBe(true);
+		expect((await db.select().from(captureEvents))[0]?.captureMethod).toBe("platform_import");
+	});
+
+	test("keeps the first arrival provenance through later updates", async () => {
+		const db = openTestDb();
+		const imported: RawPageCapture = {
+			schemaVersion: 1,
+			payloadType: "raw_page",
+			eventId: "import-first",
+			source: "x",
+			action: "snapshot",
+			observedAt: 100,
+			captureMethod: "platform_import",
+			runId: "import-run",
+			page: 1,
+			raw: {},
+		};
+		await applyCapture(db, imported, [normalized()]);
+		await applyCapture(db, itemEvent({ eventId: "live-later", observedAt: 200 }));
+
+		const [stored] = await db.select().from(items);
+		expect(stored?.captureOrigin).toBe("platform_import");
 	});
 
 	test("stores no event when a content-less save has no existing item", async () => {

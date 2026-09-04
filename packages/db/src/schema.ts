@@ -42,6 +42,8 @@ export const items = sqliteTable(
      * quietly lie about when you saved things.
      */
     savedAtExact: integer("saved_at_exact").notNull().default(0),
+    /** How this item first entered Anansi. Never rewritten by later refreshes. */
+    captureOrigin: text("capture_origin").notNull().default("legacy_unknown"),
     /**
      * The timeline's own ordering key, and the only truthful answer to "what
      * did I save most recently?" while saved_at is a backfill stamp.
@@ -88,6 +90,8 @@ export const captureEvents = sqliteTable(
     source: text("source").notNull(),
     externalId: text("external_id"),
     action: text("action").notNull(),
+    /** The delivery path that produced this event. */
+    captureMethod: text("capture_method").notNull().default("legacy_unknown"),
     observedAt: integer("observed_at").notNull(),
     receivedAt: integer("received_at").notNull(),
     itemId: text("item_id").references(() => items.id, { onDelete: "set null" }),

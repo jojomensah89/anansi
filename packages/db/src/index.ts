@@ -2,6 +2,7 @@ export * as schema from "./schema.ts";
 export { captureEvents, items, itemSourceLinks, media, tags, itemTags } from "./schema.ts";
 export type { AnansiDb, DbItem, NewDbItem } from "./types.ts";
 export { upsertItems, countItems, creators, setArchived, tagItems, listTags, disabledSources, setSourceEnabled } from "./queries.ts";
+export type { CaptureOrigin, UpsertOptions } from "./queries.ts";
 export { searchItems, recentSaves, findByAuthor, getItem, listItems, libraryStats, sourceHealth, toFtsQuery } from "./search.ts";
 export { InvalidListCursorError } from "./search.ts";
 export type { SearchHit, SearchOptions, ItemDetail, SourceHealth, CardMedia } from "./search.ts";

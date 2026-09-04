@@ -51,6 +51,7 @@ async function recordReceipt(
 		externalId:
 			capture.payloadType === "item_event" ? capture.externalId : null,
 		action: capture.action,
+		captureMethod: capture.captureMethod,
 		observedAt: capture.observedAt,
 		receivedAt: Math.floor(Date.now() / 1000),
 		itemId: receipt.itemId,
@@ -112,7 +113,9 @@ async function applyPlatformEvent(
 			);
 		}
 		if (capture.normalizedItem) {
-			await upsertItemsInTransaction(db, [capture.normalizedItem]);
+			await upsertItemsInTransaction(db, [capture.normalizedItem], {
+				captureOrigin: capture.captureMethod,
+			});
 			existing = await findItem(db, capture);
 		}
 	} else if (!existing) {
@@ -179,7 +182,9 @@ async function applyChromeEvent(
 			);
 		}
 		if (capture.normalizedItem) {
-			await upsertItemsInTransaction(db, [capture.normalizedItem]);
+			await upsertItemsInTransaction(db, [capture.normalizedItem], {
+				captureOrigin: capture.captureMethod,
+			});
 			existing = await findItem(db, capture);
 		}
 	} else if (!existing) {
@@ -263,7 +268,9 @@ async function applyWithinTransaction(
 				"a raw capture page must parse to at least one item",
 			);
 		}
-		const applied = await upsertItemsInTransaction(db, parsedItems);
+		const applied = await upsertItemsInTransaction(db, parsedItems, {
+			captureOrigin: capture.captureMethod,
+		});
 		const outcome: CaptureOutcome =
 			applied.inserted > 0 ? "created" : "updated";
 		result = receipt(capture, null, outcome, parsedItems.length);
