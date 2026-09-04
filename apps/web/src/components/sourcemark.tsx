@@ -32,7 +32,25 @@ export function SourceMark({ source, size = 13 }: { source: string; size?: numbe
     );
   }
 
-  // X. Drawn rather than a letter, so it cannot be mistaken for a control.
+  if (source === "web") {
+    return (
+      <svg
+        {...common}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-label="Web"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z" />
+      </svg>
+    );
+  }
+
+  // X, and the fallback. Anything unrecognised showing X's logo is how 419
+  // saved web pages ended up branded as tweets.
   return (
     <svg {...common} fill="currentColor" aria-label="X">
       <path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z" />

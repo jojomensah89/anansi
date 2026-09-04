@@ -49,11 +49,19 @@ interface Field {
   searchable?: string;
 }
 
+/**
+ * Every platform the library can hold.
+ *
+ * The bar offers only the ones you actually have — a filter that can only
+ * ever return nothing is not worth a row in a menu — so this is the full set
+ * and the count decides what appears.
+ */
 const SOURCES: { value: string; label: string }[] = [
   { value: "x", label: "X" },
   { value: "github", label: "GitHub" },
   { value: "reddit", label: "Reddit" },
   { value: "tiktok", label: "TikTok" },
+  { value: "web", label: "Web & bookmarks" },
 ];
 
 const MEDIA: Option[] = [
@@ -88,6 +96,7 @@ const TYPES_BY_SOURCE: Record<string, Option[]> = {
   ],
   tiktok: [{ value: "video", label: "Video" }],
   github: [{ value: "repo", label: "Repo" }],
+  web: [{ value: "article", label: "Page" }],
 };
 
 function allTypes(sources: string[]): Option[] {

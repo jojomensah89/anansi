@@ -32,9 +32,10 @@ export const Route = createFileRoute("/sources")({ component: Sources });
  * means the platform publishes no history endpoint and signs its own requests,
  * so capture happens by watching what its app fetches. `cli` means it is not
  * an extension source at all — GitHub has a real API and a revocable token, so
- * it is imported from the command line and there is nothing here to switch on.
+ * it is imported from the command line. `manual` means nothing is watched at
+ * all: a page is here because you pressed something.
  */
-type Mode = "page" | "observe" | "cli";
+type Mode = "page" | "observe" | "cli" | "manual";
 
 interface Known {
   name: string;
@@ -78,6 +79,13 @@ const KNOWN: Known[] = [
     note:
       "No history endpoint and signed requests, so there is no import to press: your favourites arrive as the extension watches the page load them.",
   },
+  {
+    name: "Web pages & bookmarks",
+    source: "web",
+    mode: "manual",
+    note:
+      "Nothing is watched here — a page arrives because you saved it from the toolbar, right-clicked a selection, or turned on Chrome bookmark mirroring in the extension popup.",
+  },
 ];
 
 const NAMES: Record<string, string> = {
@@ -85,6 +93,7 @@ const NAMES: Record<string, string> = {
   github: "GitHub stars",
   reddit: "Reddit saves",
   tiktok: "TikTok favourites",
+  web: "Web pages & bookmarks",
 };
 
 const MODES: Record<string, Mode> = Object.fromEntries(KNOWN.map((k) => [k.source, k.mode]));
@@ -403,7 +412,9 @@ function Sources() {
             scrolls them, rather than requesting a list nobody serves.{" "}
             <strong style={{ color: "var(--muted)", fontWeight: 500 }}>cli</strong> means the
             extension is not involved at all: GitHub has a real API and a token you can scope and
-            revoke, so it is imported by command rather than scraped.
+            revoke, so it is imported by command rather than scraped.{" "}
+            <strong style={{ color: "var(--muted)", fontWeight: 500 }}>manual</strong> means nothing
+            is watched — a web page is here because you saved it.
           </div>
         </div>
       </div>
@@ -442,6 +453,7 @@ function Mode({ mode, push }: { mode: Mode; push?: boolean }) {
         borderRadius: 3,
         border: "1px solid var(--edge)",
         color: mode === "observe" ? "var(--accent)" : "var(--faint)",
+        fontStyle: mode === "cli" || mode === "manual" ? "italic" : undefined,
       }}
     >
       {mode}

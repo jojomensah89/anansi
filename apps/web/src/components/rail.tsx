@@ -109,6 +109,7 @@ export function Rail({ total, authors, bySource }: RailProps) {
             ["gh", "github", "Stars", bySource.github ?? 0],
             ["r/", "reddit", "Reddit", bySource.reddit ?? 0],
             ["tt", "tiktok", "TikTok", bySource.tiktok ?? 0],
+            ["www", "web", "Web pages", bySource.web ?? 0],
           ] as const
         ).map(([tag, source, label, n]) => (
           <Link
