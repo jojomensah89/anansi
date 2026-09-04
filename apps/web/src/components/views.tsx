@@ -3,12 +3,11 @@ import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 
 /**
- * The three views that are not the grid.
+ * The two views that are not the grid.
  *
  * Each answers a different question, which is the only reason to have more
  * than one. Row: what is in here, densely, when you are scanning names and
- * text. Timeline: what was I saving in a given week. Mosaic: nothing but the
- * images, for finding the one you remember seeing rather than reading.
+ * text. Timeline: what was I saving in a given week.
  */
 // The view is part of the URL schema now, so its type lives with the schema.
 export type { ViewMode } from "../lib/library-search.ts";
@@ -164,72 +163,12 @@ export function TimelineView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: 
   );
 }
 
-/* ------------------------------------------------------------- Mosaic --- */
-
-/**
- * Images only, nothing else.
- *
- * For the case where you remember what a thing looked like and not a word of
- * it. Items with no media are simply absent — a mosaic with text tiles in it
- * is a worse grid, not a mosaic.
- */
-export function MosaicView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemRow) => void }) {
-  const tiles = items.flatMap((item) =>
-    [...(item.media ?? []), ...(item.quoted?.media ?? [])].map((m) => ({ item, media: m })),
-  );
-
-  if (tiles.length === 0) {
-    return (
-      <div style={{ padding: "40px 12px", color: "var(--muted)", fontSize: 13.5 }}>
-        Nothing here has media.
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 6 }}>
-      {tiles.map(({ item, media }) => (
-        <button
-          key={item.id + media.key}
-          type="button"
-          onClick={() => onOpen(item)}
-          title={`@${item.author} — ${item.excerpt.slice(0, 90)}`}
-          style={{
-            position: "relative",
-            aspectRatio: "1 / 1",
-            padding: 0,
-            border: "none",
-            borderRadius: 5,
-            overflow: "hidden",
-            cursor: "pointer",
-            background: "var(--rail)",
-          }}
-        >
-          <img
-            src={mediaUrl(media.key)}
-            alt=""
-            loading="lazy"
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-          />
-          {media.kind === "video_poster" && (
-            <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ width: 30, height: 30, borderRadius: "50%", background: "#0b0e11b3", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--text)"><path d="M8 5v14l11-7z" /></svg>
-              </span>
-            </span>
-          )}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /* -------------------------------------------------------- the switcher --- */
 
 /**
  * Each icon draws what the view does to the same set of items: packed
- * rectangles, stacked lines, a column against a date, a wall of pictures. The
- * label stays — an icon alone would be a guess, and these four are close
+ * rectangles, stacked lines, and a column against a date. The label stays —
+ * an icon alone would be a guess, and these three are close
  * enough in meaning to be worth spelling out.
  */
 function TabIcon({ d }: { d: string }) {
@@ -257,8 +196,6 @@ const MODES: { value: ViewMode; label: string; icon: string }[] = [
   { value: "row", label: "Row", icon: "M4 6h4v4H4zM10 6h10M10 10h7M4 14h4v4H4zM10 14h10M10 18h7" },
   // A spine with events hanging off it.
   { value: "timeline", label: "Timeline", icon: "M7 3v18M7 7h11M7 13h8M7 18h12" },
-  // Pictures, not text.
-  { value: "mosaic", label: "Mosaic", icon: "M4 5h16v14H4zM4 14l4-4 5 5M14 12l2-2 4 4" },
 ];
 
 export function ViewTabs({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {

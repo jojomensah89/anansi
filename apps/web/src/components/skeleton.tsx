@@ -196,24 +196,6 @@ export function RowsSkeleton({ count = 8 }: { count?: number }) {
   );
 }
 
-export function MosaicSkeleton({ count = 18 }: { count?: number }) {
-  return (
-    <Loading label="Loading your library">
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-          gap: 8,
-        }}
-      >
-        {Array.from({ length: count }, (_, index) => (
-          <Bone key={index} height={150} radius={6} delay={index * 30} />
-        ))}
-      </div>
-    </Loading>
-  );
-}
-
 /* ------------------------------------------------------------- lists --- */
 
 export function CreatorRowsSkeleton({ count = 10 }: { count?: number }) {

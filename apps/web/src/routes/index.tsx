@@ -6,12 +6,11 @@ import { Palette } from "../components/palette.tsx";
 import { Detail } from "../components/detail.tsx";
 import { FilterChips, FilterTrigger, useFilterBar, type Filters } from "../components/filters.tsx";
 import { SelectBar } from "../components/selectbar.tsx";
-import { MosaicView, RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
+import { RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
 import { useMasonry } from "../components/masonry.tsx";
 import {
   CountBone,
   GridSkeleton,
-  MosaicSkeleton,
   RowsSkeleton,
   useSlowLoad,
 } from "../components/skeleton.tsx";
@@ -341,7 +340,6 @@ function Library() {
           )}
           {firstLoad && !error && view === "row" && <RowsSkeleton />}
           {firstLoad && !error && view === "timeline" && <RowsSkeleton count={6} />}
-          {firstLoad && !error && view === "mosaic" && <MosaicSkeleton />}
           {error && (
             <div style={{ color: "var(--muted)", fontSize: 13, padding: 12 }}>
               {error}
@@ -386,7 +384,6 @@ function Library() {
 
           {!firstLoad && view === "row" && <RowView items={items} onOpen={(i) => setOpenId(i.id)} />}
           {!firstLoad && view === "timeline" && <TimelineView items={items} onOpen={(i) => setOpenId(i.id)} />}
-          {!firstLoad && view === "mosaic" && <MosaicView items={items} onOpen={(i) => setOpenId(i.id)} />}
           <div ref={sentinel} style={{ height: 40 }} />
             {loading && items.length > 0 && (
               <div className="mono" style={{ fontSize: 11, color: "var(--faint)", padding: 8 }} aria-live="polite">

@@ -12,7 +12,7 @@
  * into a plain TypeScript build.
  */
 
-export const VIEWS = ["grid", "row", "timeline", "mosaic"] as const;
+export const VIEWS = ["grid", "row", "timeline"] as const;
 export type ViewMode = (typeof VIEWS)[number];
 
 /** Exclusive by nature: "has media" and "no media" cannot both be true. */

@@ -58,9 +58,9 @@ describe("validateLibrarySearch", () => {
     expect(validateLibrarySearch({ source: `x,${long}` }).source).toEqual(["x"]);
   });
 
-  test("only the four views are accepted", () => {
+  test("only the supported views are accepted", () => {
     expect(validateLibrarySearch({ view: "timeline" }).view).toBe("timeline");
-    expect(validateLibrarySearch({ view: "mosaic" }).view).toBe("mosaic");
+    expect(validateLibrarySearch({ view: "mosaic" }).view).toBeUndefined();
     expect(validateLibrarySearch({ view: "nonsense" }).view).toBeUndefined();
     expect(validateLibrarySearch({ view: 7 }).view).toBeUndefined();
   });
