@@ -11,7 +11,7 @@
  * What this does NOT cover is the three-line TanStack wrapper and the D1
  * binding. Those are the only two layers still untested before a deploy.
  */
-import { openLocalDb } from "@anansi/db/local";
+import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import type { AnansiDb } from "@anansi/db";
 import { handleApi } from "../src/server/api.ts";
 import { handleMcp } from "../src/server/mcp.ts";
@@ -21,7 +21,20 @@ const dbPath = process.env.ANANSI_DB_PATH ?? "data/anansi.db";
 const ingestToken = process.env.INGEST_TOKEN;
 const mcpToken = process.env.MCP_TOKEN;
 
-const db = openLocalDb(dbPath) as unknown as AnansiDb;
+/**
+ * Migrate on open, rather than hoping someone remembered.
+ *
+ * Opening a library without bringing its schema up to date produces a server
+ * that starts cleanly, answers /api/stats correctly, and then fails every
+ * ingest with "no such table" — which reads as a broken endpoint rather than
+ * an unmigrated database, and sends you looking in the wrong place entirely.
+ *
+ * Drizzle records what it has applied, so this is a no-op on a current
+ * library and additive on an old one.
+ */
+const local = openLocalDb(dbPath);
+migrateLocalDb(local);
+const db = local as unknown as AnansiDb;
 const mediaDir = process.env.ANANSI_MEDIA_DIR ?? "data/media";
 const media = {
   dir: mediaDir,
