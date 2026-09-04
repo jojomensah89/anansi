@@ -325,6 +325,7 @@ async function deliverRaw(
   raw: unknown,
   requestedPage?: number,
   cursor?: string | null,
+  captureMethod: "platform_import" | "platform_event" = "platform_import",
 ): Promise<void> {
   const config = await loadConfig();
   const delivery = captureDeliveryMode(
@@ -346,7 +347,7 @@ async function deliverRaw(
     source,
     action: "snapshot",
     observedAt: Math.floor(Date.now() / 1000),
-    captureMethod: "platform_import",
+    captureMethod,
     runId: identity.runId,
     page: identity.page,
     ...(cursor ? { cursor } : {}),
@@ -1303,6 +1304,7 @@ async function continueGitHubImport(
     msg.raw,
     msg.page,
     current.runMode === "full" ? (msg.cursor ?? null) : undefined,
+    current.runMode === "live" ? "platform_event" : "platform_import",
   );
   await patchStatus("github", { pages: msg.page, items: totalItems });
 
