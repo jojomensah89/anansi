@@ -24,6 +24,7 @@ import {
   type IndexedDbOutbox,
 } from "../lib/idb-outbox.ts";
 import { createIngestTransport } from "../lib/ingest-transport.ts";
+import { createHeartbeatClient, type HeartbeatClient } from "../lib/heartbeat.ts";
 import {
   MESSAGE_PROTOCOL_VERSION,
   parseExtensionMessage,
@@ -55,6 +56,8 @@ import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
 import { tweetUrl } from "../lib/platforms/x.ts";
 import type {
   CaptureQueueStatus,
+  CaptureSource as SharedCaptureSource,
+  HeartbeatSourceState,
   ItemEventCapture,
   RawPageCapture,
 } from "@anansi/sources";
@@ -117,12 +120,15 @@ export type Status = Record<string, SourceStatus>;
 const CONFIG_TTL_MS = 60 * 60 * 1000;
 const ALARM = "anansi-sync";
 const OUTBOX_ALARM = "anansi-outbox";
+const HEARTBEAT_ALARM = "anansi-heartbeat";
 const CAPTURE_SOURCES = ["x", "reddit", "tiktok"] as const;
+const HEARTBEAT_SOURCES = ["x", "reddit", "tiktok", "web"] as const;
 const tabNonces = new Map<number, string>();
 
 let cached: ServerCache<RemoteConfig> | null = null;
 let persistent: { outbox: IndexedDbOutbox; runs: SourceRuns } | null = null;
 let durableQueue: CaptureQueue | null = null;
+let healthHeartbeat: HeartbeatClient | null = null;
 
 function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
   if (persistent) return persistent;
@@ -150,6 +156,7 @@ async function patchStatus(source: string, patch: Partial<SourceStatus>): Promis
   const all = ((await browser.storage.local.get("status")).status ?? {}) as Status;
   const current = all[source] ?? { startedAt: null, lastRun: null, pages: 0, items: 0, uploaded: 0, failed: 0, message: null };
   await browser.storage.local.set({ status: { ...all, [source]: { ...current, ...patch } } });
+  requestHeartbeat();
 }
 
 async function readStatus(source: string): Promise<SourceStatus> {
@@ -221,13 +228,63 @@ function publishQueueStatus(): Promise<CaptureQueueStatus> {
   return queue().getStatus();
 }
 
+function heartbeat(): HeartbeatClient {
+  if (healthHeartbeat) return healthHeartbeat;
+  healthHeartbeat = createHeartbeatClient({
+    storage: {
+      async get(key) {
+        return (await browser.storage.local.get(key))[key];
+      },
+      set: (values) => browser.storage.local.set(values),
+    },
+    version: browser.runtime.getManifest().version,
+    createId: () => crypto.randomUUID(),
+    now: () => Math.floor(Date.now() / 1000),
+    async readState() {
+      const snapshot = await durableSnapshot();
+      const sources: Partial<Record<SharedCaptureSource, HeartbeatSourceState>> = {};
+      for (const source of HEARTBEAT_SOURCES) {
+        const run = snapshot.runs[source];
+        const counts = snapshot.bySource[source] ?? EMPTY_COUNTS;
+        sources[source] = {
+          phase: run?.phase ?? "idle",
+          ...(run?.paused ? { paused: true } : {}),
+          ...(run?.lastErrorCode ? { lastErrorCode: run.lastErrorCode } : {}),
+          ...counts,
+        };
+      }
+      return { queue: snapshot.queue, sources };
+    },
+    async transport(payload) {
+      const current = await settings();
+      if (!current) throw new Error("extension is not configured");
+      const response = await fetch(`${current.server}/api/extension/heartbeat`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${current.token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error("heartbeat rejected");
+    },
+  });
+  return healthHeartbeat;
+}
+
+function requestHeartbeat(): void {
+  void heartbeat().send();
+}
+
 async function wakeDurableQueue(
   includeFailed = false,
   source?: CaptureSource,
 ): Promise<CaptureQueueStatus> {
-  return queue().retry(
+  const status = await queue().retry(
     includeFailed ? { includeFailed: true, ...(source ? { source } : {}) } : undefined,
   );
+  requestHeartbeat();
+  return status;
 }
 
 /** Legacy direct upload, kept only while a source's captureV2 flag is off. */
@@ -994,6 +1051,14 @@ async function rescheduleAlarm(): Promise<void> {
   }
 }
 
+async function rescheduleHeartbeat(): Promise<void> {
+  await browser.alarms.clear(HEARTBEAT_ALARM);
+  browser.alarms.create(HEARTBEAT_ALARM, {
+    periodInMinutes: 2,
+    delayInMinutes: 1,
+  });
+}
+
 async function processPendingRefreshes(): Promise<void> {
   const runs = persistentState().runs;
   for (const source of CAPTURE_SOURCES) {
@@ -1277,6 +1342,10 @@ export default defineBackground(() => {
    */
   browser.alarms.onAlarm.addListener((alarm) => {
     void (async () => {
+      if (alarm.name === HEARTBEAT_ALARM) {
+        requestHeartbeat();
+        return;
+      }
       if (alarm.name === OUTBOX_ALARM) {
         await wakeDurableQueue();
         await processPendingRefreshes();
@@ -1292,15 +1361,19 @@ export default defineBackground(() => {
   });
 
   void rescheduleAlarm();
+  void rescheduleHeartbeat();
   void wakeDurableQueue().then(processPendingRefreshes);
+  requestHeartbeat();
   // The worker restarts constantly; the listeners have to come back with it.
   void startMirroring();
   browser.runtime.onStartup.addListener(() => {
     void wakeDurableQueue().then(processPendingRefreshes);
+    requestHeartbeat();
   });
   browser.runtime.onInstalled.addListener(() => {
     void wakeDurableQueue().then(processPendingRefreshes);
     void armOpenTabs();
+    requestHeartbeat();
   });
 
   // Arm the observers on every matching tab as it loads, so real-time capture
