@@ -336,8 +336,8 @@ export function extractGitHubStarsPage(
 	const currentPath = new URL(pageUrl).pathname.replace(/\/+$/, "");
 	const allRepositoriesHref =
 		currentPath === "/stars"
-			? Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]")).find(
-					(anchor) => {
+			? Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))
+					.find((anchor) => {
 						const candidate = validatedGitHubStarsPageUrl(
 							anchor.getAttribute("href") ?? "",
 							pageUrl,
@@ -348,8 +348,8 @@ export function extractGitHubStarsPage(
 							url.pathname.endsWith("/repositories") &&
 							url.searchParams.get("filter") === "all"
 						);
-					},
-				)?.getAttribute("href")
+					})
+					?.getAttribute("href")
 			: undefined;
 	const nextHref =
 		allRepositoriesHref ??

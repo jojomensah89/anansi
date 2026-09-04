@@ -154,8 +154,7 @@ describe("extractGitHubStarsPage", () => {
 					forks: 20,
 				},
 			],
-			nextUrl:
-				"https://github.com/stars/Vyom-26/repositories?filter=all",
+			nextUrl: "https://github.com/stars/Vyom-26/repositories?filter=all",
 		});
 	});
 
