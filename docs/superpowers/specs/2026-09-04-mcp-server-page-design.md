@@ -39,8 +39,8 @@ reference literally.
    agents can search the saved library through Anansi's read-only tools.
 2. An endpoint card shows the current origin plus `/mcp`, a copy button, a
    `4 tools available` badge, and `Streamable HTTP · Bearer-key auth` metadata.
-3. A connection card provides client choices for Claude Code, Claude Desktop,
-   Cursor, VS Code, Windsurf, and Zed. The selected client changes the
+3. A connection card provides client choices for Claude Code, Codex, Cursor,
+   VS Code, and Zed. The selected client changes the
    copyable setup snippet.
 4. The setup snippet always uses the literal `<YOUR_MCP_TOKEN>` placeholder.
    Supporting text explains that it must be replaced with the token already
@@ -64,12 +64,11 @@ format:
 
 - Claude Code: `claude mcp add --transport http anansi <endpoint> --header
   "Authorization: Bearer <YOUR_MCP_TOKEN>"`
-- Claude Desktop: JSON `mcpServers` entry with `type: "http"`, `url`, and an
-  `Authorization` header.
 - Cursor: JSON `mcp` entry with `url` and an `Authorization` header.
 - VS Code: JSON `servers` entry with `type: "http"`, `url`, and headers.
-- Windsurf and Zed: JSON HTTP-server entries with the same endpoint and bearer
-  header.
+- Codex: TOML `mcp_servers.anansi` entry with the endpoint and
+  `bearer_token_env_var = "MCP_TOKEN"`.
+- Zed: JSON HTTP-server entry with the same endpoint and bearer header.
 
 The exact snippet is kept copyable and compact; no snippet includes a real
 token, local database path, or other private environment value.

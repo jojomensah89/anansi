@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { CountBone, useSlowLoad } from "./skeleton.tsx";
+import { SourceMark } from "./sourcemark.tsx";
 
 /**
  * The 228px rail from the Library artboard.
@@ -92,6 +93,13 @@ export function Rail({ total, authors, bySource }: RailProps) {
             <path d="M4 7h16M4 12h16M4 17h9" />
           </svg>
         </Item>
+        <Item to="/mcp" label="MCP server" active={path === "/mcp"}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={path === "/mcp" ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="4" y="4" width="16" height="6" rx="1.5" />
+            <rect x="4" y="14" width="16" height="6" rx="1.5" />
+            <path d="M7 7h.01M7 17h.01M11 7h6M11 17h6" />
+          </svg>
+        </Item>
       </div>
 
       <div className="mono" style={{ padding: "22px 16px 8px", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fainter)" }}>
@@ -105,21 +113,21 @@ export function Rail({ total, authors, bySource }: RailProps) {
         */}
         {(
           [
-            ["x", "x", "Bookmarks", bySource.x ?? 0],
-            ["gh", "github", "Stars", bySource.github ?? 0],
-            ["r/", "reddit", "Reddit", bySource.reddit ?? 0],
-            ["tt", "tiktok", "TikTok", bySource.tiktok ?? 0],
-            ["www", "web", "Web pages", bySource.web ?? 0],
+            ["x", "Bookmarks", bySource.x ?? 0],
+            ["github", "Stars", bySource.github ?? 0],
+            ["reddit", "Reddit", bySource.reddit ?? 0],
+            ["tiktok", "TikTok", bySource.tiktok ?? 0],
+            ["web", "Web pages", bySource.web ?? 0],
           ] as const
-        ).map(([tag, source, label, n]) => (
+        ).map(([source, label, n]) => (
           <Link
-            key={tag}
+            key={source}
             to="/"
             search={{ source: [source] }}
             style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 8px", borderRadius: 5, fontSize: 12.5, color: "var(--text-dim)" }}
           >
-            <span className="mono" style={{ fontSize: 10, width: 22, height: 16, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--edge-strong)", borderRadius: 3, color: "var(--muted)" }}>
-              {tag}
+            <span style={{ width: 22, height: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <SourceMark source={source} size={15} />
             </span>
             {label}
             <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faint)" }}>

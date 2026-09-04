@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { findByAuthor, getItem, recentSaves, searchItems } from "@anansi/db";
 import type { AnansiDb, ItemDetail, SearchHit } from "@anansi/db";
+import { MCP_TOOL_CATALOG } from "./catalog.ts";
 
 /**
  * Four tools, reading the same database through the same functions the HTTP
@@ -72,7 +73,7 @@ const json = (value: unknown) => ({
 
 export function registerTools(server: McpServer, db: AnansiDb): void {
   server.registerTool(
-    "search_memory",
+    MCP_TOOL_CATALOG[0].name,
     {
       title: "Search saved posts",
       description:
@@ -104,7 +105,7 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
   );
 
   server.registerTool(
-    "get_item",
+    MCP_TOOL_CATALOG[1].name,
     {
       title: "Get one saved item",
       description:
@@ -119,7 +120,7 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
   );
 
   server.registerTool(
-    "recent_saves",
+    MCP_TOOL_CATALOG[2].name,
     {
       title: "Recently saved",
       description:
@@ -139,7 +140,7 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
   );
 
   server.registerTool(
-    "find_by_author",
+    MCP_TOOL_CATALOG[3].name,
     {
       title: "Everything from one author",
       description:
