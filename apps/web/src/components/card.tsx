@@ -76,9 +76,13 @@ export function Card({
         </span>
       )}
 
-      {media.length > 0 && <MediaGrid media={media} dim={selectable && !selected} />}
-
-      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+      {/*
+        Who, then what they said, then what they showed — the order the post
+        was written in, and the order the quote block below already used. Media
+        first put a picture above the name of the person who posted it, so a
+        card and the quote inside it disagreed about how a post is shaped.
+      */}
+      <div style={{ padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Avatar src={item.authorAvatar} square={isRepo} size={22} />
           <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -112,7 +116,16 @@ export function Card({
             {item.excerpt}
           </div>
         )}
+      </div>
 
+      {/* Full bleed, which is why it is not inside the padded block above. */}
+      {media.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <MediaGrid media={media} dim={selectable && !selected} />
+        </div>
+      )}
+
+      <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
         {quoted && (
           <div
             style={{
@@ -154,6 +167,34 @@ export function Card({
         {/* The platform mark sits here, not in the top-right corner where a
             close button lives — up there it reads as "dismiss this". */}
         <div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)" }}>
+          {/*
+            Stated, not implied by absence. The item is still here because a
+            library keeps what you saved; without a word saying why it looks
+            identical to one that is still bookmarked.
+          */}
+          {item.platformSaved === 0 && (
+            <span
+              title={
+                item.removedFromSourceAt
+                  ? `No longer saved on the platform, since ${new Date(item.removedFromSourceAt * 1000).toLocaleDateString()}`
+                  : "No longer saved on the platform"
+              }
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                color: "var(--fainter)",
+                border: "1px solid var(--line)",
+                borderRadius: 4,
+                padding: "1px 6px",
+              }}
+            >
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+              unsaved
+            </span>
+          )}
           {item.metrics?.likes ? <span>{compact(item.metrics.likes)} ♥</span> : null}
           <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
             {shortDate(item.postedAt)}

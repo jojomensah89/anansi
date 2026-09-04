@@ -16,6 +16,7 @@ import {
   useSlowLoad,
 } from "../components/skeleton.tsx";
 import { api, type ItemRow } from "../lib/api.ts";
+import { useHideRemoved } from "../lib/settings.ts";
 import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
 
 export const Route = createFileRoute("/")({
@@ -60,6 +61,7 @@ function Library() {
       type: search.type,
       tag: search.tag,
       media: search.media,
+      removed: search.removed as Filters["removed"],
       archived: search.archived,
     }),
     [search],
@@ -89,6 +91,8 @@ function Library() {
    * you are already reading. Only the first deserves a wall of shapes, and
    * neither deserves one for a load too fast to notice.
    */
+  const [hideRemoved] = useHideRemoved();
+
   const firstLoad = useSlowLoad(loading && items.length === 0);
 
   /**
@@ -119,7 +123,7 @@ function Library() {
     setItems([]);
     setCursor(null);
     setDone(false);
-  }, [filters, ordering]);
+  }, [filters, ordering, hideRemoved]);
 
   const loadMore = useCallback(async () => {
     if (done) return;
@@ -127,6 +131,12 @@ function Library() {
     try {
       const page = await api.items({
         ...filters,
+        /*
+          The chip wins over the preference. Asking to see what has been
+          removed while the setting hides removed items would otherwise return
+          nothing — and an empty grid is indistinguishable from a broken one.
+        */
+        removed: filters.removed ?? (hideRemoved ? "exclude" : "include"),
         cursor,
         // Timeline needs the whole library in date order, not the loaded page
         // re-sorted — otherwise its groups are only true of what you happen
@@ -144,7 +154,7 @@ function Library() {
     } finally {
       setLoading(false);
     }
-  }, [cursor, done, filters, view]);
+  }, [cursor, done, filters, view, hideRemoved]);
 
   useEffect(() => {
     if (items.length === 0 && !done) void loadMore();

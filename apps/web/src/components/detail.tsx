@@ -352,6 +352,16 @@ export function Detail({ id, onClose }: { id: string | null; onClose: () => void
                     : "import time (not exact)"
                 }
               />
+              <Row
+                k="at source"
+                v={
+                  item.platformSaved
+                    ? "still saved"
+                    : item.removedFromSourceAt
+                      ? `removed ${new Date(item.removedFromSourceAt * 1000).toISOString().slice(0, 10)}`
+                      : "removed"
+                }
+              />
               <Row k="media" v={`${item.media.length} stored`} />
               <Row k="indexed" v="fts5 ✓" accent />
             </Section>

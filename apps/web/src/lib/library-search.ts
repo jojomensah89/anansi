@@ -18,6 +18,15 @@ export type ViewMode = (typeof VIEWS)[number];
 /** Exclusive by nature: "has media" and "no media" cannot both be true. */
 const MEDIA_VALUES = ["any", "image", "video", "none"];
 
+/**
+ * Two values, not three.
+ *
+ * "Include everything" is the absence of the filter, the way it is for every
+ * other field — a chip reading "at source is anything" would be a chip that
+ * does nothing.
+ */
+const REMOVED_VALUES = ["exclude", "only"];
+
 export interface LibrarySearch {
   source?: string[];
   author?: string[];
@@ -25,6 +34,8 @@ export interface LibrarySearch {
   tag?: string[];
   media?: string;
   archived?: boolean;
+  /** "exclude" is only what is still saved; "only" is only what has gone. */
+  removed?: string;
   view?: ViewMode;
 }
 
@@ -69,6 +80,10 @@ export function validateLibrarySearch(search: Record<string, unknown>): LibraryS
     type: asList(search.type),
     tag: asList(search.tag),
     media: media && MEDIA_VALUES.includes(media) ? media : undefined,
+    removed:
+      typeof search.removed === "string" && REMOVED_VALUES.includes(search.removed)
+        ? search.removed
+        : undefined,
     archived: search.archived === true || search.archived === "true" ? true : undefined,
     view: VIEWS.find((v) => v === search.view),
   };
@@ -87,6 +102,7 @@ export function toLibrarySearch(filters: LibraryFilters, view: ViewMode): Librar
     type: some(filters.type),
     tag: some(filters.tag),
     media: filters.media,
+    removed: filters.removed,
     archived: filters.archived ? true : undefined,
     // The default view is the absence of the param, so a plain "/" stays plain.
     view: view === "grid" ? undefined : view,

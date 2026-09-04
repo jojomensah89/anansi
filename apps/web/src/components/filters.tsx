@@ -24,7 +24,7 @@ import { SourceMark } from "./sourcemark.tsx";
  */
 export type Filters = Pick<
   ItemQuery,
-  "source" | "author" | "media" | "type" | "tag" | "archived"
+  "source" | "author" | "media" | "type" | "tag" | "archived" | "removed"
 >;
 
 interface Option {
@@ -35,7 +35,7 @@ interface Option {
   icon?: React.ReactNode;
 }
 
-type FieldKey = "source" | "type" | "media" | "author" | "tag";
+type FieldKey = "source" | "type" | "media" | "author" | "tag" | "removed";
 
 interface Field {
   key: FieldKey;
@@ -59,6 +59,17 @@ const MEDIA: Option[] = [
   { value: "image", label: "Image" },
   { value: "video", label: "Video" },
   { value: "none", label: "No media" },
+];
+
+/**
+ * Whether the platform still has it.
+ *
+ * An unsave never deletes anything here, so "removed" is a state to filter on
+ * rather than an absence — this is how you go and look at what has gone.
+ */
+const REMOVED: Option[] = [
+  { value: "exclude", label: "Still saved" },
+  { value: "only", label: "Removed at source" },
 ];
 
 const TYPES_BY_SOURCE: Record<string, Option[]> = {
@@ -109,6 +120,7 @@ const FIELD_ICONS: Record<FieldKey, React.ReactNode> = {
   source: <Icon d="M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM8 8h8" />,
   type: <Icon d="M4 6h16M4 12h16M4 18h10" />,
   media: <Icon d="M4 5h16v14H4zM4 15l4.5-4.5 3.5 3.5 3-3L20 16" />,
+  removed: <Icon d="M6 6l12 12M18 6 6 18" />,
   author: <Icon d="M12 4.6a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8zM5.5 20c0-3.3 2.9-5.6 6.5-5.6s6.5 2.3 6.5 5.6" />,
   tag: <Icon d="M4 4h7l9 9-7 7-9-9zM8 8h.01" />,
 };
@@ -210,6 +222,13 @@ export function FilterBar({
         options: MEDIA,
       },
       {
+        key: "removed",
+        label: "At source",
+        multi: false,
+        icon: FIELD_ICONS.removed,
+        options: REMOVED,
+      },
+      {
         key: "tag",
         label: "Tag",
         multi: true,
@@ -221,14 +240,20 @@ export function FilterBar({
     return all.filter((f) => f.options.length > 0);
   }, [bySource, creators, tags, filters.source, present]);
 
+  /** Single-value fields hold a string; the rest hold a list. */
+  const SINGLE: FieldKey[] = ["media", "removed"];
+
   const valuesOf = (key: FieldKey): string[] => {
-    if (key === "media") return filters.media ? [filters.media] : [];
+    if (SINGLE.includes(key)) {
+      const value = filters[key as "media" | "removed"];
+      return value ? [value] : [];
+    }
     return list(filters[key] as string[] | undefined);
   };
 
   const setValues = (key: FieldKey, values: string[]) => {
-    if (key === "media") {
-      onChange({ ...filters, media: values[0] });
+    if (SINGLE.includes(key)) {
+      onChange({ ...filters, [key]: values[0] });
       return;
     }
     onChange({ ...filters, [key]: values.length > 0 ? values : undefined });
@@ -258,6 +283,7 @@ export function FilterBar({
       media: undefined,
       type: undefined,
       tag: undefined,
+      removed: undefined,
       archived: undefined,
     });
 

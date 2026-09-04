@@ -90,4 +90,13 @@ describe("validateLibrarySearch", () => {
     expect(out.type).toBeUndefined();
     expect(out.tag).toEqual(["real"]);
   });
+
+  test("at-source takes only the two values that mean something", () => {
+    expect(validateLibrarySearch({ removed: "only" }).removed).toBe("only");
+    expect(validateLibrarySearch({ removed: "exclude" }).removed).toBe("exclude");
+    // "include everything" is the absence of the filter, not a value.
+    expect(validateLibrarySearch({ removed: "include" }).removed).toBeUndefined();
+    expect(validateLibrarySearch({ removed: "1 or 1=1" }).removed).toBeUndefined();
+    expect(validateLibrarySearch({ removed: 7 }).removed).toBeUndefined();
+  });
 });

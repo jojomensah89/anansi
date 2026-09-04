@@ -57,6 +57,8 @@ export interface ItemQuery {
   type?: string[];
   tag?: string[];
   archived?: boolean;
+  /** Items the platform no longer has saved. Kept by default. */
+  removed?: "include" | "exclude" | "only";
   order?: "saved" | "posted";
   limit?: number;
 }
@@ -107,6 +109,7 @@ export const api = {
     for (const t of opts.type ?? []) q.append("type", t);
     for (const t of opts.tag ?? []) q.append("tag", t);
     if (opts.archived) q.set("archived", "1");
+    if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
     if (opts.order === "posted") q.set("order", "posted");
     q.set("limit", String(opts.limit ?? 60));
     return get<Page>(`/api/items?${q}`, signal);

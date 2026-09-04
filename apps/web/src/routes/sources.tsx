@@ -4,6 +4,7 @@ import { Rail } from "../components/rail.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
 import { SourceCardsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { api, type SourceRow } from "../lib/api.ts";
+import { useHideRemoved } from "../lib/settings.ts";
 
 export const Route = createFileRoute("/sources")({ component: Sources });
 
@@ -105,6 +106,7 @@ type Tab = "all" | "capturing" | "planned";
 function Sources() {
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [tab, setTab] = useState<Tab>("all");
+  const [hideRemoved, setHideRemoved] = useHideRemoved();
   const [stats, setStats] = useState<{ items: number; authors: number; bySource: Record<string, number> }>({
     items: 0,
     authors: 0,
@@ -324,6 +326,65 @@ function Sources() {
               </div>
             </>
           )}
+
+          {/*
+            The one preference this page owns. It belongs here rather than in
+            the filter bar because it is not a question about this view — it is
+            a standing answer about what the library is for.
+          */}
+          <div
+            style={{
+              marginTop: 24,
+              padding: "13px 16px",
+              background: "var(--card)",
+              border: "1px solid var(--line)",
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              maxWidth: 640,
+            }}
+          >
+            <span style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>
+                Hide items removed at the source
+              </span>
+              <span style={{ fontSize: 11.5, color: "var(--faint)", lineHeight: 1.5 }}>
+                Unsaving something on a platform never deletes it here. Leave this off to keep
+                everything you ever saved, marked when the platform no longer has it; turn it on
+                for a library that mirrors what is currently saved.
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setHideRemoved(!hideRemoved)}
+              role="switch"
+              aria-checked={hideRemoved}
+              aria-label="Hide items removed at the source"
+              style={{
+                width: 36,
+                height: 20,
+                flexShrink: 0,
+                borderRadius: 10,
+                padding: "0 2px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: hideRemoved ? "flex-end" : "flex-start",
+                background: hideRemoved ? "#2a3f36" : "var(--raised)",
+                border: `1px solid ${hideRemoved ? "#3d6353" : "var(--edge)"}`,
+                cursor: "pointer",
+              }}
+            >
+              <span
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  background: hideRemoved ? "var(--ok)" : "var(--faint)",
+                }}
+              />
+            </button>
+          </div>
 
           <div
             style={{

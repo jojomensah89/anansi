@@ -78,6 +78,15 @@ export interface SearchHit {
   savedAtExact: number;
   source: string;
   score: number;
+  /**
+   * 0 once the platform no longer has it saved.
+   *
+   * An unsave never deletes the item — the library keeps what you saved even
+   * after the platform stops agreeing that you did — so this is the only way
+   * anything downstream can tell the difference.
+   */
+  platformSaved?: number;
+  removedFromSourceAt?: number | null;
 }
 
 /**
@@ -165,6 +174,9 @@ export interface ItemDetail {
   postedAt: number | null;
   savedAt: number;
   savedAtExact: boolean;
+  /** False once the platform no longer has it saved. Never a deletion. */
+  platformSaved: boolean;
+  removedFromSourceAt: number | null;
   metrics: Record<string, number>;
   media: {
     kind: string;
@@ -202,10 +214,13 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     id: string; url: string; source: string; author: string | null; authorName: string | null;
     authorAvatar: string | null;
     title: string | null; body: string | null; postedAt: number | null; savedAt: number;
-    savedAtExact: number; metrics: string; raw: string;
+    savedAtExact: number; platformSaved: number; removedFromSourceAt: number | null;
+    metrics: string; raw: string;
   }>(sql`
     select id, url, source, author_handle as author, author_name as authorName,
            author_avatar as authorAvatar,
+           platform_saved as platformSaved,
+           removed_from_source_at as removedFromSourceAt,
            title, body, posted_at as postedAt, saved_at as savedAt,
            saved_at_exact as savedAtExact, metrics, raw
     from items where id = ${id} limit 1
@@ -270,6 +285,8 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     postedAt: row.postedAt,
     savedAt: row.savedAt,
     savedAtExact: row.savedAtExact === 1,
+    platformSaved: row.platformSaved !== 0,
+    removedFromSourceAt: row.removedFromSourceAt ?? null,
     metrics,
     // A quote's images are stored on the parent row, so they are partitioned
     // back out by origin url rather than duplicated.
@@ -331,6 +348,18 @@ function tagClause(value: string | string[] | undefined): SQL {
 function archiveClause(archived: boolean | undefined) {
   if (archived === true) return sql`and i.archived_at is not null`;
   return sql`and i.archived_at is null`;
+}
+
+/**
+ * Removed at the source is a state, not a deletion.
+ *
+ * Older rows predate the column and default to 1, so "still saved" is the
+ * honest reading of a library that has never seen an unsave.
+ */
+function removedClause(removed: ListOptions["removed"]): SQL {
+  if (removed === "exclude") return sql`and i.platform_saved = 1`;
+  if (removed === "only") return sql`and i.platform_saved = 0`;
+  return sql``;
 }
 
 function mediaClause(media: string | undefined) {
@@ -414,6 +443,15 @@ export interface ListOptions {
   tag?: string | string[];
   /** Archived items are excluded unless asked for. */
   archived?: boolean;
+  /**
+   * What to do with items the platform no longer has saved.
+   *
+   * "include" is the default because the whole point of a local library is
+   * that it outlives the platform's opinion; "exclude" is for people who want
+   * the library to mirror what is currently saved, and "only" is how you find
+   * what has gone.
+   */
+  removed?: "include" | "exclude" | "only";
   /** Bookmark order by default; "posted" is chronological by the post's date. */
   order?: ListOrder;
 }
@@ -477,6 +515,8 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
            i.author_avatar as authorAvatar,
            i.title, i.posted_at as postedAt, i.saved_at as savedAt,
            i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
+           i.platform_saved as platformSaved,
+           i.removed_from_source_at as removedFromSourceAt,
            substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
            0 as score,
            -- Every stored image, not one representative. A card that shows
@@ -494,6 +534,7 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
       ${keyset}
       ${tagClause(opts.tag)}
       ${archiveClause(opts.archived)}
+      ${removedClause(opts.removed)}
       ${mediaClause(opts.media)}
       ${typeClause(opts.contentType)}
     ${ordering}

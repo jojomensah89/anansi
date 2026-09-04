@@ -104,6 +104,7 @@ const itemsRoute: Route = {
           contentType: q.getAll("type"),
           tag: q.getAll("tag"),
           archived: q.get("archived") === "1",
+          removed: (["exclude", "only"] as const).find((v) => v === q.get("removed")),
           order: q.get("order") === "posted" ? "posted" : "saved",
           limit: num(q.get("limit"), 50),
         }),
