@@ -131,17 +131,34 @@ export function validatedGitHubStarsPageUrl(
 	baseUrl: string,
 ): string | null {
 	const url = githubUrl(value, baseUrl);
-	if (!url || url.pathname.replace(/\/+$/, "") !== "/stars" || url.hash)
-		return null;
-	if (url.searchParams.size > 2) return null;
+	if (!url || url.hash) return null;
+	const parts = url.pathname.split("/").filter(Boolean);
+	const isOverview = parts.length === 1 && parts[0] === "stars";
+	const isRepositoryList =
+		parts.length === 3 &&
+		parts[0] === "stars" &&
+		parts[1] !== undefined &&
+		OWNER.test(parts[1]) &&
+		parts[2] === "repositories";
+	if (!isOverview && !isRepositoryList) return null;
+	if (url.searchParams.size > 3) return null;
+	const seen = new Set<string>();
 	for (const [key, parameter] of url.searchParams) {
 		if (
-			!new Set(["after", "before", "page"]).has(key) ||
+			seen.has(key) ||
+			!new Set([
+				"after",
+				"before",
+				"page",
+				...(isRepositoryList ? ["filter"] : []),
+			]).has(key) ||
 			parameter.length > 1_000
 		) {
 			return null;
 		}
+		seen.add(key);
 	}
+	if (isRepositoryList && url.searchParams.get("filter") !== "all") return null;
 	return url.toString();
 }
 
@@ -236,7 +253,9 @@ function extractRepository(
 	if (!location) return null;
 
 	const description = boundedText(
-		row.querySelector('[itemprop="description"]')?.textContent,
+		row.querySelector(
+			'[itemprop="description"], :scope > .py-1 > p.col-9.color-fg-muted',
+		)?.textContent,
 		MAX_DESCRIPTION_LENGTH,
 	);
 	const language = boundedText(
@@ -248,11 +267,12 @@ function extractRepository(
 			boundedText(label.textContent, MAX_LABEL_LENGTH)?.toLowerCase() ===
 			"private",
 	);
-	const ownerAvatar = optionalHttpUrl(
-		row.querySelector<HTMLImageElement>("img.avatar")?.getAttribute("src") ??
-			null,
-		pageUrl,
-	);
+	const ownerAvatar =
+		optionalHttpUrl(
+			row.querySelector<HTMLImageElement>("img.avatar")?.getAttribute("src") ??
+				null,
+			pageUrl,
+		) ?? `https://github.com/${encodeURIComponent(location.owner)}.png?size=80`;
 	const stars = linkCount(row, "stargazers");
 	const forks = linkCount(row, "forks");
 	const starredAt = isoDate(
@@ -296,7 +316,7 @@ export function extractGitHubStarsPage(
 
 	const rows = Array.from(
 		document.querySelectorAll(
-			"[data-anansi-starred-repository], [data-testid=starred-repository], div.py-4.border-bottom",
+			"[data-anansi-starred-repository], [data-testid=starred-repository], li.tmp-py-4.border-bottom, li.py-4.border-bottom, div.py-4.border-bottom",
 		),
 	).slice(0, MAX_REPOSITORIES_PER_PAGE);
 	if (rows.length === 0) {
@@ -313,9 +333,29 @@ export function extractGitHubStarsPage(
 		);
 	if (repositories.length === 0) return { kind: "page_shape_changed" };
 
-	const nextHref = document
-		.querySelector<HTMLAnchorElement>('a[rel="next"]')
-		?.getAttribute("href");
+	const currentPath = new URL(pageUrl).pathname.replace(/\/+$/, "");
+	const allRepositoriesHref =
+		currentPath === "/stars"
+			? Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]")).find(
+					(anchor) => {
+						const candidate = validatedGitHubStarsPageUrl(
+							anchor.getAttribute("href") ?? "",
+							pageUrl,
+						);
+						if (!candidate) return false;
+						const url = new URL(candidate);
+						return (
+							url.pathname.endsWith("/repositories") &&
+							url.searchParams.get("filter") === "all"
+						);
+					},
+				)?.getAttribute("href")
+			: undefined;
+	const nextHref =
+		allRepositoriesHref ??
+		document
+			.querySelector<HTMLAnchorElement>('a[rel="next"]')
+			?.getAttribute("href");
 	const nextUrl = nextHref
 		? validatedGitHubStarsPageUrl(nextHref, pageUrl)
 		: null;

@@ -1,4 +1,5 @@
 import type { SyncStateRecord } from "./idb-outbox.ts";
+import { validatedGitHubStarsPageUrl } from "./platforms/github.ts";
 
 export type CaptureSource = "x" | "reddit" | "tiktok" | "github" | "web";
 
@@ -380,18 +381,9 @@ export function isExpectedImportTab(
 			);
 		}
 		if (source === "github") {
-			if (
-				host !== "github.com" ||
-				url.pathname.replace(/\/+$/, "") !== "/stars" ||
-				url.hash ||
-				url.searchParams.size > 2
-			) {
-				return false;
-			}
-			return Array.from(url.searchParams).every(
-				([key, parameter]) =>
-					(key === "after" || key === "before" || key === "page") &&
-					parameter.length <= 1_000,
+			return (
+				host === "github.com" &&
+				validatedGitHubStarsPageUrl(value, value) !== null
 			);
 		}
 		// TikTok has no favourites route to match: which profile counts depends

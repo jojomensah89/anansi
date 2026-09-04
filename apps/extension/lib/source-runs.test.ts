@@ -166,7 +166,19 @@ describe("import-route selection", () => {
 			true,
 		);
 		expect(
+			isExpectedImportTab(
+				"github",
+				"https://github.com/stars/jojomensah89/repositories?filter=all&page=2",
+			),
+		).toBe(true);
+		expect(
 			isExpectedImportTab("github", "https://github.com/stars/lists/work"),
+		).toBe(false);
+		expect(
+			isExpectedImportTab(
+				"github",
+				"https://github.com/stars/jojomensah89/repositories?filter=others",
+			),
 		).toBe(false);
 		expect(
 			isExpectedImportTab("github", "https://github.com/stars?token=secret"),

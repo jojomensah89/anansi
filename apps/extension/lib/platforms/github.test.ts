@@ -56,8 +56,18 @@ describe("GitHub URL validation", () => {
 				"https://github.com/stars",
 			),
 		).toBe("https://github.com/stars?after=opaque_cursor_2");
+		expect(
+			validatedGitHubStarsPageUrl(
+				"/stars/jojomensah89/repositories?filter=all&page=2",
+				"https://github.com/stars",
+			),
+		).toBe(
+			"https://github.com/stars/jojomensah89/repositories?filter=all&page=2",
+		);
 		for (const value of [
 			"/stars/lists/work",
+			"/stars/jojomensah89/repositories?filter=others",
+			"/stars/jojomensah89/repositories?filter=all&language=typescript",
 			"/settings/profile",
 			"https://example.com/stars?page=2",
 			"/stars?token=secret",
@@ -138,13 +148,28 @@ describe("extractGitHubStarsPage", () => {
 					url: "https://github.com/Anansi-Labs/Private_Archive",
 					description: "Internal research archive.",
 					language: "Rust",
+					ownerAvatar: "https://github.com/Anansi-Labs.png?size=80",
 					visibility: "private",
 					stars: 1234,
 					forks: 20,
 				},
 			],
-			nextUrl: "https://github.com/stars?after=opaque_cursor_2",
+			nextUrl:
+				"https://github.com/stars/Vyom-26/repositories?filter=all",
 		});
+	});
+
+	test("continues from the full signed-in repository list", async () => {
+		const result = extractGitHubStarsPage(
+			await fixture("stars-page.html"),
+			"https://github.com/stars/Vyom-26/repositories?filter=all",
+		);
+		expect(result.kind).toBe("page");
+		if (result.kind !== "page") return;
+		expect(result.page.repositories).toHaveLength(2);
+		expect(result.page.nextUrl).toBe(
+			"https://github.com/stars/Vyom-26/repositories?filter=all&page=2",
+		);
 	});
 
 	test("does not copy page markup or sensitive form fields", async () => {
