@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ItemDetail } from "@anansi/db";
 import { api, compact, mediaUrl } from "../lib/api.ts";
+import { Avatar } from "./avatar.tsx";
 import { Bone, Loading } from "./skeleton.tsx";
 
 /**
@@ -94,30 +95,7 @@ export function Detail({ id, onClose }: { id: string | null; onClose: () => void
         {item && (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 20 }}>
-              {item.authorAvatar ? (
-                <img
-                  src={item.authorAvatar}
-                  alt=""
-                  width={38}
-                  height={38}
-                  style={{
-                    borderRadius: item.source === "github" ? 6 : "50%",
-                    flexShrink: 0,
-                    objectFit: "cover",
-                    background: "var(--edge-strong)",
-                  }}
-                />
-              ) : (
-                <span
-                  style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: item.source === "github" ? 6 : "50%",
-                    background: "var(--edge-strong)",
-                    flexShrink: 0,
-                  }}
-                />
-              )}
+              <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} square={item.source === "github"} size={38} />
               <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                 <span style={{ fontSize: 14.5, fontWeight: 600 }}>
                   {item.authorName ?? item.author ?? "unknown"}
@@ -177,17 +155,7 @@ export function Detail({ id, onClose }: { id: string | null; onClose: () => void
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
-                  {item.quoted.avatar ? (
-                    <img
-                      src={item.quoted.avatar}
-                      alt=""
-                      width={22}
-                      height={22}
-                      style={{ borderRadius: "50%", objectFit: "cover", flexShrink: 0, background: "var(--edge-strong)" }}
-                    />
-                  ) : (
-                    <span style={{ width: 22, height: 22, borderRadius: "50%", background: "var(--edge-strong)", flexShrink: 0 }} />
-                  )}
+                  <Avatar src={item.quoted.avatar} seed={item.quoted.handle ?? item.quoted.name} size={22} />
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{item.quoted.name ?? item.quoted.handle}</span>
                   <span className="mono" style={{ fontSize: 11.5, color: "var(--faint)" }}>
                     @{item.quoted.handle ?? "unknown"}

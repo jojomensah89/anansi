@@ -1,4 +1,5 @@
 import { compact, mediaUrl, shortDate, type ItemRow } from "../lib/api.ts";
+import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 
 /**
@@ -62,9 +63,7 @@ export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemR
 
             <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {item.authorAvatar && (
-                  <img src={item.authorAvatar} alt="" width={16} height={16} loading="lazy" style={{ borderRadius: "50%", objectFit: "cover" }} />
-                )}
+                <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} size={16} />
                 <span style={{ fontSize: 12.5 }}>{item.authorName ?? item.author}</span>
                 <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
                   @{item.author}

@@ -1,4 +1,5 @@
 import { compact, mediaUrl, shortDate, type CardMedia, type ItemRow } from "../lib/api.ts";
+import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 
 /**
@@ -84,7 +85,7 @@ export function Card({
       */}
       <div style={{ padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Avatar src={item.authorAvatar} square={isRepo} size={22} />
+          <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} square={isRepo} size={22} />
           <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
             {item.authorName && item.authorName !== item.author && (
               <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -139,7 +140,7 @@ export function Card({
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <Avatar src={quoted.avatar} size={17} />
+              <Avatar src={quoted.avatar} seed={quoted.handle ?? quoted.name} size={17} />
               <span style={{ fontSize: 11.5, fontWeight: 600 }}>{quoted.name ?? quoted.handle}</span>
               <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
                 @{quoted.handle ?? "unknown"}
@@ -276,22 +277,5 @@ function MediaGrid({ media, dim, inset }: { media: CardMedia[]; dim?: boolean; i
         </span>
       )}
     </div>
-  );
-}
-
-function Avatar({ src, size, square }: { src?: string | null; size: number; square?: boolean }) {
-  const radius = square ? 4 : "50%";
-  if (!src) {
-    return <span style={{ width: size, height: size, borderRadius: radius, background: "var(--edge-strong)", flexShrink: 0 }} />;
-  }
-  return (
-    <img
-      src={src}
-      alt=""
-      width={size}
-      height={size}
-      loading="lazy"
-      style={{ borderRadius: radius, flexShrink: 0, objectFit: "cover", background: "var(--edge-strong)" }}
-    />
   );
 }

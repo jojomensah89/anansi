@@ -5,8 +5,35 @@
  * in the top-right corner of every card — exactly where a close button lives.
  * It read as "dismiss this", which is the worst thing a passive label can do.
  */
-export function SourceMark({ source, size = 13 }: { source: string; size?: number }) {
-  const common = { width: size, height: size, viewBox: "0 0 24 24" } as const;
+import { sourceMarkColor } from "./sourcemark-colors.ts";
+
+/**
+ * Each platform in its own colour.
+ *
+ * A wall of identical grey marks makes you read the handle to know where
+ * something came from, which is the one thing a logo is for. Reddit's orange
+ * and TikTok's cyan are recognisable at twelve pixels in a way their outlines
+ * are not.
+ *
+ * X and GitHub are both black-on-white brands, so on a dark theme they are the
+ * text colour — that is their colour here, not an absence of one.
+ */
+export function SourceMark({
+  source,
+  size = 13,
+  /** Inherit the surrounding colour instead — for a dimmed or selected row. */
+  muted,
+}: {
+  source: string;
+  size?: number;
+  muted?: boolean;
+}) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    style: muted ? undefined : { color: sourceMarkColor(source) },
+  } as const;
 
   if (source === "github") {
     return (
