@@ -1,480 +1,229 @@
 # Anansi
 
-A memory layer over everything you save — built so your coding agent can query
-it, not just so you can scroll it.
+Anansi is a local-first memory layer for the things you save online. It captures bookmarks, saved posts, favourites, GitHub stars, and web pages into one searchable library that your coding agent can query through MCP.
 
-Days 1–2 of the build spec: **the importer and the local library**. No cloud
-account, no server. It pages your X bookmarks in your own browser, writes
-every raw payload to disk, and normalizes them into a local SQLite file with
-FTS5 already indexed.
+It is designed for personal use: your browser supplies the platform session, Anansi stores the capture, and the server exposes only the library you choose to connect.
 
-```
-apps/cli/        the importer, adapters, ingest receiver
-apps/web/        TanStack Start on Workers: the JSON API and /mcp
-packages/db/     schema, migrations, the driver-taking db module
-packages/mcp/    the four tools, transport-agnostic
-packages/infra/  D1 + R2 + the Worker, as Alchemy resources
-packages/env/    the Worker's bindings, typed from infra
-```
+## Status
 
-Bun workspaces, laid out the way Better-T-Stack does, so day 8-9 adds
-`apps/web` as a merge rather than a migration. No `apps/server`: the MCP tools
-and the HTTP routes must call the same functions, and that is an import, not
-a network hop.
+| Source | Capture | Status |
+| --- | --- | --- |
+| X bookmarks | History import + live saves | Supported |
+| Reddit saves | History import + live saves | Supported |
+| GitHub stars | Full import + live star/unstar events | Supported |
+| Web pages | Toolbar, context menu, and selection capture | Supported |
+| Chrome bookmarks | Optional mirroring into the web library | Supported |
+| TikTok favourites | Observe while browsing your favourites | Experimental |
 
-## Quickstart
+GitHub capture is extension-only. It reads the signed-in GitHub stars pages in your browser, includes repositories that are visible to that account—including visible private repositories—and does not require GitHub OAuth or a personal access token.
+
+## Quick start
+
+### Requirements
+
+- [Bun](https://bun.sh/) 1.3 or newer
+- A Chromium-based browser for the extension
+- A local SQLite database (created automatically)
+
+### 1. Install dependencies
 
 ```bash
 bun install
-bun run anansi ingest
 ```
 
-Then paste the printed snippet into the console of a logged-in x.com tab with
-Bookmarks open. That is the whole setup. **You never handle a credential.**
+### 2. Start the local server
 
-A small bridge window opens; keep it open until the import finishes. If your
-popup blocker eats it, the snippet saves `anansi-bookmarks.json` to your
-downloads instead — then `anansi ingest --file <path>`.
+Copy the example environment file and set both tokens. The ingest token authenticates the browser extension; the MCP token authenticates agent clients.
 
-### Why a bridge window
+PowerShell:
 
-x.com's CSP `connect-src` has no `127.0.0.1`, and console-evaluated code runs
-in page context under the page's CSP, so the snippet cannot POST here
-directly:
-
-```
-Connecting to 'http://127.0.0.1:8787/ingest' violates the following
-Content Security Policy directive: "connect-src 'self' blob: ..."
+```powershell
+Copy-Item .env.example .env
+# Edit .env and set INGEST_TOKEN and MCP_TOKEN.
+bun run apps/web/scripts/serve-local.ts
 ```
 
-That rules out the bookmarklet-POSTs-to-localhost shape the build spec
-assumed. CSP governs *connections*, not *windows* — so the snippet opens
-`/bridge` on Anansi's own origin, and the payload crosses by `postMessage`,
-which is not a connection. The bridge, being same-origin with the server,
-POSTs freely. It only accepts messages whose origin is `https://x.com`.
+The local server listens on `http://127.0.0.1:8788` and creates `data/anansi.db` on first start.
 
-The extension will need none of this: a content script's fetches are bound by
-the extension's CSP, not the page's. This is the zero-install path until then.
+To run the web interface against that local server, use a second terminal:
 
-## Commands
-
-| command | what it does |
-|---|---|
-| `anansi ingest` | the capture path: loopback receiver + a snippet for the browser |
-| `anansi reparse x` | re-run the parser over raw pages already on disk. No network. |
-| `anansi stats x` | authors, media, date range, top ten |
-| `anansi search "<q>"` | bm25-ranked keyword search, snippet highlighted |
-| `anansi recent` | newest saves first |
-| `anansi import github` | your starred repos, with a real `starred_at` |
-| `anansi media sync` | fetch thumbnails; `--r2` uploads instead of `data/media/` |
-| `anansi serve --mcp` | the four MCP tools over stdio, for your agent |
-| `anansi db migrate` | create or update `data/anansi.db` |
-| `anansi db creators` | top authors, as a group-by |
-| `anansi doctor` | endpoint resolution, last run, saved cursor |
-| `anansi import x` | headless capture for your own machine only — see below |
-
-## How it is put together
-
-Three seams, placed on day 1 because the spec turns on them later:
-
-**`CaptureAdapter` splits fetching from parsing.** `pages()` touches the
-network; `parse()` is a pure function over a raw payload. So the parser is
-developed offline against saved fixtures, a parser fix costs no re-fetch, and
-the same `parse()` runs server-side when the extension starts POSTing raw
-payloads to `/api/ingest`.
-
-**`NormalizedItem` mirrors the `items` table one-for-one.** Day 2 is a mapping,
-not a redesign.
-
-**`SessionProvider` decides whose session makes the request.** Today: cookies
-from `.env`. Later: a cookie-reading CLI, then the extension. Nothing above
-that interface knows which one it got.
-
-### Why the browser makes the request
-
-Because that is where the session already is. `credentials: "include"` makes
-the browser attach its own cookie jar; ct0 is read in-page for the CSRF header
-exactly as x.com's own code does, and never leaves the tab. What crosses to
-the loopback server is the untouched bookmark payload and nothing else.
-
-The alternative — reading `auth_token` out of DevTools into a `.env` — asks a
-person to handle a live credential for their entire account, to do a thing
-their browser is already authorised to do. It is not a setup step anyone
-should be given.
-
-This is also the extension's design, arriving early: browser fetches with the
-user's session, POSTs raw, server parses. When the extension replaces the
-snippet, only the sender changes.
-
-### The queryId
-
-Not in the main bundle — it lives in a lazily loaded chunk, reachable through
-`window.webpackChunk_twitter_responsive_web`. In the page that walk is two
-lines and always current, which is another reason capture belongs there.
-
-Measured, not assumed: fetching x.com from a CLI without cookies returns the
-**logged-out shell**, whose chunk graph is `LoggedOutShell` and never
-references Bookmarks. The bearer is reachable that way; the queryId is not and
-cannot be. `endpoint.ts` still exists for the headless path below, with four
-tiers (env, disk cache, network scan, pinned) and loud logging when it falls
-back.
-
-### The headless path, and who it is for
-
-`anansi import x` reads cookies from `.env` and makes the requests itself. It
-exists for one case: a cron job on your own machine, against your own account,
-where no browser is open to paste into. It is not documented for users, it is
-not in the quickstart, and `.env.example` says so.
-
-### Raw first, always
-
-Every page is written to `data/raw/x/` before anything tries to understand it.
-That is what makes `reparse` free, and it is why the day the payload shape
-changes costs you a parser fix rather than a re-import.
-
-### The one alarm
-
-Every run appends to a ledger in `data/checkpoint-x.json`. A run that returns
-zero items after a run that didn't exits non-zero and says so. That single
-check is the difference between a tool and a tool you trust.
-
-### The database
-
-One `items` table for every source, with the platform payload kept in `raw`,
-so a new adapter is a parser rather than a migration. No `user_id` column —
-this is a single-tenant library, and that column arrives when there is a
-second user.
-
-FTS5 is external-content (`content='items'`), so the index stores no second
-copy of the text. That makes its three sync triggers mandatory rather than
-decorative, and it is why **`db:push` is unsafe here** — push diffs the
-Drizzle DSL and knows nothing about a virtual table. Generate and migrate.
-
-Upserts are idempotent on `(source, external_id)`. A row's `id` is generated
-once and never overwritten, and `saved_at` may only move backwards or toward
-being exact, so re-importing does not march every item's saved date forward.
-
-### Search, and where it stops working
-
-FTS5 with BM25 and `snippet()`. Porter stemming works — searching *streaming*
-finds *Stream*. Every term is quoted before binding, because `match` throws on
-an apostrophe, a bare `*`, an unbalanced quote or the bare word `AND`, and a
-thrown query inside an MCP call looks to an agent like the library is broken.
-`search.test.ts` holds those inputs; a trailing `*` and an explicit "phrase"
-are kept as real affordances.
-
-**CJK is tokenized badly, but it matters less than it looks.** `unicode61`
-splits on non-alphanumeric characters and Japanese has no spaces, so a whole
-run becomes one token — `デザイン` returns 0 hits against a post that plainly
-contains it. `scripts/probe-cjk.ts` measures it.
-
-The corpus makes this small, though: 36 items contain CJK, and 34 of them also
-carry a Latin word of four characters or more (`GitHub`, `Codex`, a URL), which
-is enough to find them. **Two items** are genuinely unreachable. Not worth a
-second index.
-
-What is missing is fuzziness, not tokenization. A misspelling returns nothing,
-because BM25 has no notion of near. `search_memory` says so in its description
-so the agent retries rather than concluding the library is empty.
-
-## The MCP server
-
-Four tools, reading the same database through the same functions the HTTP
-routes will call — registered against a server rather than wired to a
-transport, so the same four run over stdio today and over HTTP from a Worker
-later. There is no second implementation to drift.
-
-```
-search_memory(query, source?, author?, since?, limit)
-get_item(id)
-recent_saves(source?, limit)
-find_by_author(handle, limit)
+```powershell
+$env:VITE_API_BASE = "http://127.0.0.1:8788"
+bun run dev:web
 ```
 
-To use it from any project, once:
+Then open the Vite URL printed in the terminal.
+
+### 3. Build and load the extension
 
 ```bash
-claude mcp add anansi --scope user -- bun run <path to anansi>/apps/cli/src/cli.ts serve --mcp
+bun run --cwd apps/extension build
 ```
 
-Inside this repo, `.mcp.json` already does it.
+Open your browser's extension page, enable Developer mode, choose **Load unpacked**, and select:
 
-Two rules the tools enforce. **Excerpts, never full bodies** — capped at 300
-characters, because ten full posts with their payloads would spend an agent's
-context on `__typename` fields. And **every result carries its url**, because
-an unattributed memory is a hallucination waiting to happen.
-
-`get_item` deliberately does not return `raw`, though the spec's sketch lists
-it. Everything raw is actually consulted for — links, thread siblings, media —
-is extracted instead. `apps/cli/scripts/mcp-smoke.ts` drives the whole thing
-over real stdio and fails if any of that regresses.
-
-### Sources
-
-Four, in two capture modes:
-
-| source | mode | how |
-|---|---|---|
-| X bookmarks | page | GraphQL timeline, queryId resolved at runtime |
-| GitHub stars | page | documented API, scoped PAT, real `starred_at` |
-| Reddit saves | page | `/user/me/saved.json`, plain REST, session cookie |
-| TikTok favourites | **observe** | no history endpoint exists |
-
-**page** means the extension can walk your whole history itself. **observe**
-means the platform publishes no history endpoint and signs its own web
-requests (`X-Bogus`, `msToken`), so they cannot be forged from outside the app.
-Capture happens by watching what the app fetches while you scroll. There is no
-import button for TikTok, and saying so beats letting an empty card read as
-broken.
-
-Reddit is the easy middle: a documented JSON endpoint that answers to a normal
-logged-in session, so no app registration, no OAuth dance, no client secret.
-
-The TikTok parser is **written but unverified** against a real payload. That is
-survivable because of where it runs — the extension uploads raw and the server
-parses, so a wrong guess is a server-side fix, and `/api/ingest` returns 422 on
-a payload that parses to zero, so it surfaces in the popup immediately.
-
-### GitHub, and what it proved
-
-Adding a second source touched **no file** in `core/`, `packages/db`,
-`packages/mcp` or `store/` — only a parser, a client, an adapter and one line
-of dispatch. That is what the `CaptureAdapter` seam was for, and it is the
-reason GitHub is second rather than tenth.
-
-It is a genuine contrast with X. A documented endpoint, real pagination
-(`Link: rel="next"`, with page number carried in the same `cursor` field the X
-adapter fills with an opaque string), and `Accept:
-application/vnd.github.star+json`, which is the whole reason to bother early:
-without it you get a bare repo list, with it every entry carries `starred_at`.
-**That is the first exact saved-at in the library**, and currently the only
-thing exercising `saved_at_exact`.
-
-`GITHUB_TOKEN` in `.env` is fine to ask for, unlike the X cookies: a
-fine-grained PAT is purpose-scoped, read-only, revocable from a settings page,
-and carries no session.
-
-One honest limit. Cross-source recency is approximate until X can produce real
-timestamps — backfilled X items are stamped with import time, so they outrank
-stars you added months ago. Within a source the ordering is correct, and
-`recent_saves(source: "github")` is exact.
-
-### Media
-
-`anansi media sync` fetches a thumbnail for every media row that has none.
-Local by default, `--r2` to upload; one `MediaSink` interface, the same driver
-seam the database uses.
-
-The spec says "fetch and convert locally". There is nothing to convert —
-`pbs.twimg.com` does it:
-
-```
-original                 75.5 KB  image/jpeg
-?format=webp&name=small  18.9 KB  image/webp
+```text
+apps/extension/.output/chrome-mv3
 ```
 
-So no `sharp`, no native module, no local CPU, and nothing in this path that
-could not also run inside a Worker. The fetch *is* the conversion.
+Open the Anansi extension popup and enter:
 
-Measured on the real library: **1,246 thumbnails, 31.6 MB, zero failures, 101
-seconds.** The spec estimated 150-200 MB for fewer items; the real figure is
-about a fifth of that, and 0.3% of R2's 10 GB free tier.
+- Server: `http://127.0.0.1:8788`
+- Ingest token: the value of `INGEST_TOKEN`
 
-Video is stored as its poster frame and never as the MP4 — that is the one
-line in the cost section that could actually start a bill.
+Click **Save**. The popup will load the configured sources and show queue, import, and connection status.
 
-`stored_key` survives a reparse. Media rows are replaced wholesale on import,
-which is right for staleness, but a fresh uuid each time would orphan every
-uploaded file and re-download the library; identity and upload state are
-carried across on `(item_id, origin_url)`.
+## Capturing GitHub stars
 
-The R2 path is wired but **unverified against a live bucket** — that needs a
-Cloudflare account, which days 1-7 deliberately do not require.
+1. Sign in to GitHub in the same browser profile where Anansi is installed.
+2. Open the Anansi popup and choose **Import** beside GitHub.
+3. Anansi opens GitHub's signed-in stars page, follows the full repository list, and queues each bounded repository record.
+4. Leave the browser session available while the first import runs. Progress and the pagination cursor are persisted, so an interrupted run can resume.
 
-### The edge
+After the initial import, successful GitHub star and unstar actions are captured automatically. Repository identity is normalized as lowercase `owner/repository`, so a repository is stored once even when GitHub changes its display casing. Unstarring removes it from the current-star view without deleting the saved record; starring it again restores the current state.
 
-Generated with Better-T-Stack and merged, rather than hand-rolled:
+An import contains repository metadata such as:
+
+- Repository name and URL
+- Description and primary language, when available
+- Star and fork counts
+- Starred date, when GitHub provides it
+- Public/private visibility
+- Owner avatar, with a safe fallback when GitHub does not render one
+
+Only data visible in the signed-in GitHub page is captured. The extension does not send cookies, passwords, page forms, or raw HTML, and it does not request GitHub account access.
+
+## Extension sources
+
+The extension uses the existing browser session and sends bounded capture payloads to the authenticated Anansi ingest endpoint.
+
+- **X** walks the bookmarks page and watches bookmark mutations.
+- **Reddit** walks the saved-post listing and watches save/unsave requests.
+- **GitHub** walks the signed-in stars pages and watches star/unstar requests.
+- **TikTok** observes data already fetched while the signed-in favourites view is open; it has no history import and remains experimental.
+- **Web** captures the current page or selection from the toolbar and context menu.
+- **Chrome bookmarks** can be mirrored after granting the optional bookmarks permission.
+
+Automatic sync can be set to off, hourly, every two hours, every six hours, or daily. Live saves are queued immediately; scheduled imports open a background tab when needed and close only tabs created by Anansi.
+
+## MCP server
+
+Anansi exposes the same library through a Streamable HTTP MCP server at:
+
+```text
+http://127.0.0.1:8788/mcp
+```
+
+Bearer authentication is required when `MCP_TOKEN` is configured. The web app also includes an `/mcp` setup page that uses the literal `<YOUR_MCP_TOKEN>` placeholder; it never displays the configured secret.
+
+The MCP server provides four read-focused tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `search_memory` | Search saved items and return ranked excerpts with source URLs |
+| `get_item` | Retrieve one saved item with text, links, media, and thread context |
+| `recent_saves` | List the newest saved items |
+| `find_by_author` | Find saved items from one author |
+
+For Claude Code:
 
 ```bash
-bun create better-t-stack@latest anansi-web   --frontend tanstack-start --backend self --runtime none   --database sqlite --orm drizzle --db-setup d1   --api none --auth none --addons none --examples none   --web-deploy cloudflare --package-manager bun
+claude mcp add --transport http anansi http://127.0.0.1:8788/mcp --header "Authorization: Bearer <YOUR_MCP_TOKEN>"
 ```
 
-Two flags were found by running it rather than reading about it.
-`--backend self` means the fullstack framework hosts its own backend and
-**requires `--runtime none`** — it produces `apps/web` and no `apps/server`,
-which is what the "MCP tools call the same functions the HTTP routes call"
-rule wants. And `--database sqlite` alone means *Turso*; `--db-setup d1` is
-what actually produces `drizzle-orm/d1` and a `Cloudflare.D1.Database`.
+For Codex or another client that supports an environment-backed bearer token:
 
-The API is a plain `Request -> Response` function with the TanStack route as a
-three-line wrapper, so it is tested against the real library with no framework
-in the way. `/mcp` uses the SDK's `WebStandardStreamableHTTPServerTransport` —
-a Worker has `Request` and `Response`, not node req/res streams — and serves
-the identical `createAnansiServer` the stdio CLI does.
+```toml
+[mcp_servers.anansi]
+url = "http://127.0.0.1:8788/mcp"
+bearer_token_env_var = "MCP_TOKEN"
+```
 
-Both `/api/ingest` and `/mcp` are **closed unless a token is configured**. An
-open ingest on a public URL is an invitation to have someone else's library
-merged into yours.
+Keep `MCP_TOKEN` in the client environment rather than committing it to a project file.
 
-### Testing it before deploying
+## Local API
 
-Vite's dev SSR runs under Node, which cannot load `bun:sqlite`, so the
-TanStack dev server cannot reach the local library. That is a dev-runtime
-limitation, not a problem with the code — `handleApi` and `handleMcp` are
-plain `Request -> Response`, so they mount on Bun directly:
+The local server provides JSON endpoints for the library and extension:
+
+```text
+GET  /api/stats
+GET  /api/items
+GET  /api/items/:id
+GET  /api/search?q=...
+GET  /api/recent
+GET  /api/authors?handle=...
+GET  /api/creators
+GET  /api/sources
+POST /api/ingest
+POST /api/extension/heartbeat
+GET  /api/extension/config
+```
+
+`POST /api/ingest` and the extension heartbeat require the `INGEST_TOKEN` bearer token. Ingest is closed when no token is configured.
+
+## CLI
+
+The CLI remains useful for local database and parser work:
 
 ```bash
-INGEST_TOKEN=dev-ingest MCP_TOKEN=dev-mcp bun run apps/web/scripts/serve-local.ts
+bun run anansi --help
+bun run anansi db migrate
+bun run anansi search "design system"
+bun run anansi recent --limit 20
+bun run anansi media sync
+bun run anansi serve --mcp
+```
+
+The browser extension is the recommended capture path. The CLI also contains source adapters for local experiments and reparsing raw captures already on disk.
+
+## Project structure
+
+```text
+apps/cli/        Local CLI, import adapters, database and stdio MCP entrypoint
+apps/extension/  WXT React MV3 extension and platform content scripts
+apps/web/        TanStack Start UI, JSON API, MCP HTTP route, local server
+packages/db/     SQLite/D1 schema, migrations, search, and item operations
+packages/mcp/    Transport-independent MCP server and tool definitions
+packages/sources/  Shared capture contracts and source parsers
+packages/ui/     Shared UI components and styles
+packages/infra/  Cloudflare infrastructure and deployment resources
+packages/env/    Typed runtime environment bindings
+```
+
+The durable boundaries are intentional: the extension captures and queues; the server validates and parses; the database owns identity, search, removal state, and provenance; MCP and HTTP call the same database functions.
+
+## Development commands
+
+```bash
+bun test
+bun run typecheck
+bun run --cwd apps/extension compile
+bun run --cwd apps/extension build
+bun run --cwd apps/web build
+```
+
+To exercise the local MCP HTTP transport:
+
+```bash
 bun run apps/web/scripts/mcp-http-smoke.ts
 ```
 
-Verified locally against the real 1,274-item library: every read endpoint,
-keyset pagination with no overlap between pages, bearer auth on ingest
-(401 without, 401 wrong, idempotent with), and the full MCP handshake over
-HTTP — `initialize`, `tools/list`, `search_memory`, `get_item` — using the
-same `createAnansiServer` the stdio CLI calls. The FTS index and all 1,246
-`stored_key`s survive an HTTP ingest.
+The local test suite covers queue recovery, retry behavior, parser fixtures, authenticated ingest, GitHub import/live transitions, search, source health, and repository-card rendering.
 
-**What is still untested:** the three-line TanStack route wrapper and the D1
-binding. Those are the only two layers a deploy would exercise for the first
-time.
+## Privacy and permissions
 
-**Not yet deployed.** `bun run deploy` needs a Cloudflare account, which
-nothing before this point required.
+Anansi is intentionally conservative about browser access:
 
-### The interface
+- No `<all_urls>` permission
+- No `cookies` permission
+- No GitHub OAuth flow or GitHub personal access token for extension capture
+- Platform requests run from the signed-in page that already owns the session
+- Raw payloads are bounded and validated before server-side parsing
+- Extension-to-server traffic uses bearer authentication
+- Chrome bookmark access is optional and requested only when mirroring is enabled
 
-Three views — Library, Creators, Sources. Search is an **overlay** and item
-detail is a **drawer**, because both are things you do *to* the library rather
-than places you go instead of it; opening a result should never cost you your
-scroll position or your query.
+The local database and downloaded media live under `data/`. Do not commit `.env`, database files, raw captures, or media.
 
-The palette is the product surface, per the Screens canvas note. It debounces
-and aborts in flight, shows the real bm25 score (negative, lower is better)
-because that is the first thing that explains a wrong-looking result, and its
-empty state says what is actually wrong — keyword search has no notion of
-near, so a misspelling returns nothing.
+## License
 
-Grid pagination is keyset and infinite. Offset paging would silently drop or
-repeat items whenever an import ran underneath a scroll, which is a thing that
-will happen.
-
-Colours and type come straight from the Screens artboards rather than being
-reinterpreted, so a screenshot of the app and a screenshot of the mockup are
-the same design. Creators reproduces its numbers off the real library: 874
-authors, 1.46 saves per author, 695 saved exactly once.
-
-**Sources** is borrowed in shape from [removed]'s Connections page, which gets one
-thing right that no grid of cards does: a library is an ongoing process, not a
-pile, and the question you actually have is *is this still working?* It shows
-per-source item counts, media coverage, staleness, and the split between items
-**captured live** and items **backfilled** — a distinction that falls out of
-the `saved_at_exact` column already added for a different reason, rather than
-needing a provenance field.
-
-Borrowed in shape only. [removed] lists seven platforms because breadth is its
-pitch; this lists the two that exist and names the rest as not planned. Its
-four view modes and AI tagging are the parts the spec warns will eat the
-fortnight.
-
-To run it, both halves:
-
-```bash
-INGEST_TOKEN=dev-ingest MCP_TOKEN=dev-mcp bun run apps/web/scripts/serve-local.ts
-bun run dev:web    # with VITE_API_BASE=http://127.0.0.1:8788 in apps/web/.env.local
-```
-
-## The extension
-
-`apps/extension`, WXT + React, MV3. The thing that finally makes capture
-automatic — and the thing that deletes the bridge window, because a content
-script's fetches are bound by the **extension's** CSP, not the page's.
-
-Five content scripts:
-
-```
-x-main       MAIN     document_start   x.com       pages, and watches saves
-reddit-main  MAIN     document_start   reddit.com  watches saves
-tiktok-main  MAIN     document_start   tiktok.com  observes item lists
-relay        isolated document_start   all three   MAIN <-> background
-reddit       isolated document_idle    reddit.com  pages saved.json
-```
-
-Reddit needs both worlds for opposite reasons: the isolated one can fetch
-saved.json with your session and reach extension APIs, while only the MAIN one
-can see the page's own `fetch` and notice a save happening.
-
-### Save something, and it is just there
-
-Saving a post on X or Reddit syncs it within a couple of seconds, which is the
-one behaviour that makes a library feel live rather than imported.
-
-The mutation's own response is useless for this — X answers
-`{"data":{"tweet_bookmark_put":"Done"}}` and Reddit's `/api/save` is no better.
-Uploading that would parse to zero items and **422 on every single save**. So a
-watched save is treated as a *signal*: the background pulls the top twenty
-items of the listing instead, which arrives with the whole post. One request,
-debounced so three saves in a row cost one sync, and the upsert makes the
-nineteen you already have free — verified as `0 inserted, 20 updated`.
-
-Reddit needs no MAIN world: there is no queryId buried in a lazy chunk, a
-content script's same-origin fetch already carries the session, and extension
-APIs are there — so it talks to the background worker directly. X and TikTok
-both need it, for opposite halves of the same reason.
-
-`MAIN` because the isolated world cannot see
-`window.webpackChunk_twitter_responsive_web`, where the Bookmarks queryId
-lives, and because its `window.fetch` is a different object entirely.
-`document_start` because at `document_idle` X has already cached its own
-reference to `fetch`, so the patch lands on something nobody calls — which
-produces empty results that look exactly like X killing the API. Neither
-script can do the job alone, so they talk by `postMessage`.
-
-That split is also the trust boundary. `x-main` shares a context with x.com's
-own code, so it holds **no token and knows no server**; everything from it is
-treated as data by the relay and forwarded verbatim.
-
-### The thin pipe
-
-The extension parses nothing. It fetches `/api/extension/config`, follows it,
-and uploads the untouched payload; `/api/ingest` parses server-side. So when X
-reshapes a response you fix it in one place and every install is repaired on
-its next run, whether it was installed yesterday or six months ago — the
-extension's version stops mattering, which is what makes shipping it
-load-unpacked reasonable rather than a maintenance trap. The config endpoint
-doubles as a kill switch.
-
-A payload that parses to **zero items returns 422**, not a cheerful zero. That
-is the failure the whole project exists to notice.
-
-Permissions are `storage`, `tabs`, and three hosts. No `<all_urls>` — broad
-permissions are the biggest driver of review scrutiny, and this needs exactly
-what it asks for.
-
-### Automatic sync
-
-`chrome.alarms`, set from the popup: off, 1h, 2h, 6h or daily. Every capture
-path stops at the first thing it has already seen and the ingest upsert is
-idempotent, so a repeated run costs one request and changes nothing.
-
-**A sync needs the relevant tab open.** Capture runs in your own logged-in tab
-rather than from the background worker, which would mean taking the `cookies`
-permission and rebuilding a session the page already has. That is a far broader
-grant than the convenience is worth, and the cost of not taking it is stated in
-the popup rather than hidden.
-
-### Load it
-
-```bash
-bun run --filter @anansi/extension build
-```
-
-Then `chrome://extensions` → Developer Mode → Load unpacked →
-`apps/extension/.output/chrome-mv3`. Set the server and ingest token in the
-popup. No store, no review, no gatekeeper.
-
-## Terms
-
-Automated access to X outside the official API is against their developer
-terms. Every request this tool makes is made from your machine, with your own
-session, against your own account. That is not the same as being in the clear.
+MIT
