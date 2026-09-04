@@ -4,6 +4,7 @@ import {
 	captureDeliveryMode,
 	createSourceRuns,
 	isExpectedImportTab,
+	SOURCE_RUN_LEASE_MS,
 	type SyncStateStore,
 } from "./source-runs.ts";
 
@@ -52,6 +53,21 @@ describe("source runs", () => {
 		expect(overlap).toEqual({ started: false, run: first.run });
 		expect(otherSource.started).toBe(true);
 		expect(otherSource.run.runId).not.toBe(first.run.runId);
+	});
+
+	test("recovers an expired run without losing its resume cursor", async () => {
+		const { runs, setNow } = setup();
+		const first = await runs.begin("github");
+		await runs.setCursor("github", "https://github.com/stars?after=cursor-9");
+		setNow(first.run.startedAt + SOURCE_RUN_LEASE_MS);
+
+		const recovered = await runs.begin("github", "full");
+
+		expect(recovered.started).toBe(true);
+		expect(recovered.run.runId).not.toBe(first.run.runId);
+		expect(recovered.run.cursor).toBe(
+			"https://github.com/stars?after=cursor-9",
+		);
 	});
 
 	test("assigns stable page identities inside a persisted run", async () => {

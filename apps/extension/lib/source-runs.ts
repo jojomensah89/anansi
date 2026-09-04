@@ -130,6 +130,13 @@ function asRunState(
 /** Enough to survive a burst of saves, not enough to become a second library. */
 const MAX_PENDING_SAVES = 200;
 
+/**
+ * A running import owns this lease. Chrome may terminate an MV3 worker without
+ * running cleanup, so a persisted run older than the lease is recoverable by
+ * the next worker instead of blocking imports forever.
+ */
+export const SOURCE_RUN_LEASE_MS = 90_000;
+
 /** Durable source-run coordinator backed by the IndexedDB syncState store. */
 export function createSourceRuns(
 	dependencies: SourceRunsDependencies,
@@ -161,7 +168,12 @@ export function createSourceRuns(
 		begin(source, mode = "full") {
 			return serialize(source, async () => {
 				const current = await read(source);
-				if (current.phase === "running" && current.runId && current.startedAt) {
+				if (
+					current.phase === "running" &&
+					current.runId &&
+					current.startedAt &&
+					now() - current.updatedAt < SOURCE_RUN_LEASE_MS
+				) {
 					return {
 						started: false,
 						run: current as ActiveSourceRunState,

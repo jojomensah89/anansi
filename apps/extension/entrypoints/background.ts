@@ -36,6 +36,7 @@ import {
   captureDeliveryMode,
   createSourceRuns,
   isExpectedImportTab,
+  SOURCE_RUN_LEASE_MS,
   type CaptureSource,
   type SourceRuns,
 } from "../lib/source-runs.ts";
@@ -122,6 +123,7 @@ const CONFIG_TTL_MS = 60 * 60 * 1000;
 const ALARM = "anansi-sync";
 const OUTBOX_ALARM = "anansi-outbox";
 const HEARTBEAT_ALARM = "anansi-heartbeat";
+const SOURCE_RUN_RECOVERY_ALARM_PREFIX = "anansi-source-run-recovery:";
 const CAPTURE_SOURCES = ["x", "reddit", "tiktok", "github"] as const;
 const HEARTBEAT_SOURCES = ["x", "reddit", "tiktok", "github", "web"] as const;
 const tabNonces = new Map<number, string>();
@@ -781,7 +783,22 @@ async function closeOwnedTab(source: CaptureSource, expectedTabId?: number): Pro
   if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
 }
 
+function sourceRunRecoveryAlarm(source: CaptureSource): string {
+  return `${SOURCE_RUN_RECOVERY_ALARM_PREFIX}${source}`;
+}
+
+function scheduleSourceRunRecovery(source: CaptureSource, leaseAt: number): void {
+  browser.alarms.create(sourceRunRecoveryAlarm(source), {
+    when: Math.max(Date.now() + 100, leaseAt + SOURCE_RUN_LEASE_MS + 100),
+  });
+}
+
+function clearSourceRunRecovery(source: CaptureSource): Promise<boolean> {
+  return browser.alarms.clear(sourceRunRecoveryAlarm(source));
+}
+
 async function finishRun(source: CaptureSource): Promise<void> {
+  await clearSourceRunRecovery(source);
   await persistentState().runs.finish(source);
   await closeOwnedTab(source);
 }
@@ -790,6 +807,7 @@ async function expireOwnedRun(source: CaptureSource, expectedTabId: number): Pro
   const runs = persistentState().runs;
   const tabId = await runs.takeOwnedTab(source, expectedTabId);
   if (tabId === null) return;
+  await clearSourceRunRecovery(source);
   await runs.finish(source);
   await browser.tabs.remove(tabId).catch(() => {});
   await patchStatus(source, {
@@ -812,21 +830,23 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   const runs = persistentState().runs;
   const begun = await runs.begin(source, live ? "live" : "full");
   if (!begun.started) {
+    scheduleSourceRunRecovery(source, begun.run.updatedAt);
     if (!quiet) await patchStatus(source, { message: "a capture is already running" });
     return;
   }
+  scheduleSourceRunRecovery(source, begun.run.updatedAt);
 
   const config = await loadConfig(true);
   if (!config?.enabled) {
     if (!quiet) await patchStatus(source, { message: "server has capture disabled" });
-    await runs.finish(source);
+    await finishRun(source);
     return;
   }
 
   const entry = config.sources.find((s) => s.source === source);
   if (!entry) {
     if (!quiet) await patchStatus(source, { message: "switched off in Sources" });
-    await runs.finish(source);
+    await finishRun(source);
     return;
   }
 
@@ -845,7 +865,7 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   }
 
   if (!target) {
-    await runs.finish(source);
+    await finishRun(source);
     await patchStatus(source, { startedAt: null, message: `could not open ${entry.host}` });
     return;
   }
@@ -1239,6 +1259,7 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
       return { ok: true };
     }
     case "stop": {
+      await clearSourceRunRecovery(msg.source);
       const tabId = await persistentState().runs.stop(msg.source);
       if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
       await patchStatus(msg.source, { startedAt: null, message: "stopped" });
@@ -1278,6 +1299,7 @@ async function continueGitHubImport(
     ? config.sources.find((candidate) => candidate.source === "github")
     : undefined;
   if (!entry) {
+    await clearSourceRunRecovery("github");
     const ownedTab = await runs.stop("github");
     if (ownedTab !== null) await browser.tabs.remove(ownedTab).catch(() => {});
     await patchStatus("github", { startedAt: null, message: "switched off in Sources" });
@@ -1444,6 +1466,7 @@ async function handlePageEvent(
     case "error":
       await persistentState().runs.noteError(source, msg.errorCode);
       if (source === "github" && msg.errorCode === "not_signed_in") {
+        await clearSourceRunRecovery(source);
         await persistentState().runs.finish(source);
       } else {
         await finishRun(source);
@@ -1517,6 +1540,14 @@ export default defineBackground(() => {
    */
   browser.alarms.onAlarm.addListener((alarm) => {
     void (async () => {
+      if (alarm.name.startsWith(SOURCE_RUN_RECOVERY_ALARM_PREFIX)) {
+        const source = alarm.name.slice(SOURCE_RUN_RECOVERY_ALARM_PREFIX.length);
+        if (!isCaptureSource(source)) return;
+        const interrupted = await persistentState().runs.current(source);
+        if (interrupted.phase !== "running") return;
+        await startCapture(source, true, interrupted.runMode === "live");
+        return;
+      }
       if (alarm.name === HEARTBEAT_ALARM) {
         requestHeartbeat();
         return;
