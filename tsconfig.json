@@ -17,5 +17,5 @@
 
     "types": ["bun", "node"]
   },
-  "include": ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts", "packages/*/*.config.ts", "packages/*/scripts/**/*.ts", "apps/*/scripts/**/*.ts"]
+  "include": ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts", "packages/*/*.config.ts", "packages/*/scripts/**/*.ts", "apps/*/scripts/**/*.ts", "scripts/**/*.ts"]
 }

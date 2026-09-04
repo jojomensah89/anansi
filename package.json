@@ -31,6 +31,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "dev:web": "turbo run dev -F web --",
+    "dev:local": "bun run scripts/dev.ts",
     "build": "turbo run build",
     "db:generate": "turbo run db:generate -F @anansi/db --",
     "db:studio": "bun run --filter @anansi/db db:studio",
