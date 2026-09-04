@@ -3,6 +3,7 @@ import { parseHTML } from "linkedom";
 import {
 	extractGitHubStarsPage,
 	githubRepositoryIdentity,
+	readGitHubStarMutation,
 	validatedGitHubRepositoryUrl,
 	validatedGitHubStarsPageUrl,
 } from "./github.ts";
@@ -65,6 +66,40 @@ describe("GitHub URL validation", () => {
 			expect(
 				validatedGitHubStarsPageUrl(value, "https://github.com/stars"),
 			).toBeNull();
+		}
+	});
+});
+
+describe("GitHub star mutations", () => {
+	test("reads successful star and unstar repository actions", () => {
+		expect(
+			readGitHubStarMutation(
+				"https://github.com/Vyom-26/BMX_Racer/star",
+				"POST",
+				true,
+			),
+		).toEqual({
+			action: "save",
+			externalId: "vyom-26/bmx_racer",
+			canonicalUrl: "https://github.com/Vyom-26/BMX_Racer",
+		});
+		expect(
+			readGitHubStarMutation(
+				"https://github.com/Vyom-26/BMX_Racer/unstar",
+				"DELETE",
+				true,
+			),
+		).toMatchObject({ action: "unsave", externalId: "vyom-26/bmx_racer" });
+	});
+
+	test("ignores failed, read-only, nested, and off-origin requests", () => {
+		for (const input of [
+			["https://github.com/Vyom-26/BMX_Racer/star", "POST", false],
+			["https://github.com/Vyom-26/BMX_Racer/star", "GET", true],
+			["https://github.com/Vyom-26/BMX_Racer/issues/star", "POST", true],
+			["https://example.com/Vyom-26/BMX_Racer/star", "POST", true],
+		] as const) {
+			expect(readGitHubStarMutation(input[0], input[1], input[2])).toBeNull();
 		}
 	});
 });

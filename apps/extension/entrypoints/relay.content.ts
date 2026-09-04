@@ -26,6 +26,7 @@ export default defineContentScript({
     "https://www.reddit.com/*",
     "https://old.reddit.com/*",
     "https://reddit.com/*",
+    "https://github.com/*",
   ],
   runAt: "document_start",
 

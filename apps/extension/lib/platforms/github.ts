@@ -61,6 +61,12 @@ export type GitHubStarsExtraction =
 	| { kind: "signed_out" }
 	| { kind: "page_shape_changed" };
 
+export interface GitHubStarMutation {
+	action: "save" | "unsave";
+	externalId: string;
+	canonicalUrl: string;
+}
+
 function boundedText(
 	value: string | null | undefined,
 	max: number,
@@ -137,6 +143,32 @@ export function validatedGitHubStarsPageUrl(
 		}
 	}
 	return url.toString();
+}
+
+export function readGitHubStarMutation(
+	value: string,
+	method: string,
+	ok: boolean,
+): GitHubStarMutation | null {
+	if (!ok || !new Set(["POST", "PUT", "DELETE"]).has(method.toUpperCase()))
+		return null;
+	const url = githubUrl(value, "https://github.com/");
+	if (!url || url.search || url.hash) return null;
+	const parts = url.pathname.split("/").filter(Boolean);
+	if (parts.length !== 3) return null;
+	const [owner, name, operation] = parts;
+	if (!owner || !name || (operation !== "star" && operation !== "unstar"))
+		return null;
+	const repository = validatedGitHubRepositoryUrl(
+		`/${owner}/${name}`,
+		url.origin,
+	);
+	if (!repository) return null;
+	return {
+		action: operation === "star" ? "save" : "unsave",
+		externalId: repository.identity,
+		canonicalUrl: repository.url,
+	};
 }
 
 function optionalHttpUrl(

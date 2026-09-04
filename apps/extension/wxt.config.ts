@@ -31,6 +31,7 @@ export default defineConfig({
       "https://reddit.com/*",
       "https://www.tiktok.com/*",
       "https://tiktok.com/*",
+      "https://github.com/*",
       // Where your library lives. Loopback covers local development; replace
       // with your Worker origin before shipping to anyone else.
       "http://127.0.0.1/*",
