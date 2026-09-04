@@ -186,3 +186,16 @@ export const sourceSettings = sqliteTable("source_settings", {
   enabled: integer("enabled").notNull().default(1),
   updatedAt: integer("updated_at"),
 });
+
+/** Last operational snapshot from each browser extension installation. */
+export const extensionClients = sqliteTable(
+  "extension_clients",
+  {
+    installationId: text("installation_id").primaryKey(),
+    extensionVersion: text("extension_version").notNull(),
+    lastSeenAt: integer("last_seen_at").notNull(),
+    queue: text("queue").notNull(),
+    sources: text("sources").notNull(),
+  },
+  (t) => [index("extension_clients_last_seen").on(t.lastSeenAt)],
+);

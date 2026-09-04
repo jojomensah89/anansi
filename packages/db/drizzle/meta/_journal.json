@@ -64,6 +64,13 @@
       "when": 1788540043217,
       "tag": "0008_extension_health_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1788540250098,
+      "tag": "0009_extension_clients",
+      "breakpoints": true
     }
   ]
 }

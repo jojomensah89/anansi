@@ -1,5 +1,5 @@
 export * as schema from "./schema.ts";
-export { captureEvents, items, itemSourceLinks, media, tags, itemTags } from "./schema.ts";
+export { captureEvents, extensionClients, items, itemSourceLinks, media, tags, itemTags } from "./schema.ts";
 export type { AnansiDb, DbItem, NewDbItem } from "./types.ts";
 export { upsertItems, countItems, creators, setArchived, tagItems, listTags, disabledSources, setSourceEnabled } from "./queries.ts";
 export type { CaptureOrigin, UpsertOptions } from "./queries.ts";
@@ -10,3 +10,5 @@ export { pendingMedia, markMediaStored, mediaStats } from "./media.ts";
 export type { PendingMedia } from "./media.ts";
 export { applyCapture, CaptureApplicationError } from "./capture-events.ts";
 export type { CaptureApplicationErrorCode } from "./capture-events.ts";
+export { extensionHealth, recordExtensionHeartbeat } from "./extension-health.ts";
+export type { ExtensionHealth } from "./extension-health.ts";
