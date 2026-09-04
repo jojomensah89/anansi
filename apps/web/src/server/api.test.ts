@@ -207,7 +207,7 @@ describe("handleApi", () => {
     // through the same pass.
     expect(body.features.captureV2).toEqual({
       x: true,
-      reddit: false,
+      reddit: true,
       tiktok: false,
       web: true,
     });

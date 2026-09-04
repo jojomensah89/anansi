@@ -4,7 +4,7 @@ import { Rail } from "../components/rail.tsx";
 import { Card } from "../components/card.tsx";
 import { Palette } from "../components/palette.tsx";
 import { Detail } from "../components/detail.tsx";
-import { FilterBar, type Filters } from "../components/filters.tsx";
+import { FilterChips, FilterTrigger, useFilterBar, type Filters } from "../components/filters.tsx";
 import { SelectBar } from "../components/selectbar.tsx";
 import { MosaicView, RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
 import { useMasonry } from "../components/masonry.tsx";
@@ -92,6 +92,8 @@ function Library() {
    * neither deserves one for a load too fast to notice.
    */
   const [hideRemoved] = useHideRemoved();
+
+  const bar = useFilterBar({ filters, onChange: setFilters, bySource: counts });
 
   const firstLoad = useSlowLoad(loading && items.length === 0);
 
@@ -209,107 +211,126 @@ function Library() {
       <Rail total={total} authors={authors} bySource={counts} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div
-          style={{
-            height: 52,
-            flexShrink: 0,
-            borderBottom: "1px solid var(--line)",
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            padding: "0 20px",
-          }}
-        >
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Library</span>
-          <span className="mono" style={{ fontSize: 11, color: "var(--faint)", display: "flex", alignItems: "center", gap: 5 }}>
-            {statsReady && `${total.toLocaleString()} items · ${authors} authors`}
-            {!statsReady && statsSlow && (
-              <>
-                <CountBone digits={5} height={9} /> items · <CountBone digits={4} height={9} /> authors
-              </>
-            )}
-          </span>
+        <div className="scroll" style={{ flex: 1 }}>
+          {/*
+            Glass, and therefore sticky inside the scroller rather than fixed
+            above it. Blur over an empty background is just a tint; the header
+            has to have the library passing beneath it for the effect to be
+            anything at all.
+          */}
+          <div className="glass" style={{ position: "sticky", top: 0, zIndex: 30 }}>
+            <div
+              style={{
+                height: 46,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "0 20px",
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 600 }}>Library</span>
+              <span className="mono" style={{ fontSize: 11, color: "var(--faint)", display: "flex", alignItems: "center", gap: 5 }}>
+                {statsReady && `${total.toLocaleString()} items · ${authors} authors`}
+                {!statsReady && statsSlow && (
+                  <>
+                    <CountBone digits={5} height={9} /> items · <CountBone digits={4} height={9} /> authors
+                  </>
+                )}
+              </span>
+            </div>
 
-          <span style={{ width: 1, height: 18, background: "var(--line)", margin: "0 4px" }} />
-          <ViewTabs value={view} onChange={setView} />
-
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => setPaletteOpen(true)}
+            {/*
+              One level: the views you can be in, and everything you can do to
+              them. Search and Add filter were on separate rows, which made
+              choosing a view feel like a different kind of act from narrowing
+              one.
+            */}
+            <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
-                height: 30,
-                padding: "0 10px 0 9px",
-                border: "1px solid var(--edge)",
-                borderRadius: 5,
-                background: "var(--card)",
-                width: 250,
-                cursor: "pointer",
-                font: "inherit",
+                gap: 10,
+                padding: "0 20px 10px",
+                flexWrap: "wrap",
               }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--fainter)" strokeWidth="1.8" strokeLinecap="round">
-                <circle cx="11" cy="11" r="6.5" />
-                <path d="m20 20-4.2-4.2" />
-              </svg>
-              <span style={{ fontSize: 12.5, color: "var(--fainter)" }}>
-                Search {total.toLocaleString()} saves
-              </span>
-              <span
-                className="mono"
-                style={{
-                  marginLeft: "auto",
-                  fontSize: 10,
-                  color: "var(--faintest)",
-                  border: "1px solid var(--edge)",
-                  borderRadius: 3,
-                  padding: "1px 4px",
-                }}
-              >
-                ⌘K
-              </span>
-            </button>
+              <ViewTabs value={view} onChange={setView} />
 
-            <button
-              type="button"
-              onClick={() => {
-                setSelecting((s) => !s);
-                setPicked(new Set());
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                height: 30,
-                padding: "0 11px",
-                borderRadius: 5,
-                cursor: "pointer",
-                font: "inherit",
-                fontSize: 12.5,
-                background: selecting ? "var(--accent)" : "var(--card)",
-                color: selecting ? "var(--ink)" : "var(--text-dim)",
-                border: `1px solid ${selecting ? "var(--accent)" : "var(--edge)"}`,
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 12l5 5L20 6" />
-              </svg>
-              Select
-            </button>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setPaletteOpen(true)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    height: 30,
+                    padding: "0 10px 0 9px",
+                    border: "1px solid var(--edge)",
+                    borderRadius: 5,
+                    background: "var(--card)",
+                    width: 232,
+                    cursor: "pointer",
+                    font: "inherit",
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--fainter)" strokeWidth="1.8" strokeLinecap="round">
+                    <circle cx="11" cy="11" r="6.5" />
+                    <path d="m20 20-4.2-4.2" />
+                  </svg>
+                  <span style={{ fontSize: 12.5, color: "var(--fainter)" }}>
+                    Search {total.toLocaleString()} saves
+                  </span>
+                  <span
+                    className="mono"
+                    style={{
+                      marginLeft: "auto",
+                      fontSize: 10,
+                      color: "var(--faintest)",
+                      border: "1px solid var(--edge)",
+                      borderRadius: 3,
+                      padding: "1px 4px",
+                    }}
+                  >
+                    ⌘K
+                  </span>
+                </button>
+
+                <FilterTrigger bar={bar} />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelecting((s) => !s);
+                    setPicked(new Set());
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    height: 30,
+                    padding: "0 11px",
+                    borderRadius: 5,
+                    cursor: "pointer",
+                    font: "inherit",
+                    fontSize: 12.5,
+                    background: selecting ? "var(--accent)" : "var(--card)",
+                    color: selecting ? "var(--ink)" : "var(--text-dim)",
+                    border: `1px solid ${selecting ? "var(--accent)" : "var(--edge)"}`,
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 12l5 5L20 6" />
+                  </svg>
+                  Select
+                </button>
+              </div>
+            </div>
+
+            <FilterChips bar={bar} matched={done ? items.length : null} />
           </div>
-        </div>
 
-        <FilterBar
-          filters={filters}
-          onChange={setFilters}
-          bySource={counts}
-          matched={done ? items.length : null}
-        />
-
-        <div className="scroll" style={{ flex: 1, padding: "16px 20px" }}>
+          <div style={{ padding: "16px 20px" }}>
           {/*
             The first page and the next page are different waits. An empty
             screen needs a shape; a screen you are already reading needs a line
@@ -367,11 +388,12 @@ function Library() {
           {!firstLoad && view === "timeline" && <TimelineView items={items} onOpen={(i) => setOpenId(i.id)} />}
           {!firstLoad && view === "mosaic" && <MosaicView items={items} onOpen={(i) => setOpenId(i.id)} />}
           <div ref={sentinel} style={{ height: 40 }} />
-          {loading && items.length > 0 && (
-            <div className="mono" style={{ fontSize: 11, color: "var(--faint)", padding: 8 }} aria-live="polite">
-              loading more…
-            </div>
-          )}
+            {loading && items.length > 0 && (
+              <div className="mono" style={{ fontSize: 11, color: "var(--faint)", padding: 8 }} aria-live="polite">
+                loading more…
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

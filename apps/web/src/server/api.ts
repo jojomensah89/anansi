@@ -323,7 +323,7 @@ const extensionConfigRoute: Route = {
           */
         captureV2: {
           x: true,
-          reddit: false,
+          reddit: true,
           tiktok: false,
           // Web capture has no legacy path to conflict with — the durable
           // queue is the only way a saved page ever reaches here — so there is

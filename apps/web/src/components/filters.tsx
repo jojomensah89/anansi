@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Creator, type ItemQuery } from "../lib/api.ts";
 import { SourceMark } from "./sourcemark.tsx";
 
@@ -15,8 +15,10 @@ import { SourceMark } from "./sourcemark.tsx";
  * alternative — ANDing two platforms — can only ever return nothing, and an
  * empty grid is indistinguishable from a broken library.
  *
- * Applied filters live in the bar rather than behind a menu, because a filter
- * you cannot see is a filter you forget is on.
+ * The bar comes in two halves that live in different places: the Add-filter
+ * button belongs in the toolbar beside the views and the search, and the
+ * applied chips belong on their own row where they can wrap. They share state
+ * through `useFilterBar`, because only one popover may be open at a time.
  *
  * Content type is offered per selected platform. A Reddit save can be a
  * comment and a GitHub star never is, so a flat list would offer options that
@@ -127,22 +129,47 @@ const FIELD_ICONS: Record<FieldKey, React.ReactNode> = {
 
 /* --------------------------------------------------------------- bar --- */
 
-export function FilterBar({
+export interface FilterBar {
+  fields: Field[];
+  applied: Field[];
+  unapplied: Field[];
+  valuesOf: (key: FieldKey) => string[];
+  setValues: (key: FieldKey, values: string[]) => void;
+  toggleValue: (field: Field, value: string) => void;
+  clearAll: () => void;
+  clearArchived: () => void;
+  anyApplied: boolean;
+  /** Which applied chip has its value list open. */
+  openChip: FieldKey | null;
+  setOpenChip: (key: FieldKey | null) => void;
+  /** The Add-filter popover: closed, listing fields, or inside one. */
+  picking: "fields" | FieldKey | null;
+  setPicking: (next: "fields" | FieldKey | null) => void;
+  archived: boolean;
+}
+
+/** Single-value fields hold a string; every other field holds a list. */
+const SINGLE: FieldKey[] = ["media", "removed"];
+
+/**
+ * One bar's worth of state, shared by two components in two places.
+ *
+ * Only one popover may be open at a time, and clearing a field has to close
+ * whatever was showing it, so that truth cannot live in either half.
+ */
+export function useFilterBar({
   filters,
   onChange,
   bySource,
-  matched,
 }: {
   filters: Filters;
   onChange: (next: Filters) => void;
   bySource: Record<string, number>;
-  matched: number | null;
-}) {
-  const [open, setOpen] = useState<FieldKey | null>(null);
-  const [adding, setAdding] = useState(false);
+}): FilterBar {
+  const [openChip, setOpenChip] = useState<FieldKey | null>(null);
+  const [picking, setPicking] = useState<"fields" | FieldKey | null>(null);
   const [tags, setTags] = useState<{ label: string; count: number }[]>([]);
   const [creators, setCreators] = useState<Creator[]>([]);
-  const barRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -150,30 +177,6 @@ export function FilterBar({
     api.creators(300, controller.signal).then((c) => setCreators(c.creators)).catch(() => {});
     return () => controller.abort();
   }, []);
-
-  // A click anywhere else closes the menu, which is what every other menu on
-  // the machine does.
-  useEffect(() => {
-    if (!open && !adding) return;
-    const onDown = (event: MouseEvent) => {
-      if (!barRef.current?.contains(event.target as Node)) {
-        setOpen(null);
-        setAdding(false);
-      }
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(null);
-        setAdding(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open, adding]);
 
   const present = Object.keys(bySource).filter((s) => (bySource[s] ?? 0) > 0);
 
@@ -214,13 +217,7 @@ export function FilterBar({
         icon: FIELD_ICONS.type,
         options: allTypes(scope),
       },
-      {
-        key: "media",
-        label: "Media",
-        multi: false,
-        icon: FIELD_ICONS.media,
-        options: MEDIA,
-      },
+      { key: "media", label: "Media", multi: false, icon: FIELD_ICONS.media, options: MEDIA },
       {
         key: "removed",
         label: "At source",
@@ -239,9 +236,6 @@ export function FilterBar({
     ];
     return all.filter((f) => f.options.length > 0);
   }, [bySource, creators, tags, filters.source, present]);
-
-  /** Single-value fields hold a string; the rest hold a list. */
-  const SINGLE: FieldKey[] = ["media", "removed"];
 
   const valuesOf = (key: FieldKey): string[] => {
     if (SINGLE.includes(key)) {
@@ -263,7 +257,8 @@ export function FilterBar({
     const current = valuesOf(field.key);
     if (!field.multi) {
       setValues(field.key, current[0] === value ? [] : [value]);
-      setOpen(null);
+      setOpenChip(null);
+      setPicking(null);
       return;
     }
     setValues(
@@ -273,53 +268,181 @@ export function FilterBar({
   };
 
   const applied = fields.filter((f) => valuesOf(f.key).length > 0);
-  const unapplied = fields.filter((f) => valuesOf(f.key).length === 0);
-  const anyApplied = applied.length > 0 || filters.archived === true;
 
-  const clearAll = () =>
-    onChange({
-      source: undefined,
-      author: undefined,
-      media: undefined,
-      type: undefined,
-      tag: undefined,
-      removed: undefined,
-      archived: undefined,
-    });
+  return {
+    fields,
+    applied,
+    unapplied: fields.filter((f) => valuesOf(f.key).length === 0),
+    valuesOf,
+    setValues,
+    toggleValue,
+    clearAll: () =>
+      onChange({
+        source: undefined,
+        author: undefined,
+        media: undefined,
+        type: undefined,
+        tag: undefined,
+        removed: undefined,
+        archived: undefined,
+      }),
+    clearArchived: () => onChange({ ...filters, archived: undefined }),
+    anyApplied: applied.length > 0 || filters.archived === true,
+    openChip,
+    setOpenChip,
+    picking,
+    setPicking,
+    archived: filters.archived === true,
+  };
+}
+
+/** Close on a click elsewhere, or Escape — what every other menu does. */
+function useDismiss(active: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const onDown = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) close();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [active, close]);
+
+  return ref;
+}
+
+/**
+ * The Add-filter button, for the toolbar.
+ *
+ * Its popover is two levels deep in one place — fields, then that field's
+ * values — rather than opening a second popover somewhere else on screen.
+ * Choosing a field and then hunting for where its values appeared is the
+ * failure this shape avoids.
+ */
+export function FilterTrigger({ bar }: { bar: FilterBar }) {
+  const close = useCallback(() => bar.setPicking(null), [bar]);
+  const ref = useDismiss(bar.picking !== null, close);
+  const field = bar.fields.find((f) => f.key === bar.picking);
 
   return (
-    <div ref={barRef} style={{ position: "relative", flexShrink: 0, borderBottom: "1px solid var(--line)" }}>
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => {
+          bar.setOpenChip(null);
+          bar.setPicking(bar.picking ? null : "fields");
+        }}
+        aria-expanded={bar.picking !== null}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          height: 30,
+          padding: "0 11px",
+          borderRadius: 5,
+          border: `1px solid ${bar.picking ? "var(--accent)" : "var(--edge)"}`,
+          background: "var(--card)",
+          color: bar.picking ? "var(--accent-text)" : "var(--text-dim)",
+          fontSize: 12.5,
+          cursor: "pointer",
+          font: "inherit",
+        }}
+      >
+        <Icon d="M4 5h16l-6.5 7.5V19l-3 2v-8.5z" />
+        Add filter
+      </button>
+
+      {bar.picking === "fields" && (
+        <Menu style={{ right: 0, width: 214 }}>
+          {bar.unapplied.length === 0 ? (
+            <div className="mono" style={{ padding: "11px 12px", fontSize: 10.5, color: "var(--faint)" }}>
+              every filter is already on
+            </div>
+          ) : (
+            <div style={{ padding: 5, display: "flex", flexDirection: "column", gap: 1 }}>
+              {bar.unapplied.map((f) => (
+                <MenuRow key={f.key} onClick={() => bar.setPicking(f.key)}>
+                  <span style={{ color: "var(--faint)", display: "flex" }}>{f.icon}</span>
+                  <span style={{ fontSize: 12.5 }}>{f.label}</span>
+                  <span style={{ marginLeft: "auto", color: "var(--fainter)", display: "flex" }}>
+                    <Icon d="M9 6l6 6-6 6" />
+                  </span>
+                </MenuRow>
+              ))}
+            </div>
+          )}
+        </Menu>
+      )}
+
+      {field && (
+        <ValueMenu
+          field={field}
+          values={bar.valuesOf(field.key)}
+          onToggle={bar.toggleValue}
+          onClear={() => bar.setValues(field.key, [])}
+          onBack={() => bar.setPicking("fields")}
+          align={{ right: 0 }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The applied filters, on their own row.
+ *
+ * Absent entirely when nothing is applied rather than sitting empty: a
+ * permanent strip of chrome for a state that is usually empty costs more than
+ * it explains.
+ */
+export function FilterChips({ bar, matched }: { bar: FilterBar; matched: number | null }) {
+  const close = useCallback(() => bar.setOpenChip(null), [bar]);
+  const ref = useDismiss(bar.openChip !== null, close);
+  const open = bar.fields.find((f) => f.key === bar.openChip);
+
+  if (!bar.anyApplied) return null;
+
+  return (
+    <div ref={ref} style={{ position: "relative", borderTop: "1px solid var(--line-soft)" }}>
       <div
         style={{
-          minHeight: 42,
+          minHeight: 40,
           display: "flex",
           alignItems: "center",
           flexWrap: "wrap",
           gap: 7,
-          padding: "8px 20px",
+          padding: "7px 20px",
         }}
       >
-        {applied.map((field) => (
+        {bar.applied.map((field) => (
           <Chip
             key={field.key}
             field={field}
-            values={valuesOf(field.key)}
-            open={open === field.key}
+            values={bar.valuesOf(field.key)}
+            open={bar.openChip === field.key}
             onOpen={() => {
-              setAdding(false);
-              setOpen(open === field.key ? null : field.key);
+              bar.setPicking(null);
+              bar.setOpenChip(bar.openChip === field.key ? null : field.key);
             }}
             onClear={() => {
-              setValues(field.key, []);
-              setOpen(null);
+              bar.setValues(field.key, []);
+              bar.setOpenChip(null);
             }}
           />
         ))}
 
-        {filters.archived === true && (
+        {bar.archived && (
           <button
             type="button"
-            onClick={() => onChange({ ...filters, archived: undefined })}
+            onClick={bar.clearArchived}
             style={{ ...chipShell, borderColor: "var(--edge-strong)" }}
           >
             <span style={{ ...chipField, color: "var(--muted)" }}>
@@ -330,57 +453,27 @@ export function FilterBar({
           </button>
         )}
 
-        {unapplied.length > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(null);
-              setAdding((a) => !a);
-            }}
-            aria-expanded={adding}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              height: 26,
-              padding: "0 9px",
-              borderRadius: 5,
-              border: "1px dashed var(--edge-strong)",
-              background: "transparent",
-              color: adding ? "var(--text)" : "var(--muted)",
-              fontSize: 11.5,
-              cursor: "pointer",
-              font: "inherit",
-            }}
-          >
-            <Icon d="M12 5v14M5 12h14" />
-            Add filter
-          </button>
-        )}
-
-        {anyApplied && (
-          <button
-            type="button"
-            onClick={clearAll}
-            className="mono"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              height: 26,
-              padding: "0 8px",
-              border: "none",
-              background: "transparent",
-              color: "var(--faint)",
-              fontSize: 10.5,
-              cursor: "pointer",
-              fontFamily: "var(--mono)",
-            }}
-          >
-            <Icon d="M4 5h16l-6.5 7.5V19l-3 2v-8.5z" />
-            Clear all
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={bar.clearAll}
+          className="mono"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            height: 26,
+            padding: "0 8px",
+            border: "none",
+            background: "transparent",
+            color: "var(--faint)",
+            fontSize: 10.5,
+            cursor: "pointer",
+            fontFamily: "var(--mono)",
+          }}
+        >
+          <Icon d="M6 6l12 12M18 6 6 18" />
+          Clear all
+        </button>
 
         {matched !== null && (
           <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faintest)" }}>
@@ -389,31 +482,13 @@ export function FilterBar({
         )}
       </div>
 
-      {/* the field picker */}
-      {adding && (
-        <Menu style={{ left: 20, width: 210 }}>
-          {unapplied.map((field) => (
-            <MenuRow
-              key={field.key}
-              onClick={() => {
-                setAdding(false);
-                setOpen(field.key);
-              }}
-            >
-              <span style={{ color: "var(--faint)", display: "flex" }}>{field.icon}</span>
-              <span style={{ fontSize: 12.5 }}>{field.label}</span>
-            </MenuRow>
-          ))}
-        </Menu>
-      )}
-
-      {/* the value picker for whichever chip is open */}
       {open && (
         <ValueMenu
-          field={fields.find((f) => f.key === open) as Field}
-          values={valuesOf(open)}
-          onToggle={toggleValue}
-          onClear={() => setValues(open, [])}
+          field={open}
+          values={bar.valuesOf(open.key)}
+          onToggle={bar.toggleValue}
+          onClear={() => bar.setValues(open.key, [])}
+          align={{ left: 20 }}
         />
       )}
     </div>
@@ -441,23 +516,8 @@ export function FieldFilter({
   searchable?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  const ref = useDismiss(open, close);
 
   const field: Field = {
     key: "source",
@@ -514,6 +574,7 @@ export function FieldFilter({
             onChange(values.includes(value) ? values.filter((v) => v !== value) : [...values, value])
           }
           onClear={() => onChange([])}
+          align={{ left: 0 }}
         />
       )}
     </div>
@@ -657,12 +718,12 @@ function Menu({ children, style }: { children: React.ReactNode; style?: React.CS
       style={{
         position: "absolute",
         top: "100%",
-        marginTop: -3,
+        marginTop: 6,
         background: "var(--card)",
         border: "1px solid var(--edge-strong)",
         borderRadius: 7,
         boxShadow: "0 14px 34px #00000080, 0 2px 6px #0000004d",
-        zIndex: 40,
+        zIndex: 60,
         overflow: "hidden",
         ...style,
       }}
@@ -672,7 +733,15 @@ function Menu({ children, style }: { children: React.ReactNode; style?: React.CS
   );
 }
 
-function MenuRow({ children, onClick, active }: { children: React.ReactNode; onClick: () => void; active?: boolean }) {
+function MenuRow({
+  children,
+  onClick,
+  active,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  active?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -702,21 +771,55 @@ function ValueMenu({
   values,
   onToggle,
   onClear,
+  onBack,
+  align,
 }: {
   field: Field;
   values: string[];
   onToggle: (field: Field, value: string) => void;
   onClear: () => void;
+  /** Present when this menu was opened from the field list. */
+  onBack?: () => void;
+  align: React.CSSProperties;
 }) {
   const [query, setQuery] = useState("");
   useEffect(() => setQuery(""), [field.key]);
 
   const shown = field.options.filter(
-    (o) => query === "" || o.label.toLowerCase().includes(query.toLowerCase()) || o.value.toLowerCase().includes(query.toLowerCase()),
+    (o) =>
+      query === "" ||
+      o.label.toLowerCase().includes(query.toLowerCase()) ||
+      o.value.toLowerCase().includes(query.toLowerCase()),
   );
 
   return (
-    <Menu style={{ left: 20, width: field.searchable ? 268 : 236 }}>
+    <Menu style={{ ...align, width: field.searchable ? 268 : 236 }}>
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="mono"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            width: "100%",
+            padding: "8px 11px",
+            border: "none",
+            borderBottom: "1px solid var(--line)",
+            background: "transparent",
+            color: "var(--faint)",
+            fontSize: 10.5,
+            cursor: "pointer",
+            fontFamily: "var(--mono)",
+            textAlign: "left",
+          }}
+        >
+          <Icon d="M15 6l-6 6 6 6" />
+          {field.label}
+        </button>
+      )}
+
       {field.searchable && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", borderBottom: "1px solid var(--line)" }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--fainter)" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">

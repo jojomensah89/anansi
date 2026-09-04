@@ -227,11 +227,39 @@ export function MosaicView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: It
 
 /* -------------------------------------------------------- the switcher --- */
 
-const MODES: { value: ViewMode; label: string }[] = [
-  { value: "grid", label: "Grid" },
-  { value: "row", label: "Row" },
-  { value: "timeline", label: "Timeline" },
-  { value: "mosaic", label: "Mosaic" },
+/**
+ * Each icon draws what the view does to the same set of items: packed
+ * rectangles, stacked lines, a column against a date, a wall of pictures. The
+ * label stays — an icon alone would be a guess, and these four are close
+ * enough in meaning to be worth spelling out.
+ */
+function TabIcon({ d }: { d: string }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={d} />
+    </svg>
+  );
+}
+
+const MODES: { value: ViewMode; label: string; icon: string }[] = [
+  // Four panes, deliberately uneven, the way the masonry packs them.
+  { value: "grid", label: "Grid", icon: "M4 4h7v9H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 15h7v5H4z" },
+  // A thumbnail and its lines.
+  { value: "row", label: "Row", icon: "M4 6h4v4H4zM10 6h10M10 10h7M4 14h4v4H4zM10 14h10M10 18h7" },
+  // A spine with events hanging off it.
+  { value: "timeline", label: "Timeline", icon: "M7 3v18M7 7h11M7 13h8M7 18h12" },
+  // Pictures, not text.
+  { value: "mosaic", label: "Mosaic", icon: "M4 5h16v14H4zM4 14l4-4 5 5M14 12l2-2 4 4" },
 ];
 
 export function ViewTabs({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
@@ -252,8 +280,12 @@ export function ViewTabs({ value, onChange }: { value: ViewMode; onChange: (v: V
             fontSize: 12.5,
             cursor: "pointer",
             font: "inherit",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
           }}
         >
+          <TabIcon d={m.icon} />
           {m.label}
         </button>
       ))}
