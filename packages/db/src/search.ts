@@ -67,6 +67,8 @@ export interface CardMedia {
 export interface SearchHit {
   id: string;
   authorAvatar?: string | null;
+  /** Primary repository language for GitHub list cards, when stored. */
+  language?: string | null;
   mediaCount?: number;
   url: string;
   author: string | null;
@@ -513,6 +515,7 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
   const rows = await db.all<SearchHit & { saveOrder: number | null }>(sql`
     select i.id, i.url, i.author_handle as author, i.author_name as authorName,
            i.author_avatar as authorAvatar,
+           json_extract(i.raw, '$.language') as language,
            i.title, i.posted_at as postedAt, i.saved_at as savedAt,
            i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
            i.platform_saved as platformSaved,

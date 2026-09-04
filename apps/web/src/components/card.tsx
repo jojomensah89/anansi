@@ -1,5 +1,6 @@
 import { compact, mediaUrl, shortDate, type CardMedia, type ItemRow } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
+import { GithubRepoCard } from "./github-repo-card.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 
 /**
@@ -77,134 +78,137 @@ export function Card({
         </span>
       )}
 
-      {/*
-        Who, then what they said, then what they showed — the order the post
-        was written in, and the order the quote block below already used. Media
-        first put a picture above the name of the person who posted it, so a
-        card and the quote inside it disagreed about how a post is shaped.
-      */}
-      <div style={{ padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} square={isRepo} size={22} />
-          <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-            {item.authorName && item.authorName !== item.author && (
-              <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {item.authorName}
-              </span>
-            )}
-            <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
-              {item.author ?? "unknown"}
-            </span>
-          </span>
-        </div>
-
-        {isRepo && item.title && (
-          <div className="mono" style={{ fontSize: 12.5, color: "var(--text)" }}>{item.title}</div>
-        )}
-
-        {item.excerpt.trim() && (
-          <div
-            style={{
-              fontSize: 13,
-              lineHeight: 1.55,
-              color: isRepo ? "var(--muted)" : "var(--text-dim)",
-              display: "-webkit-box",
-              WebkitLineClamp: media.length > 0 ? 4 : 8,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-            }}
-          >
-            {item.excerpt}
-          </div>
-        )}
-      </div>
-
-      {/* Full bleed, which is why it is not inside the padded block above. */}
-      {media.length > 0 && (
-        <div style={{ marginTop: 10 }}>
-          <MediaGrid media={media} dim={selectable && !selected} />
-        </div>
-      )}
-
-      <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {quoted && (
-          <div
-            style={{
-              border: "1px solid var(--edge)",
-              borderRadius: 8,
-              padding: 10,
-              background: "#0e1216",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <Avatar src={quoted.avatar} seed={quoted.handle ?? quoted.name} size={17} />
-              <span style={{ fontSize: 11.5, fontWeight: 600 }}>{quoted.name ?? quoted.handle}</span>
-              <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
-                @{quoted.handle ?? "unknown"}
+      {isRepo ? (
+        <GithubRepoCard item={item} />
+      ) : (
+        <>
+          {/*
+            Who, then what they said, then what they showed — the order the post
+            was written in, and the order the quote block below already used.
+            Media first put a picture above the name of the person who posted
+            it, so a card and the quote inside it disagreed about how a post is
+            shaped.
+          */}
+          <div style={{ padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} size={22} />
+              <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                {item.authorName && item.authorName !== item.author && (
+                  <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item.authorName}
+                  </span>
+                )}
+                <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
+                  {item.author ?? "unknown"}
+                </span>
               </span>
             </div>
-            {quoted.text.trim() && (
+
+            {item.excerpt.trim() && (
               <div
                 style={{
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  color: "var(--muted)",
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                  color: "var(--text-dim)",
                   display: "-webkit-box",
-                  WebkitLineClamp: 3,
+                  WebkitLineClamp: media.length > 0 ? 4 : 8,
                   WebkitBoxOrient: "vertical",
                   overflow: "hidden",
                 }}
               >
-                {quoted.text}
+                {item.excerpt}
               </div>
             )}
-            {quoted.media.length > 0 && <MediaGrid media={quoted.media} inset />}
           </div>
-        )}
 
-        {/* The platform mark sits here, not in the top-right corner where a
-            close button lives — up there it reads as "dismiss this". */}
-        <div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)" }}>
-          {/*
-            Stated, not implied by absence. The item is still here because a
-            library keeps what you saved; without a word saying why it looks
-            identical to one that is still bookmarked.
-          */}
-          {item.platformSaved === 0 && (
-            <span
-              title={
-                item.removedFromSourceAt
-                  ? `No longer saved on the platform, since ${new Date(item.removedFromSourceAt * 1000).toLocaleDateString()}`
-                  : "No longer saved on the platform"
-              }
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                color: "var(--fainter)",
-                border: "1px solid var(--line)",
-                borderRadius: 4,
-                padding: "1px 6px",
-              }}
-            >
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                <path d="M6 6l12 12M18 6 6 18" />
-              </svg>
-              unsaved
-            </span>
+          {/* Full bleed, which is why it is not inside the padded block above. */}
+          {media.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <MediaGrid media={media} dim={selectable && !selected} />
+            </div>
           )}
-          {item.metrics?.likes ? <span>{compact(item.metrics.likes)} ♥</span> : null}
-          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-            {shortDate(item.postedAt)}
-            <span style={{ color: "var(--fainter)", display: "flex" }}>
-              <SourceMark source={item.source} size={12} />
-            </span>
-          </span>
-        </div>
-      </div>
+
+          <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {quoted && (
+              <div
+                style={{
+                  border: "1px solid var(--edge)",
+                  borderRadius: 8,
+                  padding: 10,
+                  background: "#0e1216",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <Avatar src={quoted.avatar} seed={quoted.handle ?? quoted.name} size={17} />
+                  <span style={{ fontSize: 11.5, fontWeight: 600 }}>{quoted.name ?? quoted.handle}</span>
+                  <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
+                    @{quoted.handle ?? "unknown"}
+                  </span>
+                </div>
+                {quoted.text.trim() && (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      color: "var(--muted)",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {quoted.text}
+                  </div>
+                )}
+                {quoted.media.length > 0 && <MediaGrid media={quoted.media} inset />}
+              </div>
+            )}
+
+            {/* The platform mark sits here, not in the top-right corner where a
+                close button lives — up there it reads as "dismiss this". */}
+            <div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)" }}>
+              {/*
+                Stated, not implied by absence. The item is still here because a
+                library keeps what you saved; without a word saying why it looks
+                identical to one that is still bookmarked.
+              */}
+              {item.platformSaved === 0 && (
+                <span
+                  title={
+                    item.removedFromSourceAt
+                      ? `No longer saved on the platform, since ${new Date(item.removedFromSourceAt * 1000).toLocaleDateString()}`
+                      : "No longer saved on the platform"
+                  }
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    color: "var(--fainter)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 4,
+                    padding: "1px 6px",
+                  }}
+                >
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <path d="M6 6l12 12M18 6 6 18" />
+                  </svg>
+                  unsaved
+                </span>
+              )}
+              {item.metrics?.likes ? <span>{compact(item.metrics.likes)} ♥</span> : null}
+              <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                {shortDate(item.postedAt)}
+                <span style={{ color: "var(--fainter)", display: "flex" }}>
+                  <SourceMark source={item.source} size={12} />
+                </span>
+              </span>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
