@@ -23,16 +23,59 @@ export const Route = createFileRoute("/sources")({ component: Sources });
  * possible for a platform that publishes no history endpoint, and saying so is
  * better than letting an empty card read as broken.
  */
-interface Planned {
+/**
+ * Three ways a source can be captured, and they are not ranked.
+ *
+ * `page` means the extension can walk your whole history itself. `observe`
+ * means the platform publishes no history endpoint and signs its own requests,
+ * so capture happens by watching what its app fetches. `cli` means it is not
+ * an extension source at all — GitHub has a real API and a revocable token, so
+ * it is imported from the command line and there is nothing here to switch on.
+ */
+type Mode = "page" | "observe" | "cli";
+
+interface Known {
   name: string;
   source: string;
-  mode: "page" | "observe";
+  mode: Mode;
+  /** What it captures, and how, when there is nothing here yet. */
   note: string;
 }
 
-const PLANNED: Planned[] = [
-  { name: "Reddit saves", source: "reddit", mode: "page", note: "saved posts and comments" },
-  { name: "TikTok favourites", source: "tiktok", mode: "observe", note: "favourites" },
+/**
+ * Every source the app knows about, whether or not it has anything in it.
+ *
+ * The rail lists all four unconditionally, so a source with no rows vanishing
+ * from this page left the two disagreeing — which reads as a source that is
+ * broken rather than one you simply have not imported yet.
+ */
+const KNOWN: Known[] = [
+  {
+    name: "X bookmarks",
+    source: "x",
+    mode: "page",
+    note: "Ready to capture your bookmarks as soon as the extension runs an import.",
+  },
+  {
+    name: "GitHub stars",
+    source: "github",
+    mode: "cli",
+    note:
+      "Imported from the command line rather than by the extension — GitHub has a real API and a token you can scope and revoke, so there is no reason to scrape it. Run `anansi import github` with a fine-grained token in .env.",
+  },
+  {
+    name: "Reddit saves",
+    source: "reddit",
+    mode: "page",
+    note: "Ready to capture saved posts and comments as soon as the extension runs an import.",
+  },
+  {
+    name: "TikTok favourites",
+    source: "tiktok",
+    mode: "observe",
+    note:
+      "No history endpoint and signed requests, so there is no import to press: your favourites arrive as the extension watches the page load them.",
+  },
 ];
 
 const NAMES: Record<string, string> = {
@@ -42,12 +85,7 @@ const NAMES: Record<string, string> = {
   tiktok: "TikTok favourites",
 };
 
-const MODES: Record<string, "page" | "observe"> = {
-  x: "page",
-  github: "page",
-  reddit: "page",
-  tiktok: "observe",
-};
+const MODES: Record<string, Mode> = Object.fromEntries(KNOWN.map((k) => [k.source, k.mode]));
 
 const STALE_AFTER = 7 * 86400;
 
@@ -92,13 +130,13 @@ function Sources() {
     return () => controller.abort();
   }, []);
 
-  const planned = useMemo(
-    () => PLANNED.filter((p) => !sources.some((s) => s.source === p.source)),
+  const empty = useMemo(
+    () => KNOWN.filter((k) => !sources.some((s) => s.source === k.source)),
     [sources],
   );
 
   const showCapturing = tab !== "planned";
-  const showPlanned = tab !== "capturing" && planned.length > 0;
+  const showEmpty = tab !== "capturing" && empty.length > 0;
 
   return (
     <div style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
@@ -136,7 +174,7 @@ function Sources() {
               [
                 ["all", "All"],
                 ["capturing", "Capturing"],
-                ["planned", "Planned"],
+                ["planned", "Nothing yet"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -221,7 +259,7 @@ function Sources() {
             </div>
           )}
 
-          {showPlanned && (
+          {showEmpty && (
             <>
               <div
                 className="mono"
@@ -234,7 +272,7 @@ function Sources() {
                   color: "var(--fainter)",
                 }}
               >
-                Connected, nothing captured yet
+                Nothing captured yet
               </div>
               <div
                 style={{
@@ -243,7 +281,7 @@ function Sources() {
                   gap: 14,
                 }}
               >
-                {planned.map((p) => (
+                {empty.map((p) => (
                   <div
                     key={p.source}
                     style={{
@@ -265,9 +303,7 @@ function Sources() {
                       <Mode mode={p.mode} push />
                     </div>
                     <div style={{ fontSize: 12, color: "var(--faint)", lineHeight: 1.55 }}>
-                      {p.mode === "observe"
-                        ? "No history endpoint and signed requests, so there is no import to press: your favourites arrive as the extension watches the page load them."
-                        : `Ready to capture ${p.note} as soon as the extension runs an import.`}
+                      {p.note}
                     </div>
                   </div>
                 ))}
@@ -288,8 +324,11 @@ function Sources() {
             extension can walk your whole history itself.{" "}
             <strong style={{ color: "var(--accent)", fontWeight: 500 }}>observe</strong> means the
             platform publishes no history endpoint and signs its own requests, so capture happens by
-            watching what the app fetches. TikTok is the second kind: pressing Import opens your
-            favourites and scrolls them, rather than requesting a list nobody serves.
+            watching what the app fetches — pressing Import on TikTok opens your favourites and
+            scrolls them, rather than requesting a list nobody serves.{" "}
+            <strong style={{ color: "var(--muted)", fontWeight: 500 }}>cli</strong> means the
+            extension is not involved at all: GitHub has a real API and a token you can scope and
+            revoke, so it is imported by command rather than scraped.
           </div>
         </div>
       </div>
@@ -317,7 +356,7 @@ function Badge({ source }: { source: string }) {
   );
 }
 
-function Mode({ mode, push }: { mode: "page" | "observe"; push?: boolean }) {
+function Mode({ mode, push }: { mode: Mode; push?: boolean }) {
   return (
     <span
       className="mono"
