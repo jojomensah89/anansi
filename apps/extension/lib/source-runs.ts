@@ -27,6 +27,8 @@ export interface SourceRunState extends SyncStateRecord {
 	lastErrorCode?: string;
 	/** Set only after the one-time history walk reaches its genuine end. */
 	initialImportCompletedAt?: number;
+	/** Whether this run is a history walk or a one-page live refresh. */
+	runMode?: "full" | "live";
 }
 
 export interface ActiveSourceRunState extends SourceRunState {
@@ -44,6 +46,7 @@ export interface SyncStateStore {
 export interface SourceRuns {
 	begin(
 		source: CaptureSource,
+		mode?: "full" | "live",
 	): Promise<{ started: boolean; run: ActiveSourceRunState }>;
 	current(source: CaptureSource): Promise<SourceRunState>;
 	capturePage(
@@ -115,6 +118,12 @@ function asRunState(
 			value.initialImportCompletedAt > 0
 				? value.initialImportCompletedAt
 				: undefined,
+		runMode:
+			value.runMode === "live"
+				? "live"
+				: value.runMode === "full"
+					? "full"
+					: undefined,
 	};
 }
 
@@ -149,7 +158,7 @@ export function createSourceRuns(
 	const write = (state: SourceRunState) => store.putSyncState(state);
 
 	return {
-		begin(source) {
+		begin(source, mode = "full") {
 			return serialize(source, async () => {
 				const current = await read(source);
 				if (current.phase === "running" && current.runId && current.startedAt) {
@@ -163,6 +172,7 @@ export function createSourceRuns(
 					phase: "running",
 					runId: `${source}-${createId()}`,
 					startedAt: now(),
+					runMode: mode,
 					nextPage: 0,
 					// Starting again clears both, so neither outlives its run.
 					paused: false,
@@ -205,6 +215,7 @@ export function createSourceRuns(
 					...current,
 					phase: "idle",
 					startedAt: undefined,
+					runMode: undefined,
 					updatedAt: now(),
 				});
 			});
@@ -218,6 +229,7 @@ export function createSourceRuns(
 					...current,
 					phase: "idle",
 					startedAt: undefined,
+					runMode: undefined,
 					createdTabId: undefined,
 					paused: true,
 					updatedAt: now(),
@@ -356,8 +368,18 @@ export function isExpectedImportTab(
 			);
 		}
 		if (source === "github") {
-			return (
-				host === "github.com" && url.pathname.replace(/\/+$/, "") === "/stars"
+			if (
+				host !== "github.com" ||
+				url.pathname.replace(/\/+$/, "") !== "/stars" ||
+				url.hash ||
+				url.searchParams.size > 2
+			) {
+				return false;
+			}
+			return Array.from(url.searchParams).every(
+				([key, parameter]) =>
+					(key === "after" || key === "before" || key === "page") &&
+					parameter.length <= 1_000,
 			);
 		}
 		// TikTok has no favourites route to match: which profile counts depends

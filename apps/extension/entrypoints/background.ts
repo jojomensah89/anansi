@@ -53,6 +53,7 @@ import {
   type BookmarkNode,
 } from "../lib/chrome-bookmarks.ts";
 import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
+import { validatedGitHubStarsPageUrl } from "../lib/platforms/github.ts";
 import { tweetUrl } from "../lib/platforms/x.ts";
 import type {
   CaptureQueueStatus,
@@ -91,7 +92,7 @@ export interface RemoteConfig {
   ingest: string;
   ingestProtocolVersion?: number;
   features?: {
-    captureV2?: Partial<Record<"x" | "reddit" | "tiktok" | "web", boolean>>;
+    captureV2?: Partial<Record<"x" | "reddit" | "tiktok" | "github" | "web", boolean>>;
     chromeBookmarks?: boolean;
   };
   sources: SourceConfig[];
@@ -121,8 +122,8 @@ const CONFIG_TTL_MS = 60 * 60 * 1000;
 const ALARM = "anansi-sync";
 const OUTBOX_ALARM = "anansi-outbox";
 const HEARTBEAT_ALARM = "anansi-heartbeat";
-const CAPTURE_SOURCES = ["x", "reddit", "tiktok"] as const;
-const HEARTBEAT_SOURCES = ["x", "reddit", "tiktok", "web"] as const;
+const CAPTURE_SOURCES = ["x", "reddit", "tiktok", "github"] as const;
+const HEARTBEAT_SOURCES = ["x", "reddit", "tiktok", "github", "web"] as const;
 const tabNonces = new Map<number, string>();
 
 let cached: ServerCache<RemoteConfig> | null = null;
@@ -432,7 +433,11 @@ async function deliverItemEvent(
     observedAt,
     captureMethod: "platform_event",
     externalId,
-    canonicalUrl: canonicalUrl ?? tweetUrl(externalId),
+    canonicalUrl:
+      canonicalUrl ??
+      (source === "github"
+        ? `https://github.com/${externalId}`
+        : tweetUrl(externalId)),
   };
   await queue().enqueue(capture);
   await wakeDurableQueue();
@@ -669,19 +674,26 @@ const ENTRY_URLS: Record<string, string> = {
   x: "https://x.com/i/bookmarks",
   reddit: "https://www.reddit.com/user/me/saved/",
   tiktok: "https://www.tiktok.com/",
+  github: "https://github.com/stars",
 };
 
 const HOST_PATTERNS: Record<string, string[]> = {
   x: ["https://x.com/*", "https://twitter.com/*"],
   reddit: ["https://www.reddit.com/*", "https://old.reddit.com/*", "https://reddit.com/*"],
   tiktok: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
+  github: ["https://github.com/*"],
 };
 
-async function findTab(source: string) {
+async function findTab(source: string, expectedUrl?: string) {
   const patterns = HOST_PATTERNS[source];
   if (!patterns) return undefined;
   const tabs = await browser.tabs.query({ url: patterns });
-  return tabs.find((tab) => tab.url && isExpectedImportTab(source as CaptureSource, tab.url));
+  return tabs.find(
+    (tab) =>
+      tab.url &&
+      isExpectedImportTab(source as CaptureSource, tab.url) &&
+      (!expectedUrl || tab.url === expectedUrl),
+  );
 }
 
 /**
@@ -690,14 +702,17 @@ async function findTab(source: string) {
  * Opened inactive, so an import does not yank you out of what you were doing,
  * and closed again afterwards if we were the ones who opened it.
  */
-async function openTab(source: string): Promise<{ id: number; ours: boolean } | null> {
+async function openTab(
+  source: string,
+  preferredUrl?: string,
+): Promise<{ id: number; ours: boolean } | null> {
   // Once TikTok has told us who you are, later runs skip the front page and
   // open your own profile, which is where favourites live.
   const known =
     source === "tiktok"
       ? (await persistentState().runs.current("tiktok")).handle
       : undefined;
-  const url = (known ? profileUrl(known) : null) ?? ENTRY_URLS[source];
+  const url = preferredUrl ?? (known ? profileUrl(known) : null) ?? ENTRY_URLS[source];
   if (!url) return null;
   const tab = await browser.tabs.create({ url, active: false });
   if (!tab.id) return null;
@@ -794,7 +809,7 @@ async function expireOwnedRun(source: CaptureSource, expectedTabId: number): Pro
 async function startCapture(source: string, quiet = false, live = false): Promise<void> {
   if (!isCaptureSource(source)) return;
   const runs = persistentState().runs;
-  const begun = await runs.begin(source);
+  const begun = await runs.begin(source, live ? "live" : "full");
   if (!begun.started) {
     if (!quiet) await patchStatus(source, { message: "a capture is already running" });
     return;
@@ -814,12 +829,18 @@ async function startCapture(source: string, quiet = false, live = false): Promis
     return;
   }
 
+  const preferredUrl =
+    source === "github" && !live && begun.run.cursor
+      ? validatedGitHubStarsPageUrl(begun.run.cursor, "https://github.com/stars") ?? undefined
+      : source === "github"
+        ? entry.url
+        : undefined;
   let target: { id: number; ours: boolean } | null = null;
-  const existing = await findTab(source);
+  const existing = await findTab(source, preferredUrl);
   if (existing?.id) target = { id: existing.id, ours: false };
   else {
     await patchStatus(source, { message: `opening ${entry.host}…` });
-    target = await openTab(source);
+    target = await openTab(source, preferredUrl);
   }
 
   if (!target) {
@@ -1066,6 +1087,19 @@ async function processPendingRefreshes(): Promise<void> {
   }
 }
 
+async function maybeStartInitialGitHubImport(): Promise<void> {
+  const runs = persistentState().runs;
+  if (!(await runs.initialImportDue("github"))) return;
+  const config = await loadConfig();
+  if (
+    !config?.enabled ||
+    !config.sources.some((entry) => entry.source === "github")
+  ) {
+    return;
+  }
+  await startCapture("github", true);
+}
+
 const EMPTY_COUNTS: CaptureQueueStatus = {
   queued: 0,
   uploading: 0,
@@ -1176,6 +1210,7 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
       return { ok: true, snapshot: await durableSnapshot() };
     case "reschedule":
       await rescheduleAlarm();
+      void maybeStartInitialGitHubImport();
       return { ok: true };
     case "retry-queue":
       await wakeDurableQueue(true, msg.source);
@@ -1211,14 +1246,138 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
   }
 }
 
+async function finishSuccessfulGitHubRun(pages: number, items: number): Promise<void> {
+  const runs = persistentState().runs;
+  const run = await runs.current("github");
+  if (!run.pendingRefresh) await flushPendingSaves("github");
+  if (run.runMode === "full" && !run.cursor) {
+    await runs.completeInitialImport("github");
+  }
+  await finishRun("github");
+  await patchStatus("github", {
+    startedAt: null,
+    lastRun: Date.now(),
+    pages,
+    items,
+    message: null,
+  });
+  await processPendingRefreshes();
+}
+
+async function continueGitHubImport(
+  msg: Extract<PageEventMessage, { action: "page" }>,
+  tabId?: number,
+): Promise<void> {
+  const runs = persistentState().runs;
+  const current = await runs.current("github");
+  if (current.phase !== "running") return;
+
+  const config = await loadConfig(true);
+  const entry = config?.enabled
+    ? config.sources.find((candidate) => candidate.source === "github")
+    : undefined;
+  if (!entry) {
+    const ownedTab = await runs.stop("github");
+    if (ownedTab !== null) await browser.tabs.remove(ownedTab).catch(() => {});
+    await patchStatus("github", { startedAt: null, message: "switched off in Sources" });
+    return;
+  }
+
+  const nextUrl = msg.cursor
+    ? validatedGitHubStarsPageUrl(msg.cursor, "https://github.com/stars")
+    : null;
+  if (msg.cursor && !nextUrl) {
+    await runs.noteError("github", "page_shape_changed");
+    await finishRun("github");
+    await patchStatus("github", {
+      startedAt: null,
+      message: SAFE_PLATFORM_ERRORS.page_shape_changed,
+    });
+    return;
+  }
+
+  const status = await readStatus("github");
+  const totalItems = status.items + msg.items;
+  await deliverRaw(
+    "github",
+    msg.raw,
+    msg.page,
+    current.runMode === "full" ? (msg.cursor ?? null) : undefined,
+  );
+  await patchStatus("github", { pages: msg.page, items: totalItems });
+
+  if (current.runMode === "live") {
+    await finishSuccessfulGitHubRun(msg.page, totalItems);
+    return;
+  }
+
+  if (!msg.cursor) {
+    await finishSuccessfulGitHubRun(msg.page, totalItems);
+    return;
+  }
+
+  if (msg.page >= (entry.pageLimit ?? 40)) {
+    await finishRun("github");
+    await patchStatus("github", {
+      startedAt: null,
+      lastRun: Date.now(),
+      message: "import paused at its safety limit; press Import to continue",
+    });
+    return;
+  }
+
+  if (!tabId) {
+    await runs.noteError("github", "capture_failed");
+    await finishRun("github");
+    await patchStatus("github", {
+      startedAt: null,
+      message: SAFE_PLATFORM_ERRORS.capture_failed,
+    });
+    return;
+  }
+
+  if (!nextUrl) throw new Error("validated GitHub cursor is missing");
+
+  await navigateTab(tabId, nextUrl);
+  const job = { ...entry, page: msg.page + 1 };
+  const reached =
+    (await talk(tabId, {
+      anansi: "page-command",
+      messageVersion: MESSAGE_PROTOCOL_VERSION,
+      source: "github",
+      action: "configure",
+      config: job,
+    })) &&
+    (await talk(tabId, {
+      anansi: "page-command",
+      messageVersion: MESSAGE_PROTOCOL_VERSION,
+      source: "github",
+      action: "backfill",
+      config: job,
+    }));
+  if (!reached) {
+    await runs.noteError("github", "capture_failed");
+    await finishRun("github");
+    await patchStatus("github", {
+      startedAt: null,
+      message: "could not continue the GitHub stars import",
+    });
+  }
+}
+
 async function handlePageEvent(
   msg: PageEventMessage,
   source: PlatformSource,
+  tabId?: number,
 ): Promise<BackgroundResult> {
   switch (msg.action) {
     case "ready":
       return { ok: true };
     case "page":
+      if (source === "github") {
+        await continueGitHubImport(msg, tabId);
+        return { ok: true };
+      }
       await deliverRaw(source, msg.raw, msg.page, msg.cursor ?? null);
       await patchStatus(source, { pages: msg.page, items: msg.items });
       return { ok: true };
@@ -1245,6 +1404,14 @@ async function handlePageEvent(
       return { ok: true };
     }
     case "done":
+      if (source === "github") {
+        const run = await persistentState().runs.current("github");
+        if (run.runMode === "full") {
+          await persistentState().runs.setCursor("github", null);
+        }
+        await finishSuccessfulGitHubRun(msg.pages, msg.items);
+        return { ok: true };
+      }
       // Before finishing: the pages this run queued are what give the held
       // saves their content, and the queue is serial per source.
       await flushPendingSaves(source);
@@ -1274,7 +1441,11 @@ async function handlePageEvent(
     }
     case "error":
       await persistentState().runs.noteError(source, msg.errorCode);
-      await finishRun(source);
+      if (source === "github" && msg.errorCode === "not_signed_in") {
+        await persistentState().runs.finish(source);
+      } else {
+        await finishRun(source);
+      }
       await patchStatus(source, {
         startedAt: null,
         message: SAFE_PLATFORM_ERRORS[msg.errorCode],
@@ -1296,7 +1467,7 @@ async function handleRuntimeMessage(
       return await handlePopupCommand(parsed.message);
     }
     if (parsed.message.anansi === "page-event" && parsed.source) {
-      return await handlePageEvent(parsed.message, parsed.source);
+      return await handlePageEvent(parsed.message, parsed.source, sender.tab?.id);
     }
     return { ok: false, error: "message family is not allowed on this path" };
   } catch {
@@ -1365,16 +1536,19 @@ export default defineBackground(() => {
   void rescheduleAlarm();
   void rescheduleHeartbeat();
   void wakeDurableQueue().then(processPendingRefreshes);
+  void maybeStartInitialGitHubImport();
   requestHeartbeat();
   // The worker restarts constantly; the listeners have to come back with it.
   void startMirroring();
   browser.runtime.onStartup.addListener(() => {
     void wakeDurableQueue().then(processPendingRefreshes);
+    void maybeStartInitialGitHubImport();
     requestHeartbeat();
   });
   browser.runtime.onInstalled.addListener(() => {
     void wakeDurableQueue().then(processPendingRefreshes);
     void armOpenTabs();
+    void maybeStartInitialGitHubImport();
     requestHeartbeat();
   });
 

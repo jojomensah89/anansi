@@ -52,9 +52,6 @@ export default defineContentScript({
 				items: result.page.repositories.length,
 				...(result.page.nextUrl ? { cursor: result.page.nextUrl } : {}),
 			});
-			if (!result.page.nextUrl || page >= (config.pageLimit ?? 40)) {
-				send("done", { pages: page, items: result.page.repositories.length });
-			}
 		};
 
 		window.addEventListener("message", (event) => {

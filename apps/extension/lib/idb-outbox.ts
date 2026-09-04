@@ -20,6 +20,7 @@ export interface SyncStateRecord {
 	paused?: boolean;
 	lastErrorCode?: string;
 	initialImportCompletedAt?: number;
+	runMode?: "full" | "live";
 }
 
 export interface IndexedDbOutbox extends OutboxStore {

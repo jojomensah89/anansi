@@ -167,6 +167,39 @@ describe("ingestCapture", () => {
 		});
 	});
 
+	test("ingests a bounded GitHub stars page from the extension", async () => {
+		const db = openTestDb();
+		const capture: RawPageCapture = {
+			schemaVersion: 1,
+			payloadType: "raw_page",
+			eventId: "github-run-1:page:1",
+			source: "github",
+			action: "snapshot",
+			observedAt: now,
+			captureMethod: "platform_import",
+			runId: "github-run-1",
+			page: 1,
+			raw: {
+				schemaVersion: 1,
+				pageType: "github_stars",
+				repositories: [
+					{
+						identity: "vyom-26/bmx_racer",
+						fullName: "Vyom-26/BMX_Racer",
+						owner: "Vyom-26",
+						name: "BMX_Racer",
+						url: "https://github.com/Vyom-26/BMX_Racer",
+						description: "A cel-shaded downhill BMX racing game.",
+					},
+				],
+			},
+		};
+
+		const result = await ingestCapture(db, request(capture, capture.eventId));
+		expect(result.status).toBe(200);
+		expect(result.body).toMatchObject({ parsed: 1, outcome: "created" });
+	});
+
 	test("does not acknowledge a raw page that parses to zero items", async () => {
 		const db = openTestDb();
 		const capture: RawPageCapture = {

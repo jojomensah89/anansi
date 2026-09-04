@@ -153,6 +153,9 @@ describe("import-route selection", () => {
 			isExpectedImportTab("github", "https://github.com/stars/lists/work"),
 		).toBe(false);
 		expect(
+			isExpectedImportTab("github", "https://github.com/stars?token=secret"),
+		).toBe(false);
+		expect(
 			isExpectedImportTab("github", "https://github.com/anansi/anansi"),
 		).toBe(false);
 	});
@@ -282,5 +285,15 @@ describe("initial import completion", () => {
 		await runs.completeInitialImport("github");
 		const manual = await runs.begin("github");
 		expect(manual.started).toBe(true);
+	});
+
+	test("distinguishes a live refresh from a full import", async () => {
+		const { runs } = setup();
+		const live = await runs.begin("github", "live");
+		expect(live.run.runMode).toBe("live");
+		await runs.finish("github");
+
+		const full = await runs.begin("github", "full");
+		expect(full.run.runMode).toBe("full");
 	});
 });
