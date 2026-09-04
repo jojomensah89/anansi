@@ -69,6 +69,8 @@ export interface SearchHit {
   authorAvatar?: string | null;
   /** Primary repository language for GitHub list cards, when stored. */
   language?: string | null;
+  /** Repository visibility, when GitHub supplied it. */
+  visibility?: "public" | "private" | null;
   mediaCount?: number;
   url: string;
   author: string | null;
@@ -516,6 +518,7 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
     select i.id, i.url, i.author_handle as author, i.author_name as authorName,
            i.author_avatar as authorAvatar,
            json_extract(i.raw, '$.language') as language,
+           json_extract(i.raw, '$.visibility') as visibility,
            i.title, i.posted_at as postedAt, i.saved_at as savedAt,
            i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
            i.platform_saved as platformSaved,

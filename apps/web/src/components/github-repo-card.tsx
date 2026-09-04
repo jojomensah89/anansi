@@ -61,6 +61,7 @@ export function GithubRepoCard({ item }: { item: ItemRow }) {
   const metrics = item.metrics ?? {};
   const language = item.language?.trim() || null;
   const languageColor = githubLanguageColor(language);
+  const isPrivate = item.visibility === "private";
 
   return (
     <>
@@ -73,8 +74,15 @@ export function GithubRepoCard({ item }: { item: ItemRow }) {
           </span>
         </div>
 
-        <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {fullName}
+        <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {fullName}
+          </span>
+          {isPrivate && (
+            <span style={{ flexShrink: 0, padding: "1px 5px", border: "1px solid var(--edge-strong)", borderRadius: 999, color: "var(--faint)", fontSize: 9.5 }}>
+              Private
+            </span>
+          )}
         </div>
 
         {item.excerpt.trim() && (

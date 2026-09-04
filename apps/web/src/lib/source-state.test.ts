@@ -114,6 +114,14 @@ describe("sourcePresentation", () => {
 		).toBe("experimental");
 	});
 
+	test("a supported GitHub source is operational rather than planned", () => {
+		const presentation = sourcePresentation(
+			row({ source: "github", name: "GitHub stars", items: 25 }),
+			extension(),
+		);
+		expect(presentation).toEqual({ state: "ready", text: "Ready", tone: "ok" });
+	});
+
 	test("labels extension connection without inventing a version", () => {
 		expect(extensionLabel(extension())).toBe("Connected · v0.1.0");
 		expect(extensionLabel(extension("never_connected"))).toBe(

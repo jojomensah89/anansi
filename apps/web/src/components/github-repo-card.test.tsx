@@ -43,10 +43,24 @@ describe("GitHub repository card", () => {
     expect(html).not.toContain("Contributors");
   });
 
-  test("renders a neutral strip when language metadata is absent", () => {
+	test("renders a neutral strip when language metadata is absent", () => {
     const html = renderToStaticMarkup(createElement(GithubRepoCard, { item: repo({ language: null }) }));
 
     expect(html).toContain('title="Language unavailable"');
-    expect(html).toContain("background:#e5e7eb");
-  });
+		expect(html).toContain("background:#e5e7eb");
+	});
+
+	test("shows Private only when that visibility was stored", () => {
+		const privateHtml = renderToStaticMarkup(
+			createElement(GithubRepoCard, {
+				item: repo({ visibility: "private" }),
+			}),
+		);
+		const unknownHtml = renderToStaticMarkup(
+			createElement(GithubRepoCard, { item: repo() }),
+		);
+
+		expect(privateHtml).toContain("Private");
+		expect(unknownHtml).not.toContain("Private");
+	});
 });
