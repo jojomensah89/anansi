@@ -1,5 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import type { ItemRow } from "../lib/api.ts";
+
+/**
+ * Measure before paint in the browser, and do nothing during SSR.
+ *
+ * useEffect runs after the frame, so the column count would be 1 for one paint
+ * and then four — a visible snap on every load. useLayoutEffect runs first,
+ * but warns if it runs on the server, where there is nothing to measure.
+ */
+const useMeasure = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 /**
  * Column packing for a grid of unequal cards.
@@ -15,23 +24,35 @@ import type { ItemRow } from "../lib/api.ts";
  * than measured, which is wrong by a few pixels and right about the ordering
  * — and ordering is all that packing needs.
  */
-export function useColumnCount(ref: React.RefObject<HTMLElement | null>, min = 280): number {
+/**
+ * A callback ref, not a RefObject, and that distinction is the whole point.
+ *
+ * With a RefObject the measuring effect runs once on mount — when the element
+ * does not exist yet — and its dependencies never change, so it never runs
+ * again. Whichever element attached later (the skeleton, then the grid) was
+ * never measured, and a four-column layout rendered as one long column.
+ *
+ * Holding the node in state means attaching an element *is* the change that
+ * triggers the measure, whenever it happens and however many times.
+ */
+export function useColumnCount(min = 280) {
+  const [node, setNode] = useState<HTMLElement | null>(null);
   const [columns, setColumns] = useState(1);
 
-  useEffect(() => {
-    const node = ref.current;
+  const ref = useCallback((element: HTMLDivElement | null) => setNode(element), []);
+
+  useMeasure(() => {
     if (!node) return;
     const measure = () => {
-      const width = node.clientWidth;
-      setColumns(Math.max(1, Math.floor((width + 14) / (min + 14))));
+      setColumns(Math.max(1, Math.floor((node.clientWidth + 14) / (min + 14))));
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [ref, min]);
+  }, [node, min]);
 
-  return columns;
+  return { ref, columns, node };
 }
 
 /**
@@ -78,8 +99,7 @@ export function packColumns(items: ItemRow[], columns: number, columnWidth: numb
 
 /** The measured container plus its packed columns, ready to render. */
 export function useMasonry(items: ItemRow[], min = 280) {
-  const ref = useRef<HTMLDivElement>(null);
-  const columns = useColumnCount(ref, min);
-  const width = (ref.current?.clientWidth ?? min * columns) / columns;
+  const { ref, columns, node } = useColumnCount(min);
+  const width = (node?.clientWidth ?? min * columns) / columns;
   return { ref, columns, buckets: packColumns(items, columns, width) };
 }

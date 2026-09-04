@@ -8,6 +8,13 @@ import { FilterBar, type Filters } from "../components/filters.tsx";
 import { SelectBar } from "../components/selectbar.tsx";
 import { MosaicView, RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
 import { useMasonry } from "../components/masonry.tsx";
+import {
+  CountBone,
+  GridSkeleton,
+  MosaicSkeleton,
+  RowsSkeleton,
+  useSlowLoad,
+} from "../components/skeleton.tsx";
 import { api, type ItemRow } from "../lib/api.ts";
 import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
 
@@ -74,6 +81,23 @@ function Library() {
     (next: ViewMode) => void navigate({ search: toLibrarySearch(filters, next), replace: true }),
     [navigate, filters],
   );
+
+  /**
+   * Two different waits, told apart.
+   *
+   * `firstLoad` is an empty screen with nothing to look at; paging is a screen
+   * you are already reading. Only the first deserves a wall of shapes, and
+   * neither deserves one for a load too fast to notice.
+   */
+  const firstLoad = useSlowLoad(loading && items.length === 0);
+
+  /**
+   * A count has three states, not two: arrived, obviously late, and neither.
+   * Drawing a placeholder in the third would put a grey box on screen for a
+   * query that answers in twenty milliseconds.
+   */
+  const statsReady = total > 0;
+  const statsSlow = useSlowLoad(!statsReady);
 
   const refreshStats = useCallback(() => {
     api
@@ -187,8 +211,13 @@ function Library() {
           }}
         >
           <span style={{ fontSize: 14, fontWeight: 600 }}>Library</span>
-          <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
-            {total.toLocaleString()} items · {authors} authors
+          <span className="mono" style={{ fontSize: 11, color: "var(--faint)", display: "flex", alignItems: "center", gap: 5 }}>
+            {statsReady && `${total.toLocaleString()} items · ${authors} authors`}
+            {!statsReady && statsSlow && (
+              <>
+                <CountBone digits={5} height={9} /> items · <CountBone digits={4} height={9} /> authors
+              </>
+            )}
           </span>
 
           <span style={{ width: 1, height: 18, background: "var(--line)", margin: "0 4px" }} />
@@ -271,6 +300,17 @@ function Library() {
         />
 
         <div className="scroll" style={{ flex: 1, padding: "16px 20px" }}>
+          {/*
+            The first page and the next page are different waits. An empty
+            screen needs a shape; a screen you are already reading needs a line
+            at the bottom, not a wall of grey pushing your place away.
+          */}
+          {firstLoad && !error && view === "grid" && (
+            <GridSkeleton columns={masonry.columns} containerRef={masonry.ref} />
+          )}
+          {firstLoad && !error && view === "row" && <RowsSkeleton />}
+          {firstLoad && !error && view === "timeline" && <RowsSkeleton count={6} />}
+          {firstLoad && !error && view === "mosaic" && <MosaicSkeleton />}
           {error && (
             <div style={{ color: "var(--muted)", fontSize: 13, padding: 12 }}>
               {error}
@@ -289,7 +329,7 @@ function Library() {
             </div>
           )}
 
-          {view === "grid" && (
+          {!firstLoad && view === "grid" && (
             /*
               Columns packed shortest-first rather than a CSS grid. Grid rows
               are as tall as their tallest member, so a 137px card beside a
@@ -313,13 +353,13 @@ function Library() {
             </div>
           )}
 
-          {view === "row" && <RowView items={items} onOpen={(i) => setOpenId(i.id)} />}
-          {view === "timeline" && <TimelineView items={items} onOpen={(i) => setOpenId(i.id)} />}
-          {view === "mosaic" && <MosaicView items={items} onOpen={(i) => setOpenId(i.id)} />}
+          {!firstLoad && view === "row" && <RowView items={items} onOpen={(i) => setOpenId(i.id)} />}
+          {!firstLoad && view === "timeline" && <TimelineView items={items} onOpen={(i) => setOpenId(i.id)} />}
+          {!firstLoad && view === "mosaic" && <MosaicView items={items} onOpen={(i) => setOpenId(i.id)} />}
           <div ref={sentinel} style={{ height: 40 }} />
-          {loading && (
-            <div className="mono" style={{ fontSize: 11, color: "var(--faint)", padding: 8 }}>
-              loading…
+          {loading && items.length > 0 && (
+            <div className="mono" style={{ fontSize: 11, color: "var(--faint)", padding: 8 }} aria-live="polite">
+              loading more…
             </div>
           )}
         </div>

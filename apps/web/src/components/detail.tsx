@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ItemDetail } from "@anansi/db";
 import { api, compact, mediaUrl } from "../lib/api.ts";
+import { Bone, Loading } from "./skeleton.tsx";
 
 /**
  * The item detail, as a drawer rather than a route.
@@ -67,10 +68,27 @@ export function Detail({ id, onClose }: { id: string | null; onClose: () => void
         }}
       >
         {error && <div style={{ color: "var(--muted)", fontSize: 13 }}>{error}</div>}
+        {/*
+          Shaped like the drawer it becomes: an author line, a paragraph, then
+          the media. The drawer is already animating in, so a second thing
+          appearing a moment later would read as a stutter.
+        */}
         {!item && !error && (
-          <div className="mono" style={{ color: "var(--faint)", fontSize: 11 }}>
-            loading…
-          </div>
+          <Loading label="Loading this item">
+            <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 20 }}>
+              <Bone width={38} height={38} radius={19} />
+              <span style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+                <Bone width="40%" height={11} delay={60} />
+                <Bone width="26%" height={9} delay={90} />
+              </span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 22 }}>
+              <Bone height={10} delay={120} />
+              <Bone height={10} delay={150} />
+              <Bone width="76%" height={10} delay={180} />
+            </div>
+            <Bone height={280} radius={8} delay={210} />
+          </Loading>
         )}
 
         {item && (

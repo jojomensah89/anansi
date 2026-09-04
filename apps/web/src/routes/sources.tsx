@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Rail } from "../components/rail.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
+import { SourceCardsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { api, type SourceRow } from "../lib/api.ts";
 
 export const Route = createFileRoute("/sources")({ component: Sources });
@@ -130,13 +131,24 @@ function Sources() {
     return () => controller.abort();
   }, []);
 
+  // Health has to be fetched before anything here is true, and an empty grid
+  // in the meantime reads as "no sources" rather than "not yet".
+  const ready = sources.length > 0;
+  const slow = useSlowLoad(!ready);
+
   const empty = useMemo(
     () => KNOWN.filter((k) => !sources.some((s) => s.source === k.source)),
     [sources],
   );
 
   const showCapturing = tab !== "planned";
-  const showEmpty = tab !== "capturing" && empty.length > 0;
+  /*
+    Not until the health has arrived. `empty` is derived from what came back,
+    so before it does every source looks empty — and a section confidently
+    listing X under "nothing captured yet", beside a rail saying 1,274, is a
+    worse answer than no section at all.
+  */
+  const showEmpty = tab !== "capturing" && ready && empty.length > 0;
 
   return (
     <div style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
@@ -245,7 +257,9 @@ function Sources() {
             </span>
           </div>
 
-          {showCapturing && (
+          {showCapturing && !ready && slow && <SourceCardsSkeleton />}
+
+          {showCapturing && ready && (
             <div
               style={{
                 display: "grid",

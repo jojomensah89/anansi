@@ -1,4 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { CountBone, useSlowLoad } from "./skeleton.tsx";
 
 /**
  * The 228px rail from the Library artboard.
@@ -25,7 +26,7 @@ function Web() {
 function Item({
   to, label, count, active, children,
 }: {
-  to: string; label: string; count?: string; active: boolean; children: React.ReactNode;
+  to: string; label: string; count?: React.ReactNode; active: boolean; children: React.ReactNode;
 }) {
   return (
     <Link
@@ -49,8 +50,19 @@ function Item({
   );
 }
 
-export function Rail({ total, authors, archived = 0, bySource }: RailProps) {
+export function Rail({ total, authors, bySource }: RailProps) {
   const path = useRouterState({ select: (s) => s.location.pathname });
+
+  /**
+   * The rail's counts are the app's first impression, and zero is a lie while
+   * they are still in flight — "Bookmarks 0" beside a library of 1,274 reads
+   * as data loss. So a count that has not arrived is a shape, not a number,
+   * and only once the wait is long enough to see.
+   */
+  const ready = total > 0;
+  const slow = useSlowLoad(!ready);
+  const count = (n: number) =>
+    ready ? String(n) : slow ? <CountBone digits={4} height={8} /> : null;
 
   return (
     <div style={{
@@ -64,12 +76,12 @@ export function Rail({ total, authors, archived = 0, bySource }: RailProps) {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "0 8px" }}>
-        <Item to="/" label="Library" count={String(total)} active={path === "/"}>
+        <Item to="/" label="Library" count={count(total)} active={path === "/"}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={path === "/" ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinejoin="round">
             <path d="M6 4h12v17l-6-4-6 4z" />
           </svg>
         </Item>
-        <Item to="/creators" label="Creators" count={String(authors)} active={path === "/creators"}>
+        <Item to="/creators" label="Creators" count={count(authors)} active={path === "/creators"}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={path === "/creators" ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="9" cy="8" r="3.2" />
             <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5M16 6.2a3 3 0 0 1 0 5.6M17.5 19c0-2-.6-3.6-1.7-4.6" />
@@ -109,7 +121,9 @@ export function Rail({ total, authors, archived = 0, bySource }: RailProps) {
               {tag}
             </span>
             {label}
-            <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faint)" }}>{n}</span>
+            <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faint)" }}>
+              {count(n)}
+            </span>
           </Link>
         ))}
       </div>
@@ -120,7 +134,7 @@ export function Rail({ total, authors, archived = 0, bySource }: RailProps) {
           local library
         </div>
         <div className="mono" style={{ fontSize: 10.5, color: "var(--faintest)" }}>
-          {total.toLocaleString()} items · {authors} authors
+          {ready ? `${total.toLocaleString()} items · ${authors} authors` : null}
         </div>
       </div>
     </div>

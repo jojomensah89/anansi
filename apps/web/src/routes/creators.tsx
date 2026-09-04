@@ -4,6 +4,7 @@ import { Rail } from "../components/rail.tsx";
 import { Detail } from "../components/detail.tsx";
 import { FieldFilter } from "../components/filters.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
+import { Bone, CreatorRowsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { api, type Creator, type ItemRow } from "../lib/api.ts";
 
 /** The same order and labels the Library bar offers. */
@@ -79,6 +80,11 @@ function Creators() {
    */
   const top = shown[0]?.saves ?? 1;
 
+  // The table and the figures above it arrive together, so one flag covers
+  // both rather than letting the page settle in two stages.
+  const ready = creators.length > 0;
+  const slow = useSlowLoad(!ready);
+
   const once = creators.filter((c) => c.saves === 1).length;
   const topTenShare = stats.items
     ? Math.round((creators.slice(0, 10).reduce((n, c) => n + c.saves, 0) / stats.items) * 100)
@@ -150,10 +156,10 @@ function Creators() {
             gap: 44,
           }}
         >
-          <Stat n={String(stats.authors)} label="authors" />
-          <Stat n={perAuthor} label="saves per author" />
-          <Stat n={`${topTenShare}%`} label="of saves from top 10" accent />
-          <Stat n={String(once)} label="saved exactly once" />
+          <Stat n={String(stats.authors)} label="authors" pending={!ready && slow} />
+          <Stat n={perAuthor} label="saves per author" pending={!ready && slow} />
+          <Stat n={`${topTenShare}%`} label="of saves from top 10" accent pending={!ready && slow} />
+          <Stat n={String(once)} label="saved exactly once" pending={!ready && slow} />
         </div>
 
         <div className="scroll" style={{ flex: 1, padding: "0 22px" }}>
@@ -180,6 +186,8 @@ function Creators() {
             <span>Share of library</span>
             <span style={{ textAlign: "right" }}>Saves</span>
           </div>
+
+          {!ready && slow && <CreatorRowsSkeleton />}
 
           {shown.map((c, i) => {
             const active = selected === c.authorHandle;
@@ -299,12 +307,32 @@ function Creators() {
   );
 }
 
-function Stat({ n, label, accent }: { n: string; label: string; accent?: boolean }) {
+/**
+ * The label is never a placeholder.
+ *
+ * "authors" is known before the count is, and greying it out would hide the
+ * one part of the figure that is already true.
+ */
+function Stat({
+  n,
+  label,
+  accent,
+  pending,
+}: {
+  n: string;
+  label: string;
+  accent?: boolean;
+  pending?: boolean;
+}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <span className="mono" style={{ fontSize: 20, color: accent ? "var(--accent)" : "var(--text)" }}>
-        {n}
-      </span>
+      {pending ? (
+        <Bone width={44} height={17} radius={4} style={{ marginBottom: 3 }} />
+      ) : (
+        <span className="mono" style={{ fontSize: 20, color: accent ? "var(--accent)" : "var(--text)" }}>
+          {n}
+        </span>
+      )}
       <span style={{ fontSize: 11.5, color: "var(--faint)" }}>{label}</span>
     </div>
   );
