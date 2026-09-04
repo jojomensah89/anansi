@@ -130,6 +130,8 @@ const start = (source: string) => command({ action: "start", source });
  */
 const pause = (source: string) => command({ action: "stop", source });
 
+const savePage = () => command({ action: "save-page" });
+
 const retry = (source?: string) =>
   command(source ? { action: "retry-queue", source } : { action: "retry-queue" });
 
@@ -144,6 +146,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [saving, setSaving] = useState<null | "saving" | "saved" | string>(null);
 
   useEffect(() => {
     void browser.storage.local.get(["server", "token", "syncEvery", "status"]).then((s) => {
@@ -395,6 +398,51 @@ export default function App() {
               </div>
             );
           })}
+          {/*
+            The page you are on. Not a platform row — there is nothing to
+            import and nothing to watch — so it says what it does and offers
+            the one action it has.
+          */}
+          <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
+            <span style={{ width: 26, height: 26, borderRadius: 7, background: S.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: S.muted }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z" />
+              </svg>
+            </span>
+            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>This page</span>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: saving === "saved" ? S.ok : saving && saving !== "saving" ? S.warn : S.muted,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {saving === "saving"
+                  ? "Saving…"
+                  : saving === "saved"
+                    ? "Saved to your library"
+                    : (saving ?? "Save this page, or right-click a selection")}
+              </span>
+            </span>
+            <button
+              type="button"
+              disabled={saving === "saving"}
+              onClick={async () => {
+                setSaving("saving");
+                const result = (await savePage()) as { ok?: boolean; error?: string } | undefined;
+                setSaving(result?.ok ? "saved" : (result?.error ?? "could not save that page"));
+                setTimeout(() => setSaving(null), 4000);
+                refresh();
+              }}
+              style={{ ...button, height: 27, padding: "0 12px", fontSize: 11.5, flexShrink: 0 }}
+            >
+              Save
+            </button>
+          </div>
         </div>
       )}
 

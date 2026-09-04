@@ -241,7 +241,10 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
           x: false,
           reddit: false,
           tiktok: false,
-          web: false,
+          // Web capture has no legacy path to conflict with — the durable
+          // queue is the only way a saved page ever reaches here — so there is
+          // nothing to stage.
+          web: true,
         },
         chromeBookmarks: false,
       },

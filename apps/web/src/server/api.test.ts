@@ -202,11 +202,13 @@ describe("handleApi", () => {
     expect(body.ingest).toEndWith("/api/ingest");
     expect(body.sources[0].operation).toBe("Bookmarks");
     expect(body.ingestProtocolVersion).toBe(2);
+    // Web is on because it has no legacy path to conflict with; the platform
+    // sources stay staged until each has passed authenticated acceptance.
     expect(body.features.captureV2).toEqual({
       x: false,
       reddit: false,
       tiktok: false,
-      web: false,
+      web: true,
     });
     expect(body.features.chromeBookmarks).toBe(false);
 

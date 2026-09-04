@@ -38,6 +38,13 @@ import {
   type CaptureSource,
   type SourceRuns,
 } from "../lib/source-runs.ts";
+import {
+  capturablePage,
+  readPage,
+  toWebCapture,
+  UNSUPPORTED_MESSAGES,
+  type PageDetails,
+} from "../lib/page-capture.ts";
 import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
 import { tweetUrl } from "../lib/platforms/x.ts";
 import type {
@@ -385,6 +392,73 @@ async function flushPendingSaves(source: CaptureSource): Promise<void> {
     await deliverItemEvent(source, "save", externalId);
   }
 }
+
+/**
+ * Save the page in one tab, right now.
+ *
+ * `activeTab` is what makes this possible without host permission for every
+ * site, and it is also why this only ever runs from a deliberate gesture: the
+ * grant arrives when you press the button or the menu item and lapses after.
+ * There is no path here that reads a page you did not ask for.
+ */
+async function capturePage(
+  tabId: number,
+  method: "toolbar" | "context_menu",
+  selectionText?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tab = await browser.tabs.get(tabId).catch(() => null);
+  const supported = capturablePage(tab?.url);
+  if (!supported.ok) {
+    await patchStatus("web", { message: UNSUPPORTED_MESSAGES[supported.reason] });
+    return { ok: false, error: UNSUPPORTED_MESSAGES[supported.reason] };
+  }
+
+  let details: PageDetails;
+  try {
+    const [injected] = await browser.scripting.executeScript({
+      target: { tabId },
+      func: readPage,
+    });
+    details = injected?.result as PageDetails;
+    if (!details?.url) throw new Error("nothing came back");
+  } catch {
+    const message = "could not read that page";
+    await patchStatus("web", { message });
+    return { ok: false, error: message };
+  }
+
+  // The menu passes what was highlighted; it is more reliable than asking the
+  // page again, because the click can clear the selection.
+  const built = await toWebCapture(
+    { ...details, selection: selectionText ?? details.selection },
+    { method, observedAt: Math.floor(Date.now() / 1000) },
+  );
+  if (!built.ok) {
+    await patchStatus("web", { message: UNSUPPORTED_MESSAGES[built.reason] });
+    return { ok: false, error: UNSUPPORTED_MESSAGES[built.reason] };
+  }
+
+  await queue().enqueue(built.capture);
+  await wakeDurableQueue();
+
+  const pending = await persistentState().outbox.get(built.capture.eventId);
+  const current = await readStatus("web");
+  await patchStatus("web", {
+    lastRun: Date.now(),
+    items: current.items + 1,
+    ...(pending
+      ? { message: "saved locally; delivery will retry" }
+      : { uploaded: current.uploaded + 1, message: null }),
+  });
+  return { ok: true };
+}
+
+type MenuSpec = Parameters<typeof browser.contextMenus.create>[0];
+
+const MENUS: MenuSpec[] = [
+  { id: "anansi-save-page", title: "Save page to Anansi", contexts: ["page"] },
+  { id: "anansi-save-selection", title: "Save selection to Anansi", contexts: ["selection"] },
+];
 
 /** Where to open a tab when there isn't one, per source. */
 const ENTRY_URLS: Record<string, string> = {
@@ -854,6 +928,11 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
     case "retry-queue":
       await wakeDurableQueue(true, msg.source);
       return { ok: true, snapshot: await durableSnapshot() };
+    case "save-page": {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) return { ok: false, error: "no active tab" };
+      return await capturePage(tab.id, "toolbar");
+    }
     case "start": {
       const creds = await settings();
       if (!creds) {
@@ -970,6 +1049,31 @@ async function handleRuntimeMessage(
 }
 
 export default defineBackground(() => {
+  /**
+   * The menus are created on install rather than on every start.
+   *
+   * A service worker starts many times a day and createContextMenus throws on
+   * a duplicate id, so recreating them per start means an exception in the log
+   * every time — and a swallowed one is how a real error later gets missed.
+   */
+  browser.runtime.onInstalled.addListener(() => {
+    browser.contextMenus.removeAll(() => {
+      for (const menu of MENUS) {
+        browser.contextMenus.create(menu);
+      }
+    });
+  });
+
+  browser.contextMenus.onClicked.addListener((info, tab) => {
+    if (!tab?.id) return;
+    if (info.menuItemId === "anansi-save-page") {
+      void capturePage(tab.id, "context_menu");
+    }
+    if (info.menuItemId === "anansi-save-selection") {
+      void capturePage(tab.id, "context_menu", info.selectionText);
+    }
+  });
+
   browser.runtime.onMessage.addListener((message: unknown, sender: RuntimeMessageSender) =>
     handleRuntimeMessage(message, sender),
   );

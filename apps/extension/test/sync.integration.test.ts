@@ -232,7 +232,8 @@ describe("the worker stops existing", () => {
     // Leave it exactly as a kill during upload leaves it.
     await r.queue.enqueue(save("a")).catch(() => undefined);
     const [inflight] = await r.store.list();
-    await r.store.put({ ...(inflight as never), state: "uploading" });
+    if (!inflight) throw new Error("expected a committed record");
+    await r.store.put({ ...inflight, state: "uploading" });
 
     r.server.script({ status: 200 });
     const revived = r.restart();
