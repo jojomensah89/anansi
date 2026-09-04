@@ -1,6 +1,6 @@
 import type { SyncStateRecord } from "./idb-outbox.ts";
 
-export type CaptureSource = "x" | "reddit" | "tiktok" | "web";
+export type CaptureSource = "x" | "reddit" | "tiktok" | "github" | "web";
 
 export interface SourceRunState extends SyncStateRecord {
 	source: CaptureSource;
@@ -324,6 +324,11 @@ export function isExpectedImportTab(
 			return (
 				(host === "reddit.com" || host.endsWith(".reddit.com")) &&
 				/^\/user\/[^/]+\/saved\/?$/.test(url.pathname)
+			);
+		}
+		if (source === "github") {
+			return (
+				host === "github.com" && url.pathname.replace(/\/+$/, "") === "/stars"
 			);
 		}
 		// TikTok has no favourites route to match: which profile counts depends

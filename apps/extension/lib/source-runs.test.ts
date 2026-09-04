@@ -144,6 +144,18 @@ describe("import-route selection", () => {
 			false,
 		);
 	});
+
+	test("selects only GitHub's signed-in stars route", () => {
+		expect(isExpectedImportTab("github", "https://github.com/stars")).toBe(
+			true,
+		);
+		expect(
+			isExpectedImportTab("github", "https://github.com/stars/lists/work"),
+		).toBe(false);
+		expect(
+			isExpectedImportTab("github", "https://github.com/anansi/anansi"),
+		).toBe(false);
+	});
 });
 
 describe("capture delivery ownership", () => {
@@ -152,9 +164,9 @@ describe("capture delivery ownership", () => {
 		expect(captureDeliveryMode(2, { x: false }, "x")).toBe("legacy");
 		expect(captureDeliveryMode(1, { x: true }, "x")).toBe("legacy");
 		expect(captureDeliveryMode(2, { reddit: true }, "x")).toBe("legacy");
+		expect(captureDeliveryMode(2, { github: true }, "github")).toBe("queue");
 	});
 });
-
 
 describe("held saves", () => {
 	test("holds an id until it is taken, and only once", async () => {
@@ -176,9 +188,7 @@ describe("held saves", () => {
 		await runs.recordPendingSave("x", "1900000000000000001");
 		await runs.recordPendingSave("x", "1900000000000000001");
 
-		expect(await runs.takePendingSaves("x")).toEqual([
-			"1900000000000000001",
-		]);
+		expect(await runs.takePendingSaves("x")).toEqual(["1900000000000000001"]);
 	});
 
 	test("survives a worker restart, because it is in the store", async () => {

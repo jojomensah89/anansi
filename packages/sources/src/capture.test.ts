@@ -63,6 +63,26 @@ describe("parseBookmarkCapture", () => {
 		}
 	});
 
+	test("accepts GitHub platform captures and rejects manual capture methods", () => {
+		const githubPage = {
+			schemaVersion: 1,
+			payloadType: "raw_page",
+			eventId: "event-github-page-1",
+			source: "github",
+			action: "snapshot",
+			observedAt: 1_788_390_000,
+			captureMethod: "platform_import",
+			runId: "run-github-1",
+			page: 1,
+			raw: { repositories: [] },
+		};
+
+		expect(parseBookmarkCapture(githubPage).ok).toBe(true);
+		expect(
+			parseBookmarkCapture({ ...githubPage, captureMethod: "toolbar" }).ok,
+		).toBe(false);
+	});
+
 	test("allows an unsave without item content", () => {
 		const { normalizedItem: _, ...withoutItem } = itemEvent;
 		const result = parseBookmarkCapture({ ...withoutItem, action: "unsave" });

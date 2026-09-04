@@ -2,7 +2,7 @@ import type { NormalizedItem } from "./item.ts";
 
 export const CAPTURE_SCHEMA_VERSION = 1 as const;
 
-export type CaptureSource = "x" | "reddit" | "tiktok" | "web";
+export type CaptureSource = "x" | "reddit" | "tiktok" | "github" | "web";
 export type CaptureMethod =
 	| "platform_event"
 	| "platform_import"
@@ -96,6 +96,7 @@ const CAPTURE_SOURCES = new Set<CaptureSource>([
 	"x",
 	"reddit",
 	"tiktok",
+	"github",
 	"web",
 ]);
 const PLATFORM_METHODS = new Set<CaptureMethod>([
