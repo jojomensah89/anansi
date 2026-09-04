@@ -306,10 +306,22 @@ const extensionConfigRoute: Route = {
       ingest: new URL("/api/ingest", url.origin).toString(),
       ingestProtocolVersion: 2,
       features: {
-        // New delivery remains off until each source has its durable queue and
-        // adapter enabled. A capture must never be sent by both paths.
+        /**
+          * One source at a time, and the flag moves the whole path.
+          *
+          * This is not a switch for unsaves — it decides who delivers
+          * everything for that source. With it on, X's timeline pages and its
+          * save/unsave events both go through the durable queue; with it off,
+          * pages take the legacy direct upload and item events are dropped
+          * because legacy has no way to express them. Exactly one path owns a
+          * capture, which is why this is staged per source rather than
+          * globally.
+          *
+          * x: enabled for acceptance testing. reddit and tiktok stay staged
+          * until each has been through the same pass.
+          */
         captureV2: {
-          x: false,
+          x: true,
           reddit: false,
           tiktok: false,
           // Web capture has no legacy path to conflict with — the durable
