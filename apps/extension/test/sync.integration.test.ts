@@ -398,6 +398,47 @@ describe("the server says no", () => {
 /* ------------------------------------------------------- pressure ------ */
 
 describe("under pressure", () => {
+	test("a GitHub page is delivered before the save event that depends on it", async () => {
+		const r = rig();
+		const rawPage: RawPageCapture = {
+			schemaVersion: 1,
+			payloadType: "raw_page",
+			eventId: "github-run:page:1",
+			source: "github",
+			action: "snapshot",
+			observedAt,
+			captureMethod: "platform_import",
+			runId: "github-run",
+			page: 1,
+			raw: {
+				schemaVersion: 1,
+				pageType: "github_stars",
+				repositories: [],
+			},
+		};
+		const star: ItemEventCapture = {
+			schemaVersion: 1,
+			payloadType: "item_event",
+			eventId: "github:save:vyom-26/bmx_racer:1788390000",
+			source: "github",
+			action: "save",
+			externalId: "vyom-26/bmx_racer",
+			canonicalUrl: "https://github.com/Vyom-26/BMX_Racer",
+			observedAt,
+			captureMethod: "platform_event",
+		};
+
+		await r.queue.enqueue(rawPage);
+		await r.queue.enqueue(star);
+		r.server.script({ status: 200 }, { status: 200 });
+		await r.queue.retry();
+
+		expect(r.server.seen.map((entry) => entry.eventId)).toEqual([
+			"github-run:page:1",
+			"github:save:vyom-26/bmx_racer:1788390000",
+		]);
+	});
+
   test("two sources drain together without either being dropped", async () => {
     const r = rig();
     r.server.script({ status: 200 }, { status: 200 }, { status: 200 }, { status: 200 });
