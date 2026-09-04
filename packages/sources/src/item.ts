@@ -18,7 +18,7 @@ export interface MediaRef {
 
 export interface NormalizedItem {
   source: Source;
-  /** Tweet id or repo node id. Unique with `source`; this is the upsert key. */
+  /** Provider id or normalized source identity. Unique with `source`; this is the upsert key. */
   externalId: string;
   url: string;
   kind: Kind;

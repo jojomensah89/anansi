@@ -1,90 +1,223 @@
-import type { NormalizedItem } from "../item.ts";
 import type { ParseContext } from "../context.ts";
+import type { NormalizedItem } from "../item.ts";
 
 type Any = Record<string, any>;
-
-/**
- * A starred repo becomes the same NormalizedItem a tweet does.
- *
- * This is the whole point of doing GitHub second: if one items table and one
- * normalized shape really are source-agnostic, then a new adapter is a parser
- * and nothing else changes. Nothing in core/, store/ or packages/db is
- * touched by this file existing.
- */
 
 /** README bodies are for retrieval, not archival — the head is enough. */
 export const README_CHARS = 2000;
 
 export interface StarredRawPage {
-  /** Exactly as GitHub returned it. */
-  starred: unknown[];
-  /** Fetched separately, keyed by full_name, so `starred` stays untouched. */
-  readmes?: Record<string, string>;
+	/** Exactly as GitHub returned it. */
+	starred: unknown[];
+	/** Fetched separately, keyed by full_name, so `starred` stays untouched. */
+	readmes?: Record<string, string>;
 }
+
+interface ExtensionStarsPage {
+	schemaVersion: 1;
+	pageType: "github_stars";
+	repositories: unknown[];
+	nextUrl?: string;
+}
+
+interface RepositoryLocation {
+	identity: string;
+	fullName: string;
+	owner: string;
+	name: string;
+	url: string;
+}
+
+const OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+const REPOSITORY = /^[A-Za-z0-9._-]{1,100}$/;
 
 function unix(iso: unknown): number | undefined {
-  if (typeof iso !== "string") return undefined;
-  const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+	if (typeof iso !== "string") return undefined;
+	const ms = Date.parse(iso);
+	return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
 }
 
-export function parseStarredPage(raw: unknown, ctx: ParseContext): NormalizedItem[] {
-  const page = raw as StarredRawPage | Any[] | null;
-  // Tolerate a bare array: an older raw file, or a hand-made fixture.
-  const entries = (Array.isArray(page) ? page : (page?.starred ?? [])) as Any[];
-  const readmes: Record<string, string> = Array.isArray(page) ? {} : (page?.readmes ?? {});
+function nonEmpty(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
-  const items: NormalizedItem[] = [];
+function httpUrl(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	try {
+		const normalized = value.trim();
+		const url = new URL(normalized);
+		return (url.protocol === "http:" || url.protocol === "https:") &&
+			!url.username &&
+			!url.password
+			? normalized
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
 
-  for (const entry of entries) {
-    // With the star+json accept header each entry is {starred_at, repo}.
-    // Without it, the entry IS the repo. Handle both.
-    const repo: Any | undefined = entry?.repo ?? entry;
-    if (!repo?.node_id && !repo?.id) continue;
+function location(
+	fullNameValue: unknown,
+	urlValue: unknown,
+): RepositoryLocation | null {
+	const fullName = nonEmpty(fullNameValue);
+	if (!fullName) return null;
+	const parts = fullName.split("/");
+	if (parts.length !== 2) return null;
+	const [owner, name] = parts;
+	if (!owner || !name || !OWNER.test(owner) || !REPOSITORY.test(name))
+		return null;
 
-    const fullName: string = repo.full_name ?? "";
-    const starredAt = unix(entry?.starred_at);
-    const description: string = repo.description ?? "";
-    const readme = readmes[fullName];
+	if (urlValue !== undefined) {
+		const supplied = httpUrl(urlValue);
+		if (!supplied) return null;
+		const url = new URL(supplied);
+		const suppliedParts = url.pathname.split("/").filter(Boolean);
+		if (
+			url.protocol !== "https:" ||
+			url.hostname.toLowerCase() !== "github.com" ||
+			url.search ||
+			url.hash ||
+			suppliedParts.length !== 2 ||
+			suppliedParts[0]?.toLowerCase() !== owner.toLowerCase() ||
+			suppliedParts[1]?.toLowerCase() !== name.toLowerCase()
+		) {
+			return null;
+		}
+	}
 
-    items.push({
-      source: "github",
-      externalId: String(repo.node_id ?? repo.id),
-      url: repo.html_url ?? `https://github.com/${fullName}`,
-      kind: "repo",
-      authorHandle: repo.owner?.login,
-      authorName: repo.owner?.login,
-      title: fullName || undefined,
-      // Description first so BM25 weights the one-line summary above the
-      // README's install instructions and badges.
-      body: [description, readme].filter(Boolean).join("\n\n").trim(),
-      lang: undefined,
-      postedAt: unix(repo.pushed_at) ?? unix(repo.created_at),
-      // The first exact saved-at in the library. X cannot produce one until
-      // the extension watches CreateBookmark.
-      savedAt: starredAt ?? ctx.importedAt,
-      savedAtIsExact: starredAt !== undefined,
-      saveOrder: starredAt,
-      metrics: {
-        stars: repo.stargazers_count ?? 0,
-        forks: repo.forks_count ?? 0,
-        openIssues: repo.open_issues_count ?? 0,
-        watchers: repo.subscribers_count ?? repo.watchers_count ?? 0,
-      },
-      media: [],
-      links: [repo.homepage, repo.html_url].filter(
-        (u): u is string => typeof u === "string" && u.length > 0,
-      ),
-      raw: {
-        language: repo.language ?? null,
-        topics: repo.topics ?? [],
-        archived: repo.archived ?? false,
-        starredAt: entry?.starred_at ?? null,
-        hasReadme: readme !== undefined,
-        repo,
-      },
-    });
-  }
+	return {
+		identity: `${owner.toLowerCase()}/${name.toLowerCase()}`,
+		fullName,
+		owner,
+		name,
+		url: `https://github.com/${fullName}`,
+	};
+}
 
-  return items;
+function metric(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? value
+		: undefined;
+}
+
+function visibility(
+	value: unknown,
+	isPrivate: unknown,
+): "public" | "private" | undefined {
+	if (value === "public" || value === "private") return value;
+	if (typeof isPrivate === "boolean") return isPrivate ? "private" : "public";
+	return undefined;
+}
+
+function extensionPage(value: unknown): value is ExtensionStarsPage {
+	const page = value as Partial<ExtensionStarsPage> | null;
+	return (
+		page?.schemaVersion === 1 &&
+		page.pageType === "github_stars" &&
+		Array.isArray(page.repositories)
+	);
+}
+
+/** Normalize API and extension captures to one stable owner/repository identity. */
+export function parseStarredPage(
+	raw: unknown,
+	ctx: ParseContext,
+): NormalizedItem[] {
+	const page = raw as StarredRawPage | Any[] | null;
+	const fromExtension = extensionPage(raw);
+	const entries = (
+		fromExtension
+			? raw.repositories
+			: Array.isArray(page)
+				? page
+				: Array.isArray(page?.starred)
+					? page.starred
+					: []
+	) as Any[];
+	const readmes: Record<string, string> =
+		fromExtension || Array.isArray(page) || !page?.readmes || Array.isArray(page.readmes)
+			? {}
+			: page.readmes;
+	const items: NormalizedItem[] = [];
+
+	for (const entry of entries) {
+		const repo: Any | undefined = fromExtension
+			? entry
+			: (entry?.repo ?? entry);
+		if (!repo || typeof repo !== "object") continue;
+		const repository = location(
+			fromExtension ? repo.fullName : repo.full_name,
+			fromExtension ? repo.url : repo.html_url,
+		);
+		if (!repository) continue;
+
+		if (
+			fromExtension &&
+			(typeof repo.identity !== "string" ||
+				repo.identity.toLowerCase() !== repository.identity)
+		) {
+			continue;
+		}
+
+		const description = nonEmpty(repo.description) ?? "";
+		const readme = readmes[repository.fullName]?.slice(0, README_CHARS);
+		const starredAtValue = fromExtension ? repo.starredAt : entry?.starred_at;
+		const starredAt = unix(starredAtValue);
+		const owner = fromExtension
+			? nonEmpty(repo.owner)
+			: nonEmpty(repo.owner?.login);
+		const ownerAvatar = httpUrl(
+			fromExtension ? repo.ownerAvatar : repo.owner?.avatar_url,
+		);
+		const language = nonEmpty(repo.language);
+		const repositoryVisibility = visibility(repo.visibility, repo.private);
+		const stars = metric(fromExtension ? repo.stars : repo.stargazers_count);
+		const forks = metric(fromExtension ? repo.forks : repo.forks_count);
+		const openIssues = metric(repo.open_issues_count);
+		const watchers = metric(repo.subscribers_count ?? repo.watchers_count);
+		const metrics = Object.fromEntries(
+			Object.entries({ stars, forks, openIssues, watchers }).filter(
+				(entry): entry is [string, number] => entry[1] !== undefined,
+			),
+		);
+		const homepage = fromExtension ? undefined : httpUrl(repo.homepage);
+
+		items.push({
+			source: "github",
+			externalId: repository.identity,
+			url: repository.url,
+			kind: "repo",
+			...(owner ? { authorHandle: owner, authorName: owner } : {}),
+			...(ownerAvatar ? { authorAvatar: ownerAvatar } : {}),
+			title: repository.fullName,
+			body: [description, readme].filter(Boolean).join("\n\n").trim(),
+			postedAt: fromExtension
+				? unix(repo.pushedAt ?? repo.updatedAt ?? repo.createdAt)
+				: (unix(repo.pushed_at) ?? unix(repo.created_at)),
+			savedAt: starredAt ?? ctx.importedAt,
+			savedAtIsExact: starredAt !== undefined,
+			...(starredAt !== undefined ? { saveOrder: starredAt } : {}),
+			metrics,
+			media: [],
+			links: [homepage, repository.url].filter(
+				(value): value is string => value !== undefined,
+			),
+			raw: {
+				...(language ? { language } : {}),
+				...(repositoryVisibility ? { visibility: repositoryVisibility } : {}),
+				...(fromExtension
+					? {}
+					: {
+							topics: Array.isArray(repo.topics) ? repo.topics : [],
+							archived: repo.archived === true,
+							repo,
+						}),
+				starredAt: typeof starredAtValue === "string" ? starredAtValue : null,
+				hasReadme: readme !== undefined,
+			},
+		});
+	}
+
+	return items;
 }
