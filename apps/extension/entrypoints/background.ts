@@ -323,15 +323,41 @@ async function deliverItemEvent(
   externalId: string,
   canonicalUrl?: string,
 ): Promise<void> {
-  const config = await loadConfig();
-  const delivery = captureDeliveryMode(
-    config?.ingestProtocolVersion,
-    config?.features?.captureV2,
-    source,
-  );
-  // Legacy delivery has no way to say "this one item changed"; the refresh it
-  // already schedules is the only thing it can do.
-  if (delivery === "legacy") return;
+  const mode = async (force: boolean) => {
+    const config = await loadConfig(force);
+    return captureDeliveryMode(
+      config?.ingestProtocolVersion,
+      config?.features?.captureV2,
+      source,
+    );
+  };
+
+  /**
+   * Ask again before giving up.
+   *
+   * The config is cached for an hour, and this is the one path where acting on
+   * an hour-old copy is silently wrong: enabling a source on the server did
+   * nothing until the cache expired, so an unsave made in that window
+   * disappeared with no record anywhere. A mutation happens at human pace, and
+   * the server is on this machine, so one revalidation costs nothing.
+   */
+  let delivery = await mode(false);
+  if (delivery === "legacy") delivery = await mode(true);
+
+  /**
+   * Legacy delivery has no way to say "this one item changed", so there is
+   * nothing to send — but saying nothing is what made this look like it
+   * worked. An unsave that cannot be delivered has to leave a mark.
+   */
+  if (delivery === "legacy") {
+    await patchStatus(source, {
+      message:
+        action === "unsave"
+          ? "unsave not recorded — this source is not enabled for precise capture on the server"
+          : "save state not recorded — this source is not enabled for precise capture on the server",
+    });
+    return;
+  }
 
   const observedAt = Math.floor(Date.now() / 1000);
   const capture: ItemEventCapture = {
@@ -777,6 +803,39 @@ async function startCapture(source: string, quiet = false, live = false): Promis
  * A reload puts the script in place. It is the user's own tab, on the site
  * they just asked to import from, in response to their click.
  */
+/**
+ * Arm the tabs that were already open.
+ *
+ * Reloading an extension does not re-inject content scripts into tabs that
+ * were already open, and observers were only ever armed by tabs.onUpdated. So
+ * after every reload the x.com tab you were actually using had no script in it
+ * at all — you could unsave something and nothing anywhere would notice, with
+ * no error, because there was no code there to fail.
+ *
+ * `talk` reloads a tab that has nobody home, which is disruptive; that is why
+ * this runs on install and update only, and not on the service worker's many
+ * ordinary wakes.
+ */
+async function armOpenTabs(): Promise<void> {
+  const config = await loadConfig(true);
+  if (!config) return;
+
+  for (const entry of config.sources) {
+    const host = entry.host.replace("www.", "");
+    const tabs = await browser.tabs.query({ url: `*://*.${host}/*` }).catch(() => []);
+    for (const tab of tabs) {
+      if (!tab.id) continue;
+      await talk(tab.id, {
+        anansi: "page-command",
+        messageVersion: MESSAGE_PROTOCOL_VERSION,
+        source: entry.source,
+        action: "configure",
+        config: entry,
+      }).catch(() => false);
+    }
+  }
+}
+
 async function talk(tabId: number, message: unknown): Promise<boolean> {
   try {
     await browser.tabs.sendMessage(tabId, message);
@@ -1107,6 +1166,7 @@ export default defineBackground(() => {
   });
   browser.runtime.onInstalled.addListener(() => {
     void wakeDurableQueue().then(processPendingRefreshes);
+    void armOpenTabs();
   });
 
   // Arm the observers on every matching tab as it loads, so real-time capture
