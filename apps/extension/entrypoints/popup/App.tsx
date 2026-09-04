@@ -95,7 +95,7 @@ const EMPTY_QUEUE: QueueStatus = {
 };
 
 /** What the server can offer. Anything missing from its config is switched off. */
-const KNOWN_SOURCES = ["x", "reddit", "tiktok"];
+const KNOWN_SOURCES = ["x", "reddit", "tiktok", "github"];
 
 const NAMES: Record<string, string> = {
   x: "Twitter / X",
@@ -254,7 +254,11 @@ export default function App() {
   const act = (s: SourceConfig, action: string) => {
     if (action === "pause") return void pause(s.source);
     if (action === "retry") return void retry(s.source).then(refresh);
-    if (action === "sign-in") return void browser.tabs.create({ url: `https://${s.host}` });
+    if (action === "sign-in") {
+      return void browser.tabs.create({
+        url: s.source === "github" ? (s.url ?? "https://github.com/stars") : `https://${s.host}`,
+      });
+    }
     return void start(s.source);
   };
 

@@ -20,6 +20,33 @@ const snapshot = (patch: Partial<SourceSnapshot> = {}): SourceSnapshot => ({
 });
 
 describe("describeSource", () => {
+	test("maps GitHub's durable states to its shared controls", () => {
+		expect(
+			describeSource(
+				snapshot({ source: "github", phase: "running", startedAt: NOW - 1_000 }),
+				NOW,
+			),
+		).toMatchObject({ state: "running", action: "pause", actionLabel: "Pause" });
+		expect(
+			describeSource(
+				snapshot({ source: "github", paused: true, held: 25 }),
+				NOW,
+			),
+		).toMatchObject({ state: "paused", action: "import", actionLabel: "Resume" });
+		expect(
+			describeSource(
+				snapshot({ source: "github", lastErrorCode: "not_signed_in" }),
+				NOW,
+			),
+		).toMatchObject({ state: "sign_in_required", action: "sign-in" });
+		expect(
+			describeSource(
+				snapshot({ source: "github", held: 25, lastRun: NOW - 60_000 }),
+				NOW,
+			),
+		).toMatchObject({ state: "synced", action: "import" });
+	});
+
 	test("a source the server switched off says so and offers nothing", () => {
 		const view = describeSource(snapshot({ enabled: false, held: 500 }), NOW);
 
