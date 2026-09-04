@@ -137,6 +137,15 @@ export function safeAsset(value: unknown, base: string): string | undefined {
   }
 }
 
+/** A short, stable digest. Identity only — nothing here is a secret. */
+async function shortDigest(value: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)]
+    .slice(0, 6)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /* ------------------------------------------------------ the capture --- */
 
 export interface CaptureOptions {
@@ -207,9 +216,21 @@ export async function toWebCapture(
     capture: {
       schemaVersion: 1,
       payloadType: "item_event",
-      // Derived, so pressing the button twice on one page in the same second
-      // is one event rather than two.
-      eventId: `web:${externalId}:${options.observedAt}`,
+      /**
+       * Identity, second, and what is actually being saved.
+       *
+       * The content digest is not decoration. Without it, highlighting one
+       * paragraph and then another within the same second produces two
+       * different captures under one id — which the queue rejects as a
+       * collision, and which the server would treat as a duplicate and
+       * silently drop. Two different selections are two saves.
+       *
+       * The second is still in there so that saving the same page again later
+       * is a new event rather than a no-op, while a double-click is one.
+       */
+      eventId: `web:${externalId}:${options.observedAt}:${await shortDigest(
+        JSON.stringify([item.body, text ?? "", title ?? ""]),
+      )}`,
       source: "web",
       action: "save",
       observedAt: options.observedAt,

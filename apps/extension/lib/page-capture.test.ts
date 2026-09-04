@@ -152,6 +152,25 @@ describe("toWebCapture", () => {
     expect(second.eventId).toBe(first.eventId);
   });
 
+  test("two selections in the same second are two saves, not a collision", async () => {
+    // Same page, same second, different highlight. Sharing an id here means
+    // the queue rejects the second as a collision, or the server treats it as
+    // a duplicate and drops it — either way the second selection is lost.
+    const first = await captured({ selection: "the first paragraph" });
+    const second = await captured({ selection: "a different paragraph" });
+
+    expect(second.eventId).not.toBe(first.eventId);
+    expect(second.externalId).toBe(first.externalId);
+    expect(second.canonicalUrl).toBe(first.canonicalUrl);
+  });
+
+  test("the same selection twice in one second is still one event", async () => {
+    const first = await captured({ selection: "the same paragraph" });
+    const second = await captured({ selection: "the same paragraph" });
+
+    expect(second.eventId).toBe(first.eventId);
+  });
+
   test("long fields are bounded rather than shipped whole", async () => {
     const capture = await captured({
       title: "t".repeat(5_000),

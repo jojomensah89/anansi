@@ -1,5 +1,4 @@
 import {
-  countItems,
   creators,
   findByAuthor,
   getItem,
@@ -30,6 +29,11 @@ import { ingestCapture } from "./ingest.ts";
  * Every one of them calls the same function the MCP tool calls. That is the
  * spec's rule, and it holds because both import from @anansi/db rather than
  * from each other.
+ *
+ * The routes are a table rather than a chain of ifs. That started as a
+ * complexity complaint and turned out to be the better shape anyway: matching
+ * happens once, in one place, so a handler cannot accidentally depend on which
+ * checks happened to run above it.
  */
 
 const json = (body: unknown, status = 200) =>
@@ -56,19 +60,37 @@ export interface ApiEnv {
   ingestToken?: string;
 }
 
-export async function handleApi(env: ApiEnv, request: Request): Promise<Response> {
-  const url = new URL(request.url);
-  const path = url.pathname.replace(/\/+$/, "");
-  const q = url.searchParams;
+/** Everything a handler is allowed to know, resolved once by the dispatcher. */
+interface Ctx {
+  env: ApiEnv;
+  request: Request;
+  url: URL;
+  q: URLSearchParams;
+  /** Captures from a pattern route, in order. */
+  params: string[];
+}
 
-  // Served from our own copy, never hot-linked: a deleted post still renders,
-  // and no request from the library tells the platform what you are reading.
-  const mediaMatch = path.match(/^\/api\/media\/(.+)$/);
-  if (request.method === "GET" && mediaMatch) {
-    return readMedia(env.media ?? {}, decodeURIComponent(mediaMatch[1]!));
-  }
+interface Route {
+  method: "GET" | "POST";
+  /** An exact path, or a pattern whose captures become `params`. */
+  path: string | RegExp;
+  handle: (ctx: Ctx) => Response | Promise<Response>;
+}
 
-  if (request.method === "GET" && path === "/api/items") {
+/* --------------------------------------------------------- handlers --- */
+
+// Served from our own copy, never hot-linked: a deleted post still renders,
+// and no request from the library tells the platform what you are reading.
+const mediaRoute: Route = {
+  method: "GET",
+  path: /^\/api\/media\/(.+)$/,
+  handle: ({ env, params }) => readMedia(env.media ?? {}, decodeURIComponent(params[0] ?? "")),
+};
+
+const itemsRoute: Route = {
+  method: "GET",
+  path: "/api/items",
+  handle: async ({ env, q }) => {
     try {
       return json(
         await listItems(env.db, {
@@ -90,153 +112,202 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
       if (error instanceof InvalidListCursorError) return json({ error: error.message }, 400);
       throw error;
     }
-  }
+  },
+};
 
-  const itemMatch = path.match(/^\/api\/items\/([\w-]+)$/);
-  if (request.method === "GET" && itemMatch) {
-    const item = await getItem(env.db, itemMatch[1]!);
-    return item ? json(item) : json({ error: "not found" }, 404);
-  }
+const itemRoute: Route = {
+  method: "GET",
+  path: /^\/api\/items\/([\w-]+)$/,
+  handle: async ({ env, params }) => {
+    const found = await getItem(env.db, params[0] ?? "");
+    return found ? json(found) : json({ error: "not found" }, 404);
+  },
+};
 
-  if (request.method === "GET" && path === "/api/search") {
+const searchRoute: Route = {
+  method: "GET",
+  path: "/api/search",
+  handle: async ({ env, q }) => {
     const query = q.get("q") ?? "";
     if (!query.trim()) return json({ error: "q is required" }, 400);
     return json({
       query,
       results: await searchItems(env.db, {
         query,
-        source: q.get("source") ?? undefined,
-        author: q.get("author") ?? undefined,
+        source: q.getAll("source"),
+        author: q.getAll("author"),
         limit: num(q.get("limit"), 20),
       }),
     });
-  }
+  },
+};
 
-  if (request.method === "GET" && path === "/api/recent") {
-    return json({ results: await recentSaves(env.db, q.get("source") ?? undefined, num(q.get("limit"), 20)) });
-  }
+const recentRoute: Route = {
+  method: "GET",
+  path: "/api/recent",
+  handle: async ({ env, q }) =>
+    json({
+      results: await recentSaves(env.db, q.get("source") ?? undefined, num(q.get("limit"), 20)),
+    }),
+};
 
-  if (request.method === "GET" && path === "/api/authors") {
+const authorsRoute: Route = {
+  method: "GET",
+  path: "/api/authors",
+  handle: async ({ env, q }) => {
     const handle = q.get("handle");
     if (!handle) return json({ error: "handle is required" }, 400);
     return json({ results: await findByAuthor(env.db, handle, num(q.get("limit"), 20)) });
-  }
+  },
+};
 
-  if (request.method === "GET" && path === "/api/tags") {
-    return json({ tags: await listTags(env.db) });
-  }
+const tagsRoute: Route = {
+  method: "GET",
+  path: "/api/tags",
+  handle: async ({ env }) => json({ tags: await listTags(env.db) }),
+};
 
-  /**
-   * Bulk actions, set-shaped on purpose: selecting forty cards and issuing
-   * forty round trips is how a bulk action becomes slow enough to abandon.
-   */
-  if (request.method === "POST" && path === "/api/items/archive") {
-    const body = (await request.json().catch(() => ({}))) as { ids?: string[]; archived?: boolean };
+/**
+ * Bulk actions, set-shaped on purpose: selecting forty cards and issuing forty
+ * round trips is how a bulk action becomes slow enough to abandon.
+ */
+const archiveRoute: Route = {
+  method: "POST",
+  path: "/api/items/archive",
+  handle: async ({ env, request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      ids?: string[];
+      archived?: boolean;
+    };
     if (!Array.isArray(body.ids)) return json({ error: "expected { ids: [...] }" }, 400);
     return json({ changed: await setArchived(env.db, body.ids, body.archived !== false) });
-  }
+  },
+};
 
-  if (request.method === "POST" && path === "/api/items/tag") {
+const tagRoute: Route = {
+  method: "POST",
+  path: "/api/items/tag",
+  handle: async ({ env, request }) => {
     const body = (await request.json().catch(() => ({}))) as { ids?: string[]; label?: string };
     if (!Array.isArray(body.ids) || !body.label) {
       return json({ error: "expected { ids: [...], label }" }, 400);
     }
     return json({ tagged: await tagItems(env.db, body.ids, body.label) });
-  }
+  },
+};
 
-  if (request.method === "GET" && path === "/api/sources") {
+const sourcesRoute: Route = {
+  method: "GET",
+  path: "/api/sources",
+  handle: async ({ env }) => {
     const [health, off] = await Promise.all([sourceHealth(env.db), disabledSources(env.db)]);
     return json({
       sources: health.map((s) => ({ ...s, enabled: !off.includes(s.source) })),
       disabled: off,
     });
-  }
+  },
+};
 
-  const toggleMatch = path.match(/^\/api\/sources\/([\w-]+)$/);
-  if (request.method === "POST" && toggleMatch) {
+const toggleSourceRoute: Route = {
+  method: "POST",
+  path: /^\/api\/sources\/([\w-]+)$/,
+  handle: async ({ env, request, params }) => {
     const body = (await request.json().catch(() => ({}))) as { enabled?: boolean };
-    await setSourceEnabled(env.db, toggleMatch[1]!, body.enabled !== false);
-    return json({ source: toggleMatch[1], enabled: body.enabled !== false });
-  }
+    const source = params[0] ?? "";
+    await setSourceEnabled(env.db, source, body.enabled !== false);
+    return json({ source, enabled: body.enabled !== false });
+  },
+};
 
-  if (request.method === "GET" && path === "/api/creators") {
-    return json({ creators: await creators(env.db, num(q.get("limit"), 100)) });
-  }
+const creatorsRoute: Route = {
+  method: "GET",
+  path: "/api/creators",
+  handle: async ({ env, q }) => json({ creators: await creators(env.db, num(q.get("limit"), 100)) }),
+};
 
-  if (request.method === "GET" && path === "/api/stats") {
-    return json(await libraryStats(env.db));
-  }
+const statsRoute: Route = {
+  method: "GET",
+  path: "/api/stats",
+  handle: async ({ env }) => json(await libraryStats(env.db)),
+};
 
-  /**
-   * The extension's instruction sheet.
-   *
-   * This is what makes shipping load-unpacked viable. The extension knows
-   * almost nothing: it fetches this, does what it says, and uploads the raw
-   * result. When X moves an endpoint you change this and the parser, and
-   * every install is fixed on its next run regardless of when it was
-   * installed. The extension's version stops mattering.
-   *
-   * It doubles as a kill switch: set enabled false and every install stops.
-   */
-  if (request.method === "GET" && path === "/api/extension/config") {
-    // A switched-off source is simply absent from the config, so the
-    // extension stops capturing it on its next run without an update.
+/**
+ * What the extension is told to do, per source.
+ *
+ * Data rather than code, because it is the thing most likely to change when a
+ * platform moves an endpoint — and changing it here fixes every install on its
+ * next run.
+ */
+const EXTENSION_SOURCES = [
+  {
+    // Paged: the extension can walk the whole history itself.
+    mode: "page",
+    source: "x",
+    host: "x.com",
+    operation: "Bookmarks",
+    variables: { count: 100, includePromotedContent: false },
+    cursorPrefix: "cursor-bottom",
+    entryPrefix: "tweet-",
+    pageLimit: 40,
+    // Watched for real-time capture; unlike the timeline query this operation
+    // IS in the main bundle.
+    watchOperations: ["CreateBookmark", "DeleteBookmark"],
+  },
+  {
+    // Also paged, but plain REST rather than GraphQL — no queryId to resolve,
+    // and a documented cursor. `me` resolves from the session.
+    mode: "page",
+    source: "reddit",
+    host: "reddit.com",
+    url: "https://www.reddit.com/user/me/saved.json?limit=100&raw_json=1",
+    cursorParam: "after",
+    cursorPath: "data.after",
+    pageLimit: 40,
+    watchUrls: ["/api/save", "/api/unsave"],
+  },
+  {
+    /**
+     * Observe-only, and the reason that mode exists.
+     *
+     * TikTok publishes no saved/favorites API, and its web requests are signed
+     * (X-Bogus, msToken) so they cannot be forged from outside the app. What
+     * can be done is watch what the app fetches while your own Favorites load
+     * — no forging, no signature work, and the payload is the same one the
+     * page renders from.
+     */
+    mode: "observe",
+    source: "tiktok",
+    host: "tiktok.com",
+    watchUrls: ["/api/user/collect/item_list"],
+  },
+];
+
+/**
+ * The extension's instruction sheet.
+ *
+ * This is what makes shipping load-unpacked viable. The extension knows almost
+ * nothing: it fetches this, does what it says, and uploads the raw result. When
+ * X moves an endpoint you change this and the parser, and every install is
+ * fixed on its next run regardless of when it was installed. The extension's
+ * version stops mattering.
+ *
+ * It doubles as a kill switch: set enabled false and every install stops.
+ */
+const extensionConfigRoute: Route = {
+  method: "GET",
+  path: "/api/extension/config",
+  handle: async ({ env, url }) => {
+    // A switched-off source is simply absent from the config, so the extension
+    // stops capturing it on its next run without an update.
     const off = new Set(await disabledSources(env.db));
-    const all = [
-        {
-          // Paged: the extension can walk the whole history itself.
-          mode: "page",
-          source: "x",
-          host: "x.com",
-          operation: "Bookmarks",
-          variables: { count: 100, includePromotedContent: false },
-          cursorPrefix: "cursor-bottom",
-          entryPrefix: "tweet-",
-          pageLimit: 40,
-          // Watched for real-time capture; unlike the timeline query this
-          // operation IS in the main bundle.
-          watchOperations: ["CreateBookmark", "DeleteBookmark"],
-        },
-        {
-          // Also paged, but plain REST rather than GraphQL — no queryId to
-          // resolve, and a documented cursor. `me` resolves from the session.
-          mode: "page",
-          source: "reddit",
-          host: "reddit.com",
-          url: "https://www.reddit.com/user/me/saved.json?limit=100&raw_json=1",
-          cursorParam: "after",
-          cursorPath: "data.after",
-          pageLimit: 40,
-          watchUrls: ["/api/save", "/api/unsave"],
-        },
-        {
-          /**
-           * Observe-only, and the reason that mode exists.
-           *
-           * TikTok publishes no saved/favorites API, and its web requests are
-           * signed (X-Bogus, msToken) so they cannot be forged from outside
-           * the app. What can be done is watch what the app fetches while you
-           * scroll your own Favorites — no forging, no signature work, and the
-           * payload is the same one the page renders from.
-           *
-           * The cost is honest and worth stating in the UI: there is no
-           * "import everything" for TikTok. Your history arrives as you scroll
-           * it once, and everything after that is captured live.
-           */
-          mode: "observe",
-          source: "tiktok",
-          host: "tiktok.com",
-          watchUrls: ["/api/user/collect/item_list"],
-        },
-    ];
     return json({
       version: 1,
       enabled: true,
       ingest: new URL("/api/ingest", url.origin).toString(),
       ingestProtocolVersion: 2,
       features: {
-        // New delivery remains off until each source has its durable queue
-        // and adapter enabled. A capture must never be sent by both paths.
+        // New delivery remains off until each source has its durable queue and
+        // adapter enabled. A capture must never be sent by both paths.
         captureV2: {
           x: false,
           reddit: false,
@@ -248,21 +319,25 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
         },
         chromeBookmarks: false,
       },
-      sources: all.filter((s) => !off.has(s.source)),
+      sources: EXTENSION_SOURCES.filter((s) => !off.has(s.source)),
     });
-  }
+  },
+};
 
-  /**
-   * The extension's endpoint. Bearer auth rather than open, because an open
-   * ingest on a public URL is an invitation to have someone else's library
-   * merged into yours.
-   */
-  if (request.method === "POST" && path === "/api/ingest") {
+/**
+ * The extension's endpoint. Bearer auth rather than open, because an open
+ * ingest on a public URL is an invitation to have someone else's library
+ * merged into yours.
+ */
+const ingestRoute: Route = {
+  method: "POST",
+  path: "/api/ingest",
+  handle: async ({ env, request }) => {
     if (!env.ingestToken) return json({ error: "ingest is not configured" }, 503);
     const auth = request.headers.get("authorization") ?? "";
     if (auth !== `Bearer ${env.ingestToken}`) return json({ error: "unauthorized" }, 401);
 
-    const ingest = await ingestCapture(env.db, request);
+    const result = await ingestCapture(env.db, request);
 
     /**
      * Thumbnails, without making the upload wait for them.
@@ -270,14 +345,55 @@ export async function handleApi(env: ApiEnv, request: Request): Promise<Response
      * Anything ingested this way used to keep a media row with a null
      * stored_key forever, because only the CLI ever fetched images — so a
      * TikTok save rendered as a caption with no video. Fire-and-forget and
-     * bounded: an ingest must not block on image fetches, and a burst of
-     * saves must not become an unbounded download.
+     * bounded: an ingest must not block on image fetches, and a burst of saves
+     * must not become an unbounded download.
      */
-    if (env.media && ingest.syncMedia) {
+    if (env.media && result.syncMedia) {
       void fetchPendingMedia(env.db, env.media).catch(() => {});
     }
 
-    return json(ingest.body, ingest.status);
+    return json(result.body, result.status);
+  },
+};
+
+/**
+ * Matched in order. `/api/items` has to be tried before `/api/items/:id` only
+ * because the second is a pattern; everything else is disjoint.
+ */
+const ROUTES: Route[] = [
+  mediaRoute,
+  itemsRoute,
+  itemRoute,
+  searchRoute,
+  recentRoute,
+  authorsRoute,
+  tagsRoute,
+  archiveRoute,
+  tagRoute,
+  sourcesRoute,
+  toggleSourceRoute,
+  creatorsRoute,
+  statsRoute,
+  extensionConfigRoute,
+  ingestRoute,
+];
+
+/** An exact path matches with no captures; a pattern yields its groups. */
+function paramsFor(pattern: string | RegExp, path: string): string[] | null {
+  if (typeof pattern === "string") return pattern === path ? [] : null;
+  const match = pattern.exec(path);
+  return match ? match.slice(1).map((value) => value ?? "") : null;
+}
+
+export async function handleApi(env: ApiEnv, request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/\/+$/, "");
+
+  for (const route of ROUTES) {
+    if (route.method !== request.method) continue;
+    const params = paramsFor(route.path, path);
+    if (!params) continue;
+    return await route.handle({ env, request, url, q: url.searchParams, params });
   }
 
   return json({ error: "not found" }, 404);

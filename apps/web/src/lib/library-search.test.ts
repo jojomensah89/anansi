@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { validateLibrarySearch } from "./index.tsx";
+import { validateLibrarySearch } from "./library-search.ts";
 
 /**
  * The URL is input from outside.

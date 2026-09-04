@@ -9,87 +9,13 @@ import { SelectBar } from "../components/selectbar.tsx";
 import { MosaicView, RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
 import { useMasonry } from "../components/masonry.tsx";
 import { api, type ItemRow } from "../lib/api.ts";
-
-/**
- * The filters live in the URL.
- *
- * Not for the address bar's sake: it is what lets anything else in the app
- * point at a view of the library. "View 1,274" on Sources and a source in the
- * rail are ordinary links, not buttons that reach into this component's state,
- * and a filtered library survives a reload and can be sent to someone.
- *
- * Values are comma-joined rather than JSON-encoded, because ?source=x,tiktok
- * is a URL a person can read and edit and %5B%22x%22%5D is not.
- */
-const VIEWS = ["grid", "row", "timeline", "mosaic"] as const;
-const MEDIA_VALUES = ["any", "image", "video", "none"];
-
-export interface LibrarySearch {
-  source?: string[];
-  author?: string[];
-  type?: string[];
-  tag?: string[];
-  media?: string;
-  archived?: boolean;
-  view?: ViewMode;
-}
-
-/**
- * Anything can be typed into a URL, so nothing here trusts its input: an
- * unknown view or media value is dropped rather than passed to the query.
- */
-function asList(value: unknown): string[] | undefined {
-  const parts = Array.isArray(value)
-    ? value
-    : typeof value === "string"
-      ? value.split(",")
-      : [];
-  const list = [
-    ...new Set(
-      parts
-        .filter((p): p is string => typeof p === "string")
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0 && p.length <= 120),
-    ),
-  ];
-  return list.length > 0 ? list : undefined;
-}
-
-const some = (value: string[] | undefined) =>
-  value && value.length > 0 ? value : undefined;
-
-export function validateLibrarySearch(search: Record<string, unknown>): LibrarySearch {
-  const media = typeof search.media === "string" ? search.media : undefined;
-  const view = VIEWS.find((v) => v === search.view);
-  return {
-    source: asList(search.source),
-    author: asList(search.author),
-    type: asList(search.type),
-    tag: asList(search.tag),
-    media: media && MEDIA_VALUES.includes(media) ? media : undefined,
-    archived: search.archived === true || search.archived === "true" ? true : undefined,
-    view,
-  };
-}
+import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
 
 export const Route = createFileRoute("/")({
   component: Library,
   validateSearch: validateLibrarySearch,
 });
 
-/** Absent rather than empty, so a cleared filter leaves no trace in the URL. */
-function toSearch(filters: Filters, view: ViewMode): LibrarySearch {
-  return {
-    source: some(filters.source),
-    author: some(filters.author),
-    type: some(filters.type),
-    tag: some(filters.tag),
-    media: filters.media,
-    archived: filters.archived ? true : undefined,
-    // The default view is the absence of the param, so a plain "/" stays plain.
-    view: view === "grid" ? undefined : view,
-  };
-}
 
 /**
  * The Library.
@@ -140,12 +66,12 @@ function Library() {
    * the back button is for.
    */
   const setFilters = useCallback(
-    (next: Filters) => void navigate({ search: toSearch(next, view), replace: true }),
+    (next: Filters) => void navigate({ search: toLibrarySearch(next, view), replace: true }),
     [navigate, view],
   );
 
   const setView = useCallback(
-    (next: ViewMode) => void navigate({ search: toSearch(filters, next), replace: true }),
+    (next: ViewMode) => void navigate({ search: toLibrarySearch(filters, next), replace: true }),
     [navigate, filters],
   );
 

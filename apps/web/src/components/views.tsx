@@ -9,7 +9,9 @@ import { SourceMark } from "./sourcemark.tsx";
  * text. Timeline: what was I saving in a given week. Mosaic: nothing but the
  * images, for finding the one you remember seeing rather than reading.
  */
-export type ViewMode = "grid" | "row" | "timeline" | "mosaic";
+// The view is part of the URL schema now, so its type lives with the schema.
+export type { ViewMode } from "../lib/library-search.ts";
+import type { ViewMode } from "../lib/library-search.ts";
 
 /* ---------------------------------------------------------------- Row --- */
 
