@@ -23,3 +23,13 @@ export type { StarredRawPage } from "./github/parse.ts";
 export { parseSavedListing, savedListingCursor } from "./reddit/parse.ts";
 export { parseItemList } from "./tiktok/parse.ts";
 export { canonicalizeWebUrl, webExternalId } from "./web/canonical-url.ts";
+export type {
+  ExtensionHeartbeat,
+  HeartbeatParseResult,
+  HeartbeatSourceState,
+  HeartbeatValidationError,
+} from "./extension-heartbeat.ts";
+export {
+  HEARTBEAT_SCHEMA_VERSION,
+  parseExtensionHeartbeat,
+} from "./extension-heartbeat.ts";
