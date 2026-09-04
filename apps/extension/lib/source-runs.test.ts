@@ -249,6 +249,22 @@ describe("held saves", () => {
 	});
 });
 
+describe("item event identity", () => {
+	test("allocates a collision-free sequence across worker restarts", async () => {
+		const { runs, store } = setup();
+		expect(await runs.nextItemEventSequence("github")).toBe(1);
+		expect(await runs.nextItemEventSequence("github")).toBe(2);
+
+		const revived = createSourceRuns({
+			store,
+			now: () => 20_000,
+			createId: () => "run-revived",
+		});
+		expect(await revived.nextItemEventSequence("github")).toBe(3);
+		expect(await revived.nextItemEventSequence("reddit")).toBe(1);
+	});
+});
+
 describe("resume cursor", () => {
 	test("a run begins where the last acknowledged page left off", async () => {
 		const { runs } = setup();

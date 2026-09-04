@@ -30,6 +30,8 @@ export interface SourceRunState extends SyncStateRecord {
 	initialImportCompletedAt?: number;
 	/** Whether this run is a history walk or a one-page live refresh. */
 	runMode?: "full" | "live";
+	/** Durable identity source for precise item events that may share a second. */
+	itemEventSequence: number;
 }
 
 export interface ActiveSourceRunState extends SourceRunState {
@@ -68,6 +70,7 @@ export interface SourceRuns {
 	noteError(source: CaptureSource, code: string): Promise<void>;
 	initialImportDue(source: CaptureSource): Promise<boolean>;
 	completeInitialImport(source: CaptureSource): Promise<void>;
+	nextItemEventSequence(source: CaptureSource): Promise<number>;
 	setOwnedTab(source: CaptureSource, tabId: number): Promise<void>;
 	takeOwnedTab(
 		source: CaptureSource,
@@ -88,6 +91,7 @@ function defaultState(source: CaptureSource, now: number): SourceRunState {
 		nextPage: 0,
 		pendingRefresh: false,
 		pendingSaves: [],
+		itemEventSequence: 0,
 		updatedAt: now,
 	};
 }
@@ -125,6 +129,12 @@ function asRunState(
 				: value.runMode === "full"
 					? "full"
 					: undefined,
+		itemEventSequence:
+			typeof value.itemEventSequence === "number" &&
+			Number.isSafeInteger(value.itemEventSequence) &&
+			value.itemEventSequence >= 0
+				? value.itemEventSequence
+				: 0,
 	};
 }
 
@@ -333,6 +343,18 @@ export function createSourceRuns(
 				if (current.pendingSaves.length === 0) return [];
 				await write({ ...current, pendingSaves: [], updatedAt: now() });
 				return current.pendingSaves;
+			});
+		},
+
+		nextItemEventSequence(source) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				if (current.itemEventSequence >= Number.MAX_SAFE_INTEGER) {
+					throw new Error("item event sequence exhausted");
+				}
+				const itemEventSequence = current.itemEventSequence + 1;
+				await write({ ...current, itemEventSequence, updatedAt: now() });
+				return itemEventSequence;
 			});
 		},
 

@@ -427,10 +427,14 @@ async function deliverItemEvent(
   }
 
   const observedAt = Math.floor(Date.now() / 1000);
+  const identity =
+    source === "github"
+      ? `sequence:${await persistentState().runs.nextItemEventSequence(source)}`
+      : String(observedAt);
   const capture: ItemEventCapture = {
     schemaVersion: 1,
     payloadType: "item_event",
-    eventId: `${source}:${action}:${externalId}:${observedAt}`,
+    eventId: `${source}:${action}:${externalId}:${identity}`,
     source,
     action,
     observedAt,

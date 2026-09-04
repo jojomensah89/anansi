@@ -21,6 +21,7 @@ export interface SyncStateRecord {
 	lastErrorCode?: string;
 	initialImportCompletedAt?: number;
 	runMode?: "full" | "live";
+	itemEventSequence?: number;
 }
 
 export interface IndexedDbOutbox extends OutboxStore {
