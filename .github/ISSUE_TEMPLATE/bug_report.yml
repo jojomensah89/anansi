@@ -1,0 +1,48 @@
+name: Bug report
+description: Report something broken in capture, search, or MCP
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Never paste tokens, cookies, or private saved content.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Extension capture (X / Reddit / GitHub / TikTok / Web)
+        - Web library / search
+        - MCP server
+        - CLI / database
+        - Docs / README
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Bun version + commit SHA
+      placeholder: "bun 1.3.x, commit abc123"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ... 2. ... 3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      placeholder: "Expected ... / Got ..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs / screenshots
+      description: Remove INGEST_TOKEN, MCP_TOKEN, cookies, and private item text.
+      render: text

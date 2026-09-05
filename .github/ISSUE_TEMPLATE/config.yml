@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/jojomensah89/anansi/security/advisories/new
+    about: Do not open public issues for vulnerabilities. Report privately here.
+  - name: Contributing guide
+    url: https://github.com/jojomensah89/anansi/blob/main/CONTRIBUTING.md
+    about: Setup, checks, and privacy rules before your first PR.

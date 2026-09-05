@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a new source, tool, or library improvement
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      placeholder: "What can't you save / find / ask today?"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      placeholder: "What should happen instead?"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: "Workarounds, other tools, why they fall short"
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Likely scope
+      options:
+        - New capture source
+        - Search / library UX
+        - MCP tools
+        - CLI / database
+        - Docs / DX

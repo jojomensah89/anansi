@@ -13,6 +13,16 @@ apps/web/.env.local
 # turbo build cache
 .turbo/
 
+# build outputs
+dist/
+apps/extension/.output/
+apps/extension/.wxt/
+*.tsbuildinfo
+
+# test / coverage
+coverage/
+.nyc_output/
+
 # seeded design canvas: 2.5MB of editor payload, regenerated from the
 # .dc.html working files beside it
 design/*.html
