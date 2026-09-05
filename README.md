@@ -242,3 +242,7 @@ PRs welcome — small and focused wins. Read [CONTRIBUTING.md](./CONTRIBUTING.md
 ## 📄 License
 
 MIT © 2026 Jojo Mensah — see [LICENSE](./LICENSE).
+
+---
+
+Built by [Jojo Mensah](https://x.com/jojomensah89) · Follow along for demos and changelogs · [☕ Buy me a coffee](https://buymeacoffee.com/jojomensahh)
