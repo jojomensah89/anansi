@@ -7,11 +7,8 @@
 Anansi captures the things you save online — bookmarks, saved posts, GitHub stars, web pages — into one searchable library your coding agent can query over MCP. Your browser supplies the platform session; your Cloudflare account (or a local SQLite file for dev) stores the capture.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black?logo=bun)](https://bun.sh)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](./package.json)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple)](https://modelcontextprotocol.io)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Free--tier-orange?logo=cloudflare)](https://github.com/jojomensah89/anansi)
-[![Local SQLite dev](https://img.shields.io/badge/Local--dev-SQLite-green)](./README.md)
 [![Repo](https://img.shields.io/badge/GitHub-jojomensah89%2Fanansi-black?logo=github)](https://github.com/jojomensah89/anansi)
 [![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jojomensahh)
 <a href="https://x.com/jojomensah89"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs" /><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" height="20" align="middle" /></picture></a>
