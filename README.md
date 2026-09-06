@@ -219,6 +219,10 @@ bun run anansi serve --mcp
 
 ## 🛠️ Development
 
+[![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black?logo=bun)](https://bun.sh)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](./package.json)
+[![Local SQLite dev](https://img.shields.io/badge/Local--dev-SQLite-green)](./README.md)
+
 ```bash
 bun test
 bun run typecheck
