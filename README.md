@@ -52,41 +52,39 @@ Anansi fixes that:
 
 > GitHub capture is extension-only. It reads the signed-in GitHub stars pages in your browser, includes repositories visible to that account — including visible private repositories — and needs no GitHub OAuth or personal access token.
 
-Sync can be off / hourly / every 2h / every 6h / daily. GitHub and Reddit import via background session requests without opening tabs. X and TikTok use signed-in page scripts and may open an inactive tab; Anansi closes only tabs it created. If the session is missing, the popup asks you to sign in — use the explicit **Sign in** button, then retry. Network and rate-limit failures keep the resume cursor.
+Live saves are delivered immediately. Anansi also performs one daily incremental catch-up for sources that support history import, covering changes made while Chrome or the extension was inactive. GitHub and Reddit import via background session requests without opening tabs. X may use a signed-in inactive tab; TikTok remains observation-based. Anansi closes only tabs it created. If a provider session is missing, the popup asks you to sign in — use the explicit **Sign in** button, then retry. Network and rate-limit failures keep the resume cursor.
 
 ## 🚀 Quickstart
 
-Two paths, same library: run it locally in 60 seconds, or host it in your own Cloudflare account.
+Two paths, same library: run it locally or host it in your own Cloudflare account.
 
-### A. Local — 60 seconds
+### A. Local
 
 Requirements: [Bun](https://bun.sh/) 1.3+, Chromium-based browser. SQLite DB is created automatically.
 
 ```bash
 bun install
 cp .env.example .env
-# Edit .env — set INGEST_TOKEN and MCP_TOKEN
-bun run apps/web/scripts/serve-local.ts
+# Edit .env and set three independent server secrets:
+#   LIBRARY_TOKEN, INGEST_TOKEN, MCP_TOKEN
+# Then mirror INGEST_TOKEN into ANANSI_EXTENSION_INGEST_TOKEN.
+# Keep ANANSI_EXTENSION_ORIGIN=http://127.0.0.1:3001
+bun run dev:local
 ```
 
-Server listens on `http://127.0.0.1:8788`, creates `data/anansi.db` on first start.
+Open `http://127.0.0.1:3001`. This is the one public local origin: the library is at `/`, JSON endpoints are under `/api`, and MCP is at `/mcp`. The launcher creates `data/anansi.db` on first start and prints the local library sign-in token.
 
-Web UI (second terminal):
+An internal Bun process listens on port `8788` because Vite's Node runtime cannot load Bun's SQLite implementation. Vite proxies `/api` and `/mcp` to it. Do not enter or configure port `8788` anywhere.
 
-```bash
-# bash:
-export VITE_API_BASE="http://127.0.0.1:8788"
-bun run dev:web
-# PowerShell: $env:VITE_API_BASE = "http://127.0.0.1:8788"; bun run dev:web
-```
-
-Extension:
+Build the private extension in a second terminal:
 
 ```bash
 bun run --cwd apps/extension build
 ```
 
-`chrome://extensions` → Developer mode → **Load unpacked** → `apps/extension/.output/chrome-mv3`. In the Anansi popup enter Server `http://127.0.0.1:8788` + your `INGEST_TOKEN` → **Save**.
+Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `apps/extension/.output/chrome-mv3`. The extension connects immediately; there is no server or token field in the popup.
+
+> The configured build contains your ingest credential. This is appropriate for your private, load-unpacked extension, but anyone with the artifact can extract it. Never upload this configured build to a public extension store or share it.
 
 GitHub first import: sign in to GitHub in the same browser profile → popup → **Import** beside GitHub. It walks your stars pages in the worker (no tabs open), persists the pagination cursor, and resumes after interruptions. Unstarring hides from current-star view without deleting history; re-starring restores it.
 
@@ -110,7 +108,7 @@ bunx alchemy login --configure   # run from packages/infra
 # over a superuser token.
 ```
 
-App secrets (same `.env` keys as local):
+Server secrets (same `.env` keys as local):
 
 ```bash
 cp .env.example .env
@@ -119,11 +117,21 @@ cp .env.example .env
 bun run deploy   # turbo → @anansi/infra → alchemy deploy
 ```
 
-Then point the extension popup at your `https://<worker>.workers.dev` + `INGEST_TOKEN` instead of `127.0.0.1:8788`.
+After deployment returns `https://<worker>.workers.dev`:
+
+1. Set `ANANSI_EXTENSION_ORIGIN=https://<worker>.workers.dev` in your local `.env`.
+2. Set `ANANSI_EXTENSION_INGEST_TOKEN` to the same value deployed as `INGEST_TOKEN`.
+3. Run `bun run --cwd apps/extension build`.
+4. Load `apps/extension/.output/chrome-mv3` from `chrome://extensions`.
+5. Open the popup and confirm all sources appear and the library is connected.
+6. Use **Open library**, sign in with `LIBRARY_TOKEN`, and verify one page capture.
+7. Sign into each provider in the same Chrome profile before its first import.
+
+The Worker is the only public origin: the library is `/`, the API is `/api/*`, and MCP is `/mcp`. There are no deployed ports to configure.
 
 ## 🧠 Ask it from your agent (MCP)
 
-Streamable HTTP MCP server at `http://127.0.0.1:8788/mcp` locally (or `https://<worker>.workers.dev/mcp` when hosted). Bearer auth with `MCP_TOKEN` when configured. The web `/mcp` setup page uses a literal `<YOUR_MCP_TOKEN>` placeholder and never prints the secret.
+Streamable HTTP MCP server at `http://127.0.0.1:3001/mcp` locally (or `https://<worker>.workers.dev/mcp` when hosted). Bearer auth with `MCP_TOKEN` when configured. The web `/mcp` setup page uses a literal `<YOUR_MCP_TOKEN>` placeholder and never prints the secret.
 
 | Tool | Purpose |
 | --- | --- |
@@ -135,14 +143,14 @@ Streamable HTTP MCP server at `http://127.0.0.1:8788/mcp` locally (or `https://<
 Claude Code:
 
 ```bash
-claude mcp add --transport http anansi http://127.0.0.1:8788/mcp --header "Authorization: Bearer <YOUR_MCP_TOKEN>"
+claude mcp add --transport http anansi http://127.0.0.1:3001/mcp --header "Authorization: Bearer <YOUR_MCP_TOKEN>"
 ```
 
 Codex / env-backed clients:
 
 ```toml
 [mcp_servers.anansi]
-url = "http://127.0.0.1:8788/mcp"
+url = "http://127.0.0.1:3001/mcp"
 bearer_token_env_var = "MCP_TOKEN"
 ```
 
@@ -245,4 +253,4 @@ MIT © 2026 Jojo Mensah — see [LICENSE](./LICENSE).
 
 ---
 
-Built by [Jojo Mensah](https://x.com/jojomensah89) <a href="https://x.com/jojomensah89"><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" /></a> · Follow along for demos and changelogs · [☕ Buy me a coffee](https://buymeacoffee.com/jojomensahh)
+Built by [Jojo Mensah](https://x.com/jojomensah89) <a href="https://x.com/jojomensah89"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs" /><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" /></picture></a> · Follow along for demos and changelogs · [☕ Buy me a coffee](https://buymeacoffee.com/jojomensahh)
