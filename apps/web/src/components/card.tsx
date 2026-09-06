@@ -1,7 +1,8 @@
-import { compact, mediaUrl, shortDate, type CardMedia, type ItemRow } from "../lib/api.ts";
+import { mediaUrl, shortDate, type CardMedia, type ItemRow } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
 import { GithubRepoCard } from "./github-repo-card.tsx";
 import { SourceMark } from "./sourcemark.tsx";
+import { TagPopover } from "./tag-popover.tsx";
 
 /**
  * One grid card.
@@ -24,20 +25,42 @@ export function Card({
   selected,
   onOpen,
   onToggle,
+  onChanged,
 }: {
   item: ItemRow;
   selectable?: boolean;
   selected?: boolean;
-  onOpen?: (item: ItemRow) => void;
+  onOpen?: (item: ItemRow, focusNote?: boolean) => void;
   onToggle?: (item: ItemRow) => void;
+  onChanged?: () => void;
 }) {
   const isRepo = item.source === "github";
   const media = item.media ?? [];
   const quoted = item.quoted;
+  const quotedText = typeof quoted?.text === "string" ? quoted.text : "";
+  const quotedMedia = quoted?.media ?? [];
+  const tags = item.tags ?? [];
 
-  return (
-    <div
-      onClick={() => (selectable ? onToggle?.(item) : onOpen?.(item))}
+  const changed = () => {
+		onChanged?.();
+	};
+
+	return (
+		<div style={{ position: "relative" }}>
+		<div
+		  className="anansi-card"
+		  role="button"
+		  tabIndex={0}
+		  aria-label={`${selectable ? (selected ? "Deselect" : "Select") : "Open"} ${item.title ?? item.authorName ?? item.author ?? "saved item"}`}
+		  aria-pressed={selectable ? !!selected : undefined}
+		  onClick={() => (selectable ? onToggle?.(item) : onOpen?.(item))}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          if (selectable) onToggle?.(item);
+          else onOpen?.(item);
+        }
+      }}
       style={{
         background: "var(--card)",
         border: `1px solid ${selected ? "var(--accent)" : "var(--line)"}`,
@@ -79,7 +102,9 @@ export function Card({
       )}
 
       {isRepo ? (
-        <GithubRepoCard item={item} />
+		<>
+			<GithubRepoCard item={item} footer={<CardOrganization item={item} tags={tags} onChanged={changed} />} />
+		</>
       ) : (
         <>
           {/*
@@ -91,7 +116,7 @@ export function Card({
           */}
           <div style={{ padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} size={22} />
+              <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} size={42} />
               <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 {item.authorName && item.authorName !== item.author && (
                   <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -121,10 +146,10 @@ export function Card({
             )}
           </div>
 
-          {/* Full bleed, which is why it is not inside the padded block above. */}
+          {/* Media gets its own gutter so the image never touches the card edge. */}
           {media.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <MediaGrid media={media} dim={selectable && !selected} />
+            <div style={{ margin: "10px 12px 0" }}>
+              <MediaGrid media={media} dim={selectable && !selected} inset />
             </div>
           )}
 
@@ -148,28 +173,29 @@ export function Card({
                     @{quoted.handle ?? "unknown"}
                   </span>
                 </div>
-                {quoted.text.trim() && (
+                {quotedText.trim() && (
                   <div
                     style={{
                       fontSize: 12,
                       lineHeight: 1.5,
-                      color: "var(--muted)",
+                      color: "var(--text-dim)",
                       display: "-webkit-box",
                       WebkitLineClamp: 3,
                       WebkitBoxOrient: "vertical",
                       overflow: "hidden",
                     }}
                   >
-                    {quoted.text}
+                    {quotedText}
                   </div>
                 )}
-                {quoted.media.length > 0 && <MediaGrid media={quoted.media} inset />}
+                {quotedMedia.length > 0 && <MediaGrid media={quotedMedia} inset />}
               </div>
             )}
 
             {/* The platform mark sits here, not in the top-right corner where a
                 close button lives — up there it reads as "dismiss this". */}
             <div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)" }}>
+              <CardOrganization item={item} tags={tags} onChanged={changed} />
               {/*
                 Stated, not implied by absence. The item is still here because a
                 library keeps what you saved; without a word saying why it looks
@@ -179,8 +205,8 @@ export function Card({
                 <span
                   title={
                     item.removedFromSourceAt
-                      ? `No longer saved on the platform, since ${new Date(item.removedFromSourceAt * 1000).toLocaleDateString()}`
-                      : "No longer saved on the platform"
+                      ? `Removed at source on ${new Date(item.removedFromSourceAt * 1000).toLocaleDateString()}`
+                      : "Removed at source"
                   }
                   style={{
                     display: "flex",
@@ -195,22 +221,44 @@ export function Card({
                   <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                     <path d="M6 6l12 12M18 6 6 18" />
                   </svg>
-                  unsaved
+                  Removed at source
                 </span>
               )}
-              {item.metrics?.likes ? <span>{compact(item.metrics.likes)} ♥</span> : null}
+              {item.favorite && <span title="Favorite" aria-label="Favorite" style={{ color: "var(--accent)" }}>★</span>}
               <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
                 {shortDate(item.postedAt)}
                 <span style={{ color: "var(--fainter)", display: "flex" }}>
-                  <SourceMark source={item.source} size={12} />
+                  <SourceMark source={item.source} size={20} />
                 </span>
               </span>
             </div>
           </div>
         </>
       )}
-    </div>
-  );
+		</div>
+		{item.hasNote && !selectable && (
+			<button
+				type="button"
+				onClick={() => onOpen?.(item, true)}
+				aria-label="Open private note"
+				title="Has private note"
+				style={{ position: "absolute", top: 8, right: 8, zIndex: 4, width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--edge)", borderRadius: 5, background: "#0b0e11b3", color: "var(--faint)", cursor: "pointer" }}
+			>
+				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 4.5h14v15H5z" /><path d="M8 8h8M8 12h6" /></svg>
+			</button>
+		)}
+		</div>
+	);
+}
+
+function CardOrganization({ item, tags, onChanged }: { item: ItemRow; tags: NonNullable<ItemRow["tags"]>; onChanged: () => void }) {
+	return (
+		<div className="anansi-card-org" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", flexShrink: 0 }} onClick={(event) => event.stopPropagation()}>
+			{tags.slice(0, 2).map((tag) => <span key={tag.label} className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, minHeight: 21, padding: "0 7px", borderRadius: 5, background: `${tag.color || "#6b7280"}22`, color: "var(--text-dim)", fontSize: 10 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: tag.color || "#6b7280" }} />{tag.label}</span>)}
+			{tags.length > 2 && <TagPopover itemId={item.id} current={tags.map((tag) => tag.label)} onChanged={onChanged} mode="overflow" overflowCount={tags.length - 2} />}
+			<TagPopover itemId={item.id} current={tags.map((tag) => tag.label)} onChanged={onChanged} />
+		</div>
+	);
 }
 
 /**

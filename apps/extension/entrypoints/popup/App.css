@@ -19,6 +19,26 @@
   border-radius: 5px;
 }
 
+.anansi-popup button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.anansi-spinner {
+  width: 11px;
+  height: 11px;
+  margin-right: 6px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  vertical-align: -1px;
+  animation: anansi-spin 0.75s linear infinite;
+}
+
+@keyframes anansi-spin {
+  to { transform: rotate(360deg); }
+}
+
 .anansi-sources {
   /* Room for roughly four rows before this scrolls on its own. */
   max-height: 260px;

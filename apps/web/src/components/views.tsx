@@ -1,4 +1,4 @@
-import { compact, mediaUrl, shortDate, type ItemRow } from "../lib/api.ts";
+import { mediaUrl, shortDate, type ItemRow } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 
@@ -89,10 +89,9 @@ export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemR
             </span>
 
             <span className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)", flexShrink: 0, paddingTop: 2 }}>
-              {item.metrics?.likes ? <span>{compact(item.metrics.likes)} ♥</span> : null}
               <span>{shortDate(item.postedAt)}</span>
               <span style={{ color: "var(--fainter)", display: "flex" }}>
-                <SourceMark source={item.source} size={12} />
+                <SourceMark source={item.source} size={20} />
               </span>
             </span>
           </button>

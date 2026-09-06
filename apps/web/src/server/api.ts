@@ -13,12 +13,17 @@ import {
 	sourceHealth,
 	recentSaves,
 	recordExtensionHeartbeat,
-	searchItems,
-	InvalidListCursorError,
+	searchItemsPage,
+	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
+	InvalidListCursorError, InvalidSearchCursorError,
+  getAiSettings, setAiSettings, aiProgress,
 } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
+import { authorizeLibrary, sessionRoute, sameSecret, type LibraryAuthEnv } from "./library-auth.ts";
 import { parseExtensionHeartbeat } from "@anansi/sources";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
+import type { AiBinding, VectorizeBinding } from "./ai.ts";
+import { embed, reciprocalRankFusion } from "./ai.ts";
 import { ingestCapture } from "./ingest.ts";
 import {
 	isToggleableSource,
@@ -60,9 +65,12 @@ const num = (value: string | null, fallback?: number) => {
 	return Number.isFinite(n) ? n : fallback;
 };
 
-export interface ApiEnv {
+export interface ApiEnv extends LibraryAuthEnv {
+	waitUntil?: (promise: Promise<unknown>) => void;
 	db: AnansiDb;
 	media?: MediaSource;
+	ai?: AiBinding;
+	vectorize?: VectorizeBinding;
 	/** Shared secret for /api/ingest. Absent means ingest is closed. */
 	ingestToken?: string;
 }
@@ -78,7 +86,7 @@ interface Ctx {
 }
 
 interface Route {
-	method: "GET" | "POST";
+	method: "GET" | "POST" | "PATCH" | "DELETE";
 	/** An exact path, or a pattern whose captures become `params`. */
 	path: string | RegExp;
 	handle: (ctx: Ctx) => Response | Promise<Response>;
@@ -88,7 +96,7 @@ function authorizeExtension(env: ApiEnv, request: Request): Response | null {
 	if (!env.ingestToken)
 		return json({ error: "extension access is not configured" }, 503);
 	const auth = request.headers.get("authorization") ?? "";
-	return auth === `Bearer ${env.ingestToken}`
+	return sameSecret(auth, `Bearer ${env.ingestToken}`)
 		? null
 		: json({ error: "unauthorized" }, 401);
 }
@@ -121,6 +129,7 @@ const itemsRoute: Route = {
 					contentType: q.getAll("type"),
 					tag: q.getAll("tag"),
 					archived: q.get("archived") === "1",
+					favorite: q.get("favorite") === "1" ? true : undefined,
 					removed: (["exclude", "only"] as const).find(
 						(v) => v === q.get("removed"),
 					),
@@ -129,7 +138,7 @@ const itemsRoute: Route = {
 				}),
 			);
 		} catch (error) {
-			if (error instanceof InvalidListCursorError)
+			if (error instanceof InvalidListCursorError || error instanceof InvalidSearchCursorError)
 				return json({ error: error.message }, 400);
 			throw error;
 		}
@@ -151,15 +160,39 @@ const searchRoute: Route = {
 	handle: async ({ env, q }) => {
 		const query = q.get("q") ?? "";
 		if (!query.trim()) return json({ error: "q is required" }, 400);
-		return json({
-			query,
-			results: await searchItems(env.db, {
-				query,
-				source: q.getAll("source"),
-				author: q.getAll("author"),
-				limit: num(q.get("limit"), 20),
-			}),
-		});
+        try {
+          const page = await searchItemsPage(env.db, {
+            query, source: q.getAll("source"), author: q.getAll("author"), tag: q.getAll("tag"),
+            media: q.get("media") ?? undefined, contentType: q.getAll("type"),
+            archived: q.get("archived") === "1", favorite: q.get("favorite") === "1" ? true : undefined, removed: (["exclude", "only"] as const).find(v => v === q.get("removed")),
+            order: q.get("order") === "posted" ? "posted" : "saved", cursor: q.get("cursor") ?? undefined,
+            limit: num(q.get("limit"), 50),
+          });
+          let items = page.items;
+          // Vectorize is a ranking aid only: D1's filtered BM25 rows remain
+          // authoritative, so an unavailable binding simply preserves the
+          // normal keyword result and never breaks MCP or library search.
+          if (env.ai && env.vectorize) {
+            try {
+              const aiSettings = await getAiSettings(env.db);
+              if (aiSettings.semanticSearchEnabled) {
+                const vector = await embed(env.ai, aiSettings.embeddingModel, query);
+                const nearest = await env.vectorize.query(vector, { topK: Math.min((num(q.get("limit"), 50) ?? 50) * 2, 100), returnMetadata: false });
+                const lexical = items.map((item, index) => ({ id: item.id, score: 1 / (60 + index + 1) }));
+                const semantic = (nearest.matches ?? []).map((match) => ({ id: match.id, score: match.score }));
+                const order = reciprocalRankFusion([lexical, semantic]);
+                const rank = new Map(order.map((entry, index) => [entry.id, index]));
+                items = [...items].sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id));
+              }
+            } catch {
+              // Degraded semantic search is intentionally silent to callers.
+            }
+          }
+          return json({ query, ...page, items, results: items });
+        } catch (error) {
+          if (error instanceof InvalidListCursorError || error instanceof InvalidSearchCursorError) return json({ error: error.message }, 400);
+          throw error;
+        }
 	},
 };
 
@@ -281,10 +314,34 @@ const creatorsRoute: Route = {
 		json({ creators: await creators(env.db, num(q.get("limit"), 100)) }),
 };
 
+const extensionStatsRoute: Route = {
+  method: "GET", path: "/api/extension/stats",
+  handle: async ({env}) => { const stats = await libraryStats(env.db); return json({items:stats.items,bySource:stats.bySource}); },
+};
+
 const statsRoute: Route = {
 	method: "GET",
 	path: "/api/stats",
-	handle: async ({ env }) => json(await libraryStats(env.db)),
+	handle: async ({ env }) => {
+    if (env.media && env.waitUntil) env.waitUntil(fetchPendingMedia(env.db, env.media));
+    return json(await libraryStats(env.db));
+  },
+};
+
+const aiSettingsRoute: Route = {
+  method: "GET",
+  path: "/api/ai",
+  handle: async ({ env }) => json({ settings: await getAiSettings(env.db), progress: await aiProgress(env.db), available: Boolean(env.ai && env.vectorize) }),
+};
+
+const aiSettingsUpdateRoute: Route = {
+  method: "PATCH",
+  path: "/api/ai",
+  handle: async ({ env, request }) => {
+    const body = await request.json().catch(() => null) as { semanticSearchEnabled?: unknown; autoTaggingEnabled?: unknown } | null;
+    if (!body || (body.semanticSearchEnabled !== undefined && typeof body.semanticSearchEnabled !== "boolean") || (body.autoTaggingEnabled !== undefined && typeof body.autoTaggingEnabled !== "boolean")) return json({ error: "invalid AI settings" }, 400);
+    return json({ settings: await setAiSettings(env.db, { semanticSearchEnabled: body.semanticSearchEnabled as boolean | undefined, autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined }), progress: await aiProgress(env.db) });
+  },
 };
 
 /**
@@ -320,21 +377,6 @@ const EXTENSION_SOURCES = [
 		cursorPath: "data.after",
 		pageLimit: 40,
 		watchUrls: ["/api/save", "/api/unsave"],
-	},
-	{
-		/**
-		 * Observe-only, and the reason that mode exists.
-		 *
-		 * TikTok publishes no saved/favorites API, and its web requests are signed
-		 * (X-Bogus, msToken) so they cannot be forged from outside the app. What
-		 * can be done is watch what the app fetches while your own Favorites load
-		 * — no forging, no signature work, and the payload is the same one the
-		 * page renders from.
-		 */
-		mode: "observe",
-		source: "tiktok",
-		host: "tiktok.com",
-		watchUrls: ["/api/user/collect/item_list"],
 	},
 	{
 		// GitHub stars are rendered on a signed-in page. The extension reads only
@@ -383,13 +425,12 @@ const extensionConfigRoute: Route = {
 				 * capture, which is why this is staged per source rather than
 				 * globally.
 				 *
-				 * x: enabled for acceptance testing. reddit and tiktok stay staged
+					 * x: enabled for acceptance testing. reddit stays staged
 				 * until each has been through the same pass.
 				 */
 				captureV2: {
 					x: true,
 					reddit: true,
-					tiktok: false,
 					github: true,
 					// Web capture has no legacy path to conflict with — the durable
 					// queue is the only way a saved page ever reaches here — so there is
@@ -424,23 +465,61 @@ const ingestRoute: Route = {
 		 *
 		 * Anything ingested this way used to keep a media row with a null
 		 * stored_key forever, because only the CLI ever fetched images — so a
-		 * TikTok save rendered as a caption with no video. Fire-and-forget and
-		 * bounded: an ingest must not block on image fetches, and a burst of saves
+		 * A save rendered as a caption with no media. Fire-and-forget and bounded:
+		 * an ingest must not block on image fetches, and a burst of saves
 		 * must not become an unbounded download.
 		 */
 		if (env.media && result.syncMedia) {
-			void fetchPendingMedia(env.db, env.media).catch(() => {});
+			const work = fetchPendingMedia(env.db, env.media);
+			if (env.waitUntil) env.waitUntil(work); else await work;
 		}
 
 		return json(result.body, result.status);
 	},
 };
 
+const itemUpdateRoute: Route = {
+  method: "PATCH", path: /^\/api\/items\/([\w-]+)$/,
+  handle: async ({env, request, params}) => {
+    const id = params[0]!;
+    if (!(await getItem(env.db, id))) return json({error:"not found"},404);
+    const body = await request.json().catch(() => null) as {note?:unknown;favorite?:unknown;archived?:unknown} | null;
+    if (!body || (body.note !== undefined && (typeof body.note !== "string" || body.note.length > 20000)) || (body.favorite !== undefined && typeof body.favorite !== "boolean") || (body.archived !== undefined && typeof body.archived !== "boolean")) return json({error:"invalid item update"},400);
+    if (typeof body.note === "string") await setItemNote(env.db,id,body.note);
+    if (typeof body.favorite === "boolean") await setFavorite(env.db,[id],body.favorite);
+    if (typeof body.archived === "boolean") await setArchived(env.db,[id],body.archived);
+    return json(await getItem(env.db,id));
+  }
+};
+const itemTagsRoute = (method: "POST" | "DELETE"): Route => ({
+  method, path: /^\/api\/items\/([\w-]+)\/tags$/,
+  handle: async ({env, request, params}) => {
+    if (!(await getItem(env.db,params[0]!))) return json({error:"not found"},404);
+    const body = await request.json().catch(() => null) as {label?:unknown} | null;
+    if (!body || typeof body.label !== "string" || !body.label.trim() || body.label.length > 100) return json({error:"invalid tag"},400);
+    if (method === "POST") await tagItems(env.db,[params[0]!],body.label);
+    else await removeItemTag(env.db,params[0]!,body.label);
+    return json({ok:true});
+  }
+});
+const collectionRoutes: Route[] = [
+  {method:"GET",path:"/api/collections",handle:async({env})=>json({collections:await listCollections(env.db)})},
+  {method:"POST",path:"/api/collections",handle:async({env,request})=>{
+    const body=await request.json().catch(()=>null) as Parameters<typeof saveCollection>[1] | null;
+    if (!body || typeof body.name!=="string" || !body.name.trim() || body.name.length>100 || typeof body.filters!=="object" || !body.filters || Array.isArray(body.filters)) return json({error:"invalid collection"},400);
+    try { return json({collection:await saveCollection(env.db,body)}); } catch { return json({error:"invalid collection"},400); }
+  }},
+  {method:"DELETE",path:/^\/api\/collections\/([\w-]+)$/,handle:async({env,params})=>{await deleteCollection(env.db,params[0]!);return json({deleted:true});}},
+  {method:"GET",path:"/api/export",handle:async({env})=>new Response(JSON.stringify(await exportLibrary(env.db)),{headers:{"content-type":"application/json; charset=utf-8","content-disposition":'attachment; filename="anansi-library.json"',"cache-control":"no-store"}})},
+  {method:"POST",path:"/api/media/retry",handle:async({env})=>env.media ? json(await fetchPendingMedia(env.db,env.media)) : json({error:"media is not configured"},503)},
+];
+
 /**
  * Matched in order. `/api/items` has to be tried before `/api/items/:id` only
  * because the second is a pattern; everything else is disjoint.
  */
 const ROUTES: Route[] = [
+	itemUpdateRoute, itemTagsRoute("POST"), itemTagsRoute("DELETE"), ...collectionRoutes,
 	mediaRoute,
 	itemsRoute,
 	itemRoute,
@@ -453,7 +532,8 @@ const ROUTES: Route[] = [
 	sourcesRoute,
 	toggleSourceRoute,
 	creatorsRoute,
-	statsRoute,
+	statsRoute, extensionStatsRoute,
+	aiSettingsRoute, aiSettingsUpdateRoute,
 	extensionConfigRoute,
 	extensionHeartbeatRoute,
 	ingestRoute,
@@ -473,17 +553,25 @@ export async function handleApi(
 	const url = new URL(request.url);
 	const path = url.pathname.replace(/\/+$/, "");
 
+  if (path === "/api/auth/session") return sessionRoute(env, request);
+  const isExtension = path === "/api/ingest" || path.startsWith("/api/extension/");
+  const denied = isExtension ? authorizeExtension(env, request) : authorizeLibrary(env, request);
+  if (denied) return denied;
+
 	for (const route of ROUTES) {
 		if (route.method !== request.method) continue;
 		const params = paramsFor(route.path, path);
 		if (!params) continue;
-		return await route.handle({
+		const response = await route.handle({
 			env,
 			request,
 			url,
 			q: url.searchParams,
 			params,
 		});
+		response.headers.set("cache-control", "private, no-store");
+		response.headers.set("x-content-type-options", "nosniff");
+		return response;
 	}
 
 	return json({ error: "not found" }, 404);

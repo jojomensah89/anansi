@@ -1,2 +1,488 @@
 @import "@anansi/ui/globals.css";
 @import "./lib/tokens.css";
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.anansi-settings-page {
+	box-sizing: border-box;
+	width: auto;
+	flex: 1;
+	min-width: 0;
+	padding: 32px 32px 64px;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+
+.anansi-settings-page > * {
+	width: min(100%, 672px);
+}
+
+.anansi-settings-title {
+	margin: 0;
+	font-size: 20px;
+	font-weight: 650;
+	letter-spacing: -0.02em;
+}
+
+.anansi-settings-subtitle {
+	margin: 6px 0 26px;
+	color: var(--muted);
+	font-size: 13px;
+}
+
+.anansi-settings-section {
+	margin-top: 18px;
+	padding: 14px;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: var(--card);
+}
+
+.anansi-settings-heading {
+	margin: 0 6px 12px;
+	font-size: 14px;
+	font-weight: 650;
+}
+
+.anansi-settings-list {
+	overflow: hidden;
+	border: 1px solid var(--line);
+	border-radius: 11px;
+}
+
+.anansi-settings-row {
+	display: flex;
+	align-items: center;
+	gap: 11px;
+	min-height: 66px;
+	padding: 11px 15px;
+	background: var(--raised);
+}
+
+.anansi-settings-row + .anansi-settings-row {
+	border-top: 1px solid var(--line);
+}
+
+.anansi-settings-icon {
+	display: grid;
+	flex: 0 0 38px;
+	place-items: center;
+	width: 38px;
+	height: 38px;
+	border: 1px solid var(--edge);
+	border-radius: 9px;
+	background: var(--ink);
+	color: var(--muted);
+}
+
+.anansi-settings-icon svg {
+	width: 19px;
+	height: 19px;
+}
+
+.anansi-settings-copy {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	flex-wrap: wrap;
+	align-items: center;
+	column-gap: 7px;
+	row-gap: 3px;
+}
+
+.anansi-settings-copy strong {
+	font-size: 13px;
+	font-weight: 650;
+}
+
+.anansi-settings-description {
+	flex-basis: 100%;
+	color: var(--muted);
+	font-size: 12px;
+}
+
+.anansi-settings-badge {
+	padding: 1px 5px;
+	border: 1px solid var(--edge-strong);
+	border-radius: 4px;
+	font-size: 10px;
+	line-height: 1.35;
+}
+
+.anansi-settings-badge-beta {
+	border-color: #633e9b;
+	background: #2b1a4a;
+	color: #c18cff;
+}
+
+.anansi-settings-badge-smart {
+	background: var(--raised);
+	color: var(--text-dim);
+}
+
+.anansi-settings-toggle {
+	position: relative;
+	flex: 0 0 32px;
+	width: 32px;
+	height: 18px;
+	padding: 0;
+	border: 0;
+	border-radius: 999px;
+	background: var(--edge-strong);
+	cursor: pointer;
+	transition: background 140ms ease;
+}
+
+.anansi-settings-toggle span {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--muted);
+	transition: transform 140ms ease, background 140ms ease;
+}
+
+.anansi-settings-toggle[data-state="on"] {
+	background: var(--text);
+}
+
+.anansi-settings-toggle[data-state="on"] span {
+	background: var(--ink);
+	transform: translateX(14px);
+}
+
+.anansi-settings-toggle:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 3px;
+}
+
+.anansi-settings-progress {
+	margin: 12px 4px 1px;
+	color: var(--faint);
+	font-size: 10.5px;
+}
+
+.anansi-settings-unavailable {
+	margin: -2px 6px 12px;
+	color: var(--muted);
+	font-size: 12px;
+}
+
+@media (max-width: 640px) {
+	.anansi-settings-page { padding: 24px 18px 48px; }
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.anansi-creator-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Base UI-compatible Sidebar styling. State is carried by data attributes so
+   the same navigation remains usable when the rail becomes icon-only. */
+.anansi-sidebar {
+  position: relative;
+  background: var(--rail);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0;
+  transition: width 180ms ease-out;
+}
+
+.anansi-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  padding: 0 12px 18px;
+}
+
+.anansi-rail-brand-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+}
+
+.anansi-sidebar-content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.anansi-sidebar-group {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  padding: 0 8px;
+}
+
+.anansi-sidebar-group-label {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  color: var(--fainter);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.anansi-sidebar-menu,
+.anansi-sidebar-menu-item {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.anansi-sidebar-menu {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.anansi-sidebar-menu-button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  gap: 9px;
+  overflow: hidden;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 120ms ease-out, color 120ms ease-out;
+}
+
+.anansi-sidebar-menu-button:hover,
+.anansi-sidebar-menu-button:focus-visible,
+.anansi-sidebar-menu-button[data-active="true"] {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.anansi-sidebar-menu-button[data-active="true"] {
+  font-weight: 500;
+}
+
+.anansi-sidebar-menu-button > svg,
+.anansi-sidebar-menu-button .anansi-source-icon {
+  flex-shrink: 0;
+}
+
+.anansi-sidebar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.anansi-sidebar-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--fainter);
+  font-size: 10.5px;
+}
+
+.anansi-sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: auto;
+  padding: 12px 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.anansi-rail-extension {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+}
+
+.anansi-rail-extension-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.anansi-rail-extension-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.anansi-sidebar-footer .anansi-rail-extension {
+  display: flex;
+}
+
+.anansi-sidebar-trigger {
+  flex-shrink: 0;
+  color: var(--faint);
+}
+
+.anansi-sidebar[data-state="collapsed"] .anansi-sidebar-header {
+  justify-content: center;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.anansi-sidebar[data-state="collapsed"] .anansi-sidebar-menu-button {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.anansi-sidebar[data-state="collapsed"] .anansi-sidebar-group {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.anansi-sidebar[data-state="collapsed"] .anansi-sidebar-group-label,
+.anansi-sidebar[data-state="collapsed"] .anansi-sidebar-label,
+.anansi-sidebar[data-state="collapsed"] .anansi-sidebar-count,
+.anansi-sidebar[data-state="collapsed"] .anansi-rail-brand-name {
+  display: none;
+}
+
+.anansi-sidebar[data-state="collapsed"] .anansi-sidebar-trigger {
+  margin: 0;
+}
+
+.anansi-sidebar[data-state="collapsed"] .anansi-sidebar-footer {
+  align-items: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.anansi-card-org .anansi-tag-add {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+.anansi-card:hover .anansi-tag-add,
+.anansi-card:focus-within .anansi-tag-add,
+.anansi-card-org:hover .anansi-tag-add,
+.anansi-card-org:focus-within .anansi-tag-add {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (max-width: 1100px) {
+  .anansi-creator-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .anansi-shell {
+    height: calc(100svh - 58px) !important;
+  }
+
+  .anansi-shell > div > .scroll {
+    overflow-x: hidden;
+  }
+
+  .anansi-rail {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 60;
+    width: 100% !important;
+    box-sizing: border-box;
+    height: 58px;
+    padding: 5px 6px !important;
+    border-top: 1px solid var(--line);
+    border-right: 0 !important;
+    flex-direction: row !important;
+    transition: none;
+  }
+
+  .anansi-sidebar-content {
+    overflow: visible;
+  }
+
+  .anansi-rail-brand,
+  .anansi-rail-sources,
+  .anansi-rail-sources-group,
+  .anansi-rail-footer {
+    display: none !important;
+  }
+
+  .anansi-rail-primary {
+    display: block !important;
+    padding: 0 !important;
+    width: 100%;
+  }
+
+  .anansi-rail-primary .anansi-sidebar-menu {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 2px !important;
+    width: 100%;
+  }
+
+  .anansi-rail-item {
+    min-width: 0;
+    justify-content: center;
+    flex-direction: column;
+    gap: 2px !important;
+    padding: 4px 2px !important;
+    font-size: 10px !important;
+  }
+
+  .anansi-rail-item .mono {
+    display: none;
+  }
+
+  .anansi-creator-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+}

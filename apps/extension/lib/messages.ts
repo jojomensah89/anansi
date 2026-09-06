@@ -12,7 +12,7 @@
 
 export const MESSAGE_PROTOCOL_VERSION = 1 as const;
 
-export type PlatformSource = "x" | "reddit" | "tiktok" | "github";
+export type PlatformSource = "x" | "reddit" | "github";
 export type MessagePath =
 	| "page-to-relay"
 	| "runtime-to-background"
@@ -182,21 +182,18 @@ const ERROR_MESSAGES: Record<MessageValidationError["code"], string> = {
 const SOURCE_HOSTS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["x.com", "twitter.com"]),
 	reddit: new Set(["www.reddit.com", "old.reddit.com", "reddit.com"]),
-	tiktok: new Set(["www.tiktok.com", "tiktok.com"]),
 	github: new Set(["github.com"]),
 };
 
 const PAGE_EVENT_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
 	reddit: new Set(["saved", "bookmark", "page", "done", "error"]),
-	tiktok: new Set(["observed", "scanned", "identified", "bookmark", "error"]),
 	github: new Set(["page", "done", "bookmark", "error"]),
 };
 
 const PAGE_COMMAND_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["configure", "backfill"]),
 	reddit: new Set(["configure", "backfill"]),
-	tiktok: new Set(["configure", "identify", "scan"]),
 	github: new Set(["configure", "backfill"]),
 };
 
@@ -323,7 +320,7 @@ function deriveSource(urlValue: string): PlatformSource | null {
 	try {
 		const url = new URL(urlValue);
 		if (url.protocol !== "https:" || url.username || url.password) return null;
-		for (const source of ["x", "reddit", "tiktok", "github"] as const) {
+		for (const source of ["x", "reddit", "github"] as const) {
 			if (SOURCE_HOSTS[source].has(url.hostname.toLowerCase())) return source;
 		}
 	} catch {
@@ -344,7 +341,6 @@ function isSource(value: unknown): value is PlatformSource {
 	return (
 		value === "x" ||
 		value === "reddit" ||
-		value === "tiktok" ||
 		value === "github"
 	);
 }

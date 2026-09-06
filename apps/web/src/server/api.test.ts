@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
-import { handleApi } from "./api.ts";
+import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
 
 /**
  * The HTTP surface, tested against a fully migrated in-memory library with no
@@ -12,7 +12,12 @@ import { handleApi } from "./api.ts";
 const localDb = openLocalDb(":memory:");
 migrateLocalDb(localDb);
 const db = localDb as unknown as AnansiDb;
-const env = { db, ingestToken: "test-token" };
+const env = { db, ingestToken: "test-token", libraryToken: "library-test-token" };
+const handleApi = (environment: ApiEnv, request: Request) => {
+  const path = new URL(request.url).pathname;
+  if (path !== "/api/ingest" && path !== "/api/extension/heartbeat") request.headers.set("authorization", `Bearer ${path.startsWith("/api/extension/") ? "test-token" : "library-test-token"}`);
+  return dispatchApi(environment, request);
+};
 
 beforeAll(async () => {
 	await upsertItems(
@@ -215,7 +220,7 @@ describe("handleApi", () => {
 		expect(await readJson(replay)).toEqual(firstBody);
 	});
 
-	test("extension config is readable without a token, and names the ingest url", async () => {
+	test("extension config accepts the ingest credential and names the ingest url", async () => {
 		const body = await readJson(get("/api/extension/config"));
 		expect(body.version).toBe(1);
 		expect(body.enabled).toBe(true);
@@ -223,21 +228,15 @@ describe("handleApi", () => {
 		expect(body.sources[0].operation).toBe("Bookmarks");
 		expect(body.ingestProtocolVersion).toBe(2);
 		// Web is on because it has no legacy path to conflict with. X is on for
-		// acceptance testing; the remaining two stay staged until each has been
+		// acceptance testing; GitHub and Reddit remain staged until each has been
 		// through the same pass.
 		expect(body.features.captureV2).toEqual({
 			x: true,
 			reddit: true,
-			tiktok: false,
 			web: true,
 			github: true,
 		});
 		expect(body.features.chromeBookmarks).toBe(true);
-
-		const tiktok = body.sources.find(
-			(source: { source: string }) => source.source === "tiktok",
-		);
-		expect(tiktok.watchUrls).toEqual(["/api/user/collect/item_list"]);
 		const github = body.sources.find(
 			(source: { source: string }) => source.source === "github",
 		);
@@ -289,7 +288,7 @@ describe("handleApi", () => {
 			extensionVersion: "0.1.0",
 			activeClients: 1,
 		});
-		expect(sources.sources).toHaveLength(5);
+		expect(sources.sources).toHaveLength(4);
 		expect(
 			sources.sources.find(
 				(source: { source: string }) => source.source === "github",
@@ -439,6 +438,22 @@ describe("repeated filter params", () => {
 		);
 
 		expect(body.items.map((i: any) => i.source)).toEqual(["github"]);
+	});
+
+	test("favorite is applied by both list and search HTTP routes", async () => {
+		const all = await readJson(get("/api/items?source=reddit&limit=10"));
+		const id = all.items[0].id as string;
+		const changed = await handleApi(env, new Request(`https://anansi.test/api/items/${id}`, {
+			method: "PATCH",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ favorite: true }),
+		}));
+		expect(changed.status).toBe(200);
+		const listed = await readJson(get("/api/items?favorite=1&limit=50"));
+		expect(listed.items.map((item: { id: string }) => item.id)).toContain(id);
+		expect(listed.items.every((item: { favorite: boolean }) => item.favorite)).toBe(true);
+		const searched = await readJson(get("/api/search?q=reddit&favorite=1&limit=50"));
+		expect(searched.items.map((item: { id: string }) => item.id)).toEqual([id]);
 	});
 
 	test("a hostile value is bound, not interpolated", async () => {

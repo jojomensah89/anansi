@@ -1,206 +1,210 @@
-import { join, normalize } from "node:path";
-
-/**
- * Serving stored thumbnails.
- *
- * The importer writes them through a MediaSink; this reads them back, and it
- * is deliberately a separate, smaller thing. Writing needs an S3 client and a
- * filesystem; reading in a Worker needs neither — the R2 *binding* is already
- * on `env` and takes a key directly.
- *
- * Everything is served from our own copy rather than hot-linked from the
- * platform. That is the point of storing them: a deleted post still renders,
- * and no request from your library tells X what you are looking at.
- */
-export interface MediaSource {
-  /** The R2 binding, in a Worker. */
-  bucket?: { get(key: string): Promise<{ body: ReadableStream } | null> };
-  /** The directory the CLI wrote to, locally. */
-  dir?: string;
-  /** Set when the sink can be written to as well as read. */
-  put?: (key: string, bytes: ArrayBuffer) => Promise<void>;
-}
-
-const IMMUTABLE = "public, max-age=31536000, immutable";
-
-export async function readMedia(source: MediaSource, key: string): Promise<Response> {
-  // Keys come from the database, but this is a URL path segment reaching a
-  // filesystem — treat it as hostile regardless of where it should have come
-  // from. Anything that escapes the media directory is not a key.
-  const safe = normalize(key).replace(/\\/g, "/");
-  if (safe.startsWith("..") || safe.includes("../") || safe.startsWith("/")) {
-    return new Response("bad key", { status: 400 });
-  }
-
-  if (source.bucket) {
-    const object = await source.bucket.get(safe);
-    if (!object) return new Response("not found", { status: 404 });
-    return new Response(object.body, {
-      headers: { "content-type": "image/webp", "cache-control": IMMUTABLE },
-    });
-  }
-
-  if (source.dir) {
-    const file = Bun.file(join(source.dir, safe));
-    if (!(await file.exists())) return new Response("not found", { status: 404 });
-    return new Response(file, {
-      headers: { "content-type": "image/webp", "cache-control": IMMUTABLE },
-    });
-  }
-
-  return new Response("media is not configured", { status: 503 });
-}
-
-import { markMediaStored, pendingMedia } from "@anansi/db";
+import { join } from "node:path";
+import { claimMediaJobs, completeMediaJob, failMediaJob } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
 
-/**
- * Fetch thumbnails for media that has none.
- *
- * The CLI has always done this; the server had not, so anything arriving
- * through the extension kept a media row with a null stored_key and rendered
- * as text. A card with no picture for a video is not a smaller card, it is
- * the wrong card.
- *
- * Bounded and fire-and-forget: an ingest must not wait on image fetches, and
- * a burst of saves must not turn into an unbounded download.
- */
-/**
- * Where a thumbnail is allowed to come from.
- *
- * This is the one place the server makes a request to a URL that a *page*
- * chose. Platform CDNs were the only source of these until webpage capture
- * arrived; now saving a hostile page can put any http(s) URL in front of this
- * fetch, which is a request-forgery primitive pointed at whatever the server
- * can reach — a metadata endpoint, something on the loopback interface, a box
- * on the same network.
- *
- * So the rule is the network location, not the content: an address that is not
- * publicly routable is refused, whatever it claims to serve.
- */
-const PRIVATE_V4 =
-	/^(?:10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
-
-const PRIVATE_HOSTS = new Set(["localhost", "ip6-localhost", "ip6-loopback"]);
-
-export function isFetchableMediaUrl(value: string): boolean {
-	let url: URL;
-	try {
-		url = new URL(value);
-	} catch {
-		return false;
-	}
-	if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-	if (url.username !== "" || url.password !== "") return false;
-
-	const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-	if (PRIVATE_HOSTS.has(host)) return false;
-	if (host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
-		return false;
-	}
-	if (PRIVATE_V4.test(host)) return false;
-	// IPv6 loopback, unique-local (fc00::/7) and link-local (fe80::/10).
-	if (host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host)) return false;
-	// An IPv4-mapped IPv6 address hides the same private ranges, and URL
-	// normalizes it to hex — ::ffff:127.0.0.1 arrives as ::ffff:7f00:1 — so the
-	// dotted form has to be reconstructed before the v4 rules can see it.
-	const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
-	if (mapped) {
-		const high = Number.parseInt(mapped[1] ?? "", 16);
-		const low = Number.parseInt(mapped[2] ?? "", 16);
-		const dotted = [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
-		if (PRIVATE_V4.test(dotted)) return false;
-	}
-	if (host.startsWith("::ffff:") && PRIVATE_V4.test(host.slice(7))) return false;
-	return true;
+export interface MediaSource {
+  bucket?: {
+    get(key: string): Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null>;
+    put?(key: string, bytes: ArrayBuffer, options?: { httpMetadata: { contentType: string } }): Promise<unknown>;
+  };
+  dir?: string;
+  put?: (key: string, bytes: ArrayBuffer, contentType?: string) => Promise<void>;
+  runtime?: "worker" | "local";
 }
-
-/** A thumbnail is an image, and a bounded one. */
+const TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif" };
+const EXT_TYPES = Object.fromEntries(Object.entries(TYPES).map(([type, ext]) => [ext, type]));
 const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
-
-async function fetchThumbnail(target: string): Promise<ArrayBuffer> {
-	if (!isFetchableMediaUrl(target)) throw new Error("refused media url");
-
-	// Manual redirects: following automatically would let a public URL hand
-	// back a Location pointing at the loopback interface, which is exactly the
-	// check above being walked around.
-	const res = await fetch(target, { redirect: "manual" });
-	if (res.status >= 300 && res.status < 400) throw new Error("media url redirected");
-	if (!res.ok) throw new Error(String(res.status));
-
-	const type = res.headers.get("content-type") ?? "";
-	if (!type.startsWith("image/")) throw new Error("not an image");
-
-	const declared = Number(res.headers.get("content-length"));
-	if (Number.isFinite(declared) && declared > MAX_MEDIA_BYTES) {
-		throw new Error("media too large");
-	}
-
-	const bytes = await res.arrayBuffer();
-	// Checked again: content-length is a claim, not a measurement.
-	if (bytes.byteLength > MAX_MEDIA_BYTES) throw new Error("media too large");
-	return bytes;
+const TIMEOUT_MS = 15_000;
+// Cloudflare fetch cannot pin resolved addresses. Restrict that transport to
+// established provider CDNs; arbitrary webpage media uses pinned local fetch.
+const WORKER_CDNS = ["twimg.com", "redd.it", "redditmedia.com", "githubusercontent.com", "tiktokcdn.com", "tiktokcdn-us.com"];
+export function workerMediaHostAllowed(value: string): boolean {
+  try { const host = new URL(value).hostname.toLowerCase(); return WORKER_CDNS.some(domain => host === domain || host.endsWith(`.${domain}`)); }
+  catch { return false; }
+}
+export function isPublicAddress(host: string): boolean {
+  host = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host.includes(":")) {
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+    if (mapped) {
+      const high = parseInt(mapped[1]!,16), low = parseInt(mapped[2]!,16);
+      return isPublicAddress([high>>8,high&255,low>>8,low&255].join("."));
+    }
+    // Only ordinary global unicast; refuse special transition mechanisms.
+    return /^[23][0-9a-f]{0,3}:/.test(host) && !/^2002:/.test(host) && !/^2001:(?:db8|0):/.test(host);
+  }
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4 || parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a,b,c] = parts as [number,number,number,number];
+  return !(a===0 || a===10 || a===127 || a>=224 || (a===100 && b>=64 && b<=127) || (a===169 && b===254) || (a===172 && b>=16 && b<=31) || (a===192 && (b===168 || b===0 || (b===88 && c===99))) || (a===198 && (b===18 || b===19 || (b===51 && c===100))) || (a===203 && b===0 && c===113));
+}
+export function isFetchableMediaUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (!["https:","http:"].includes(url.protocol) || url.username || url.password) return false;
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (host.includes(":") || /^[\d.]+$/.test(host)) return isPublicAddress(host);
+    return host.includes(".") && !host.endsWith(".") && !["localhost","local","internal","home","lan"].some(s => host===s || host.endsWith(`.${s}`));
+  } catch { return false; }
 }
 
-export async function fetchPendingMedia(
-  db: AnansiDb,
-  source: MediaSource,
-  limit = 40,
-): Promise<{ stored: number; failed: number }> {
-  const rows = await pendingMedia(db, limit);
-  let stored = 0;
-  let failed = 0;
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new Error("media request timed out");
+  return new Promise((resolve,reject)=>{
+    const abort=()=>reject(new Error("media request timed out"));
+    signal.addEventListener("abort",abort,{once:true});
+    promise.then(resolve,reject).finally(()=>signal.removeEventListener("abort",abort));
+  });
+}
+/** DNS validation and the connection share the same address, closing rebinding. */
+async function localFetch(url: URL, signal: AbortSignal): Promise<Response> {
+  const [{ lookup }, http, https, { Readable }, { isIP }] = await Promise.all([
+    import("node:dns/promises"), import("node:http"), import("node:https"), import("node:stream"), import("node:net"),
+  ]);
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const addresses = isIP(hostname) ? [{address:hostname,family:isIP(hostname)}] : await abortable(lookup(hostname, {all:true}), signal);
+  if (!addresses.length || addresses.some(row => !isPublicAddress(row.address))) throw new Error("refused non-public media destination");
+  if (signal.aborted) throw new Error("media request timed out");
+  const address = addresses[0]!;
+  return pinnedRequest(url,address,signal,http,https,Readable);
+}
 
-  const work = rows.map(async (row) => {
+/**
+ * Connect to the address already approved by localFetch while retaining the
+ * original Host header and TLS server name. Passing a custom lookup callback
+ * through Bun's node:https compatibility layer can raise an uncaught socket
+ * error when every address refuses the connection on Windows.
+ */
+export function pinnedRequest(
+  url: URL,
+  address: {address:string;family:number},
+  signal: AbortSignal,
+  http: typeof import("node:http"),
+  https: typeof import("node:https"),
+  Readable: typeof import("node:stream").Readable,
+): Promise<Response> {
+  return new Promise((resolve,reject) => {
+    const request = (url.protocol === "https:" ? https.request : http.request)(url, {
+      method:"GET",
+      signal,
+      hostname:address.address,
+      family:address.family,
+      port:url.port || undefined,
+      path:`${url.pathname}${url.search}`,
+      headers:{host:url.host},
+      ...(url.protocol === "https:" ? {servername:url.hostname} : {}),
+    }, response => {
+      const headers = new Headers();
+      for (const [name,value] of Object.entries(response.headers)) if (value !== undefined) headers.set(name,Array.isArray(value)?value.join(", "):value);
+      resolve(new Response(Readable.toWeb(response) as unknown as ReadableStream, {status:response.statusCode??502,headers}));
+    });
+    request.once("error",reject);
+    request.end();
+  });
+}
+export async function readBoundedImage(response: Response): Promise<{bytes:ArrayBuffer;contentType:string}> {
+  if (!response.ok) { await response.body?.cancel(); throw new Error(`media HTTP ${response.status}`); }
+  const contentType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  if (!TYPES[contentType]) { await response.body?.cancel(); throw new Error("unsupported raster image type"); }
+  if (Number(response.headers.get("content-length")) > MAX_MEDIA_BYTES) { await response.body?.cancel(); throw new Error("media too large"); }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("empty media response");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const {done,value} = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_MEDIA_BYTES) throw new Error("media too large");
+      chunks.push(value);
+    }
+  } catch (error) { await reader.cancel().catch(()=>{}); throw error; }
+  finally { reader.releaseLock(); }
+  if (!size) throw new Error("empty media image");
+  const bytes = new Uint8Array(size);
+  let offset=0;
+  for (const chunk of chunks) { bytes.set(chunk,offset); offset+=chunk.length; }
+  // Reject active or mislabeled payloads instead of trusting the MIME claim.
+  const ascii = (start:number,end:number) => String.fromCharCode(...bytes.slice(start,end));
+  const valid = contentType === "image/jpeg" ? bytes[0]===255 && bytes[1]===216 && bytes[2]===255
+    : contentType === "image/png" ? bytes[0]===137 && ascii(1,4)==="PNG" && bytes[4]===13 && bytes[5]===10 && bytes[6]===26 && bytes[7]===10
+    : contentType === "image/gif" ? ["GIF87a","GIF89a"].includes(ascii(0,6))
+    : contentType === "image/webp" ? ascii(0,4)==="RIFF" && ascii(8,12)==="WEBP"
+    : ascii(4,8)==="ftyp" && ["avif","avis"].includes(ascii(8,12));
+  if (!valid) throw new Error("image signature does not match content type");
+  return {bytes:bytes.buffer,contentType};
+}
+export async function fetchThumbnail(target: string, runtime: "local" | "worker" = "local"): Promise<{bytes:ArrayBuffer;contentType:string}> {
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(), TIMEOUT_MS);
+  try {
+    let url = new URL(target);
+    for (let redirects=0;redirects<=3;redirects++) {
+      if (!isFetchableMediaUrl(url.href)) throw new Error("refused media url");
+      if (runtime === "worker" && !workerMediaHostAllowed(url.href)) throw new Error("Worker media host is not in the trusted CDN list; use local media sync");
+      const response = runtime === "worker" ? await fetch(url,{redirect:"manual",signal:controller.signal}) : await localFetch(url,controller.signal);
+      if (response.status >=300 && response.status<400) {
+        const location=response.headers.get("location");
+        await response.body?.cancel();
+        if (!location || redirects===3) throw new Error("too many media redirects");
+        url = new URL(location,url);
+      } else return await readBoundedImage(response);
+    }
+    throw new Error("too many media redirects");
+  } finally { clearTimeout(timeout); }
+}
+export async function readMedia(source: MediaSource, key: string): Promise<Response> {
+  // Only generated object keys are accepted; no drive paths, traversal or alternate separators.
+  if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif)$/.test(key)) return new Response("bad key",{status:400});
+  const inferred = EXT_TYPES[key.split(".").at(-1)!] ?? "image/jpeg";
+  const headers = {"content-type":inferred,"cache-control":"private, no-store","x-content-type-options":"nosniff"};
+  if (source.bucket) {
+    const object = await source.bucket.get(key);
+    if (!object) return new Response("not found",{status:404});
+    if (object.httpMetadata?.contentType && TYPES[object.httpMetadata.contentType]) headers["content-type"]=object.httpMetadata.contentType;
+    return new Response(object.body,{headers});
+  }
+  if (source.dir) {
+    const file=Bun.file(join(source.dir,key));
+    if (!(await file.exists())) return new Response("not found",{status:404});
+    return new Response(file,{headers});
+  }
+  return new Response("media is not configured",{status:503});
+}
+export async function fetchPendingMedia(db: AnansiDb, source: MediaSource, limit=4): Promise<{stored:number;failed:number}> {
+  if (!source.put && !source.bucket?.put && !source.dir) return {stored:0,failed:0};
+  const rows=await claimMediaJobs(db,limit);
+  let stored=0,failed=0;
+  await Promise.all(rows.map(async row=>{
     try {
-      const bytes = await fetchThumbnail(variant(row.originUrl));
-      const key = keyFor(row.id);
-
-      if (source.put) await source.put(key, bytes);
+      const {bytes,contentType}=await fetchThumbnail(variant(row.originUrl),source.runtime ?? (source.bucket ? "worker":"local"));
+      const flat=row.id.replace(/-/g,"");
+      const key=`${flat.slice(0,2)}/${flat.slice(2,4)}/${flat}-${row.token.replace(/-/g, "")}.${TYPES[contentType]}`;
+      if (source.put) await source.put(key,bytes,contentType);
+      else if (source.bucket?.put) await source.bucket.put(key,bytes,{httpMetadata:{contentType}});
       else if (source.dir) {
-        const path = `${source.dir}/${key}`;
-        await mkdir(dirname(path), { recursive: true });
-        await Bun.write(path, bytes);
-      } else throw new Error("no media sink");
-
-      await markMediaStored(db, row.id, key);
+        const {mkdir}=await import("node:fs/promises");
+        const {dirname}=await import("node:path");
+        const path=join(source.dir,key);
+        await mkdir(dirname(path),{recursive:true});
+        await Bun.write(path,bytes);
+      }
+      await completeMediaJob(db,row.id,row.token,key);
       stored++;
-    } catch {
-      // A dead thumbnail is normal — posts get deleted, accounts go private,
-      // and a refused address is a refusal working. None of it may take an
-      // ingest down.
+    } catch (error) {
+      await failMediaJob(db,row.id,row.token,row.attempts,error instanceof Error?error.message:"media fetch failed");
       failed++;
     }
-  });
-
-  await Promise.all(work);
-  return { stored, failed };
+  }));
+  return {stored,failed};
 }
-
-/**
- * Ask the CDN for the conversion rather than doing it here.
- *
- * pbs.twimg.com serves webp at a quarter the size of the original jpeg, and
- * TikTok's image CDN serves what it is given. Either way nothing is decoded
- * locally, which is what keeps this runnable inside a Worker.
- */
 function variant(originUrl: string): string {
   try {
-    const url = new URL(originUrl);
-    if (!url.hostname.endsWith("twimg.com")) return originUrl;
-    url.pathname = url.pathname.replace(/\.(jpg|jpeg|png|webp)$/i, "");
-    url.searchParams.set("format", "webp");
-    url.searchParams.set("name", "small");
-    return url.toString();
-  } catch {
-    return originUrl;
-  }
-}
-
-/** Sharded two levels, so no directory or R2 prefix holds thousands. */
-function keyFor(id: string): string {
-  const flat = id.replace(/-/g, "");
-  return `${flat.slice(0, 2)}/${flat.slice(2, 4)}/${flat}.webp`;
+    const url=new URL(originUrl);
+    if (url.hostname!=="pbs.twimg.com") return originUrl;
+    url.pathname=url.pathname.replace(/\.(jpg|jpeg|png|webp)$/i,"");
+    url.searchParams.set("format","webp");url.searchParams.set("name","small");
+    return url.href;
+  } catch { return originUrl; }
 }

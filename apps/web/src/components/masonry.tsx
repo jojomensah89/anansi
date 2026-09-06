@@ -76,8 +76,10 @@ function estimate(item: ItemRow, columnWidth: number): number {
   height += lines * 20;
 
   if (item.quoted) {
-    height += 62 + Math.min(Math.ceil(item.quoted.text.length / 32), 3) * 18;
-    if (item.quoted.media.length) height += columnWidth * (item.quoted.media.length > 1 ? 0.42 : 0.5);
+	const quotedText = typeof item.quoted.text === "string" ? item.quoted.text : "";
+	const quotedMedia = item.quoted.media ?? [];
+	height += 62 + Math.min(Math.ceil(quotedText.length / 32), 3) * 18;
+	if (quotedMedia.length) height += columnWidth * (quotedMedia.length > 1 ? 0.42 : 0.5);
   }
 
   return height;

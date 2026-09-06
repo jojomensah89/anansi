@@ -30,6 +30,13 @@ export const items = sqliteTable(
     title: text("title"),
     /** full_text with t.co expanded | repo description + README head */
     body: text("body"),
+    /** Safe reader text; markup is never executed. */
+    articleText: text("article_text"),
+    articleFormat: text("article_format").notNull().default("plain"),
+    contentTruncated: integer("content_truncated").notNull().default(0),
+    searchText: text("search_text").notNull().default(""),
+    note: text("note").notNull().default(""),
+    favorite: integer("favorite").notNull().default(0),
     lang: text("lang"),
     /** unix seconds; SQLite has no date type */
     postedAt: integer("posted_at"),
@@ -143,6 +150,8 @@ export const media = sqliteTable(
 export const tags = sqliteTable("tags", {
   id: text("id").primaryKey(),
   label: text("label").notNull().unique(),
+  /** A persisted accent chosen once when a tag is created. */
+  color: text("color").notNull().default("#6b7280"),
   /** 'ai' | 'manual' */
   origin: text("origin").notNull(),
 });
@@ -156,6 +165,64 @@ export const itemTags = sqliteTable(
     tagId: text("tag_id")
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
+    /** Assignment provenance is authoritative for AI suppression. */
+    provenance: text("provenance").notNull().default("manual"),
+    model: text("model"),
+    appliedAt: integer("applied_at"),
+  },
+  (t) => [primaryKey({ columns: [t.itemId, t.tagId] })],
+);
+
+export const aiSettings = sqliteTable("ai_settings", {
+  id: integer("id").primaryKey().default(1),
+  semanticSearchEnabled: integer("semantic_search_enabled").notNull().default(0),
+  autoTaggingEnabled: integer("auto_tagging_enabled").notNull().default(0),
+  embeddingModel: text("embedding_model").notNull().default("@cf/baai/bge-small-en-v1.5"),
+  embeddingDimensions: integer("embedding_dimensions").notNull().default(384),
+  tagModel: text("tag_model").notNull().default("@cf/meta/llama-3.1-8b-instruct"),
+  updatedAt: integer("updated_at").notNull().default(0),
+  quotaPauseReason: text("quota_pause_reason"),
+  lastRunAt: integer("last_run_at"),
+});
+
+export const aiEnrichmentJobs = sqliteTable(
+  "ai_enrichment_jobs",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    contentHash: text("content_hash").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRunAt: integer("next_run_at").notNull().default(0),
+    leaseUntil: integer("lease_until").notNull().default(0),
+    claimToken: text("claim_token"),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull().default(0),
+    updatedAt: integer("updated_at").notNull().default(0),
+  },
+  (t) => [index("ai_enrichment_jobs_due").on(t.status, t.nextRunAt, t.leaseUntil), index("ai_enrichment_jobs_item").on(t.itemId)],
+);
+
+export const itemEmbeddings = sqliteTable("item_embeddings", {
+  itemId: text("item_id").primaryKey().references(() => items.id, { onDelete: "cascade" }),
+  vectorId: text("vector_id").notNull(),
+  model: text("model").notNull(),
+  dimensions: integer("dimensions").notNull(),
+  contentHash: text("content_hash").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: integer("created_at").notNull().default(0),
+  updatedAt: integer("updated_at").notNull().default(0),
+  lastError: text("last_error"),
+});
+
+export const itemTagOverrides = sqliteTable(
+  "item_tag_overrides",
+  {
+    itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    tagId: text("tag_id").notNull().references(() => tags.id, { onDelete: "cascade" }),
+    override: text("override").notNull(),
+    createdAt: integer("created_at").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.itemId, t.tagId] })],
 );
@@ -187,6 +254,21 @@ export const sourceSettings = sqliteTable("source_settings", {
   updatedAt: integer("updated_at"),
 });
 
+export const highlights = sqliteTable("highlights", {
+  id: text("id").primaryKey(),
+  itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (t) => [uniqueIndex("highlights_item_text").on(t.itemId, t.text)]);
+
+export const collections = sqliteTable("collections", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  filters: text("filters").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 /** Last operational snapshot from each browser extension installation. */
 export const extensionClients = sqliteTable(
   "extension_clients",
@@ -199,3 +281,5 @@ export const extensionClients = sqliteTable(
   },
   (t) => [index("extension_clients_last_seen").on(t.lastSeenAt)],
 );
+
+export { mediaJobs } from "./media-jobs-schema.ts";

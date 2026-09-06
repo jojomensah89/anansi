@@ -36,16 +36,6 @@ export const SOURCE_CATALOG: readonly SourceDefinition[] = [
 		requiresExtension: true,
 	},
 	{
-		source: "tiktok",
-		name: "TikTok favourites",
-		host: "tiktok.com",
-		note: "Favourite-list observation is implemented but still needs authenticated acceptance.",
-		support: "experimental",
-		mode: "observe",
-		toggleable: true,
-		requiresExtension: true,
-	},
-	{
 		source: "web",
 		name: "Web pages & bookmarks",
 		host: "Any website",

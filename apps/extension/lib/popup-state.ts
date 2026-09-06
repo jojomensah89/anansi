@@ -27,7 +27,7 @@ export type SourceStateName =
 	| "ready";
 
 export type Tone = "accent" | "ok" | "warn" | "muted" | "faint";
-export type SourceAction = "import" | "pause" | "retry" | "sign-in" | "none";
+export type SourceAction = "import" | "pause" | "none";
 
 export interface SourceSnapshot {
 	source: string;
@@ -35,6 +35,8 @@ export interface SourceSnapshot {
 	enabled: boolean;
 	phase: "idle" | "running";
 	startedAt?: number;
+	/** Last durable progress, used to distinguish a long import from a stall. */
+	updatedAt?: number;
 	paused?: boolean;
 	/** Outbox counts belonging to this source, not the whole queue. */
 	queue: CaptureQueueStatus;
@@ -43,6 +45,13 @@ export interface SourceSnapshot {
 	lastRun?: number | null;
 	/** How many items the library holds for this source. */
 	held?: number;
+}
+
+/** Clear one popup-only start marker without mutating React's previous state. */
+export function withoutStartingSource(sources: ReadonlySet<string>, source: string): Set<string> {
+	const next = new Set(sources);
+	next.delete(source);
+	return next;
 }
 
 export interface SourceView {
@@ -121,7 +130,7 @@ export function describeSource(
 	}
 
 	if (snapshot.phase === "running" && snapshot.startedAt) {
-		if (now - snapshot.startedAt < RUN_TIMEOUT_MS) {
+		if (now - (snapshot.updatedAt ?? snapshot.startedAt) < RUN_TIMEOUT_MS) {
 			const held = pending(queue);
 			return {
 				state: "running",
@@ -145,10 +154,10 @@ export function describeSource(
 	if (snapshot.lastErrorCode && SIGN_IN_CODES.has(snapshot.lastErrorCode)) {
 		return {
 			state: "sign_in_required",
-			text: "Sign in, then press Import",
+			text: "Session not detected — sign in, then try again",
 			tone: "warn",
-			action: "sign-in",
-			actionLabel: "Sign in",
+			action: "import",
+			actionLabel: "Try again",
 			settled,
 		};
 	}
@@ -158,8 +167,8 @@ export function describeSource(
 			state: "failed",
 			text: `${plural(queue.failed, "capture", "captures")} could not be sent`,
 			tone: "warn",
-			action: "retry",
-			actionLabel: "Retry",
+			action: "import",
+			actionLabel: "Import",
 			settled: false,
 		};
 	}
@@ -169,8 +178,8 @@ export function describeSource(
 			state: "retrying",
 			text: `Retrying ${plural(queue.retrying, "capture", "captures")}`,
 			tone: "warn",
-			action: "retry",
-			actionLabel: "Retry now",
+			action: "import",
+			actionLabel: "Import",
 			settled: false,
 		};
 	}
@@ -180,8 +189,8 @@ export function describeSource(
 			state: "queued",
 			text: `${plural(pending(queue), "capture", "captures")} waiting to send`,
 			tone: "muted",
-			action: "retry",
-			actionLabel: "Send now",
+			action: "import",
+			actionLabel: "Import",
 			settled: false,
 		};
 	}
@@ -193,6 +202,20 @@ export function describeSource(
 			tone: "muted",
 			action: "import",
 			actionLabel: "Resume",
+			settled,
+		};
+	}
+
+	if (snapshot.lastErrorCode) {
+		return {
+			state: "failed",
+			text:
+				snapshot.lastErrorCode === "rate_limited"
+					? "Platform rate limit — retry later"
+					: "Import failed — press Import to retry",
+			tone: "warn",
+			action: "import",
+			actionLabel: "Import",
 			settled,
 		};
 	}

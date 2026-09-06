@@ -31,9 +31,12 @@ describe("GitHub extension capture flow", () => {
 	test("imports, captures live provenance, retains an unstar, and restores a re-star", async () => {
 		const local = openLocalDb(":memory:");
 		migrateLocalDb(local);
-		const env = { db: local as unknown as AnansiDb, ingestToken: "test-token" };
-		const request = (path: string, init?: RequestInit) =>
-			handleApi(env, new Request(`https://anansi.test${path}`, init));
+		const env = { db: local as unknown as AnansiDb, ingestToken: "test-token", libraryToken: "library-token" };
+		const request = (path: string, init: RequestInit = {}) => {
+			const headers = new Headers(init.headers);
+			if (!headers.has("authorization")) headers.set("authorization", "Bearer library-token");
+			return handleApi(env, new Request(`https://anansi.test${path}`, { ...init, headers }));
+		};
 		const json = async (response: Response | Promise<Response>) =>
 			(await (await response).json()) as any;
 		const ingest = (capture: RawPageCapture | ItemEventCapture) =>

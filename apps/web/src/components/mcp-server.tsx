@@ -70,7 +70,7 @@ export function McpServerPage() {
   const [origin, setOrigin] = useState("");
   const [selectedClient, setSelectedClient] = useState<McpClientId>("claude-code");
   const [copied, setCopied] = useState<CopyTarget | null>(null);
-  const [stats, setStats] = useState({ items: 0, authors: 0, bySource: {} as Record<string, number> });
+  const [stats, setStats] = useState({ items: 0, authors: 0, archived: 0, bySource: {} as Record<string, number> });
 
   // Keep the first render stable for SSR. The browser origin is public, but it
   // does not exist while the server is rendering the route.
@@ -82,7 +82,7 @@ export function McpServerPage() {
     const controller = new AbortController();
     api
       .stats(controller.signal)
-      .then((next) => setStats({ items: next.items, authors: next.authors, bySource: next.bySource }))
+      .then((next) => setStats({ items: next.items, authors: next.authors, archived: next.archived, bySource: next.bySource }))
       .catch(() => {});
     return () => controller.abort();
   }, []);
@@ -104,7 +104,7 @@ export function McpServerPage() {
 
   return (
     <div className="mcp-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
-      <Rail total={stats.items} authors={stats.authors} bySource={stats.bySource} />
+      <Rail total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} />
 
       <main className="mcp-main scroll">
         <div className="mcp-wrap">

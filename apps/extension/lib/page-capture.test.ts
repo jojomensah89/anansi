@@ -107,7 +107,7 @@ describe("toWebCapture", () => {
   test("a highlighted passage becomes the body, and the page text is kept", async () => {
     const capture = await captured({ selection: "  offset paging  drops rows  " }, "context_menu");
 
-    expect(capture.normalizedItem?.body).toBe("offset paging drops rows");
+    expect(capture.normalizedItem?.body).toBe("offset paging  drops rows");
     expect((capture.normalizedItem?.raw as { text?: string }).text).toContain(
       "Offset pagination",
     );

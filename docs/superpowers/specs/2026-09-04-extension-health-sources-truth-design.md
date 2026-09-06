@@ -12,7 +12,7 @@ This is the first of two independent implementations. This design fixes source t
 
 ## Evidence boundary
 
-[removed]'s public documentation establishes a useful product contract: a Connections page reports extension status, per-platform toggles, live and imported counts, current import progress, failures, and recovery actions. It does not prove [removed]'s private implementation or that every live import succeeds.
+Public product documentation establishes a useful product contract: a Connections page reports extension status, per-platform toggles, live and imported counts, current import progress, failures, and recovery actions. It does not prove private implementation details or that every live import succeeds.
 
 The current Anansi checkout already has a durable extension outbox, resumable source-run records, source-specific queue counts, server-owned source switches, and raw capture-event receipts. Those are the implementation foundation. The defect is how the web Sources page derives and communicates state.
 

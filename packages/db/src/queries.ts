@@ -1,6 +1,8 @@
-import { eq, inArray, sql } from "drizzle-orm";
-import { itemTags, items, media, sourceSettings, tags } from "./schema.ts";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { highlights, itemTagOverrides, itemTags, items, media, sourceSettings, tags } from "./schema.ts";
 import type { AnansiDb, NewDbItem } from "./types.ts";
+import { atomicWrite, type AtomicStatement } from "./atomic.ts";
+import { visibleSourceClause } from "./visibility.ts";
 
 export type CaptureOrigin =
   | "platform_event"
@@ -53,21 +55,11 @@ export async function upsertItems(
   options: UpsertOptions = {},
 ): Promise<UpsertResult> {
   if (batch.length === 0) return { inserted: 0, updated: 0, mediaRows: 0 };
-  return await db.transaction(async (transaction) =>
-    upsertItemsInTransaction(transaction as unknown as AnansiDb, batch, options),
-  );
+  const plan = await prepareUpsertItems(db, batch, options);
+  await atomicWrite(db, plan.statements);
+  return plan.result;
 }
 
-/**
- * Idempotent on (source, external_id), because imports will run twice.
- *
- * Two details that matter on a re-run. The row's `id` is generated once and
- * never overwritten, so anything that referenced it still resolves. And
- * `saved_at` is only allowed to move backwards, or toward being exact: a
- * backfill stamps import time, so letting a later backfill overwrite an
- * earlier one would march every item's saved date forward every time you
- * re-import.
- */
 /**
  * Idempotent on (source, external_id), because imports will run twice.
  *
@@ -83,50 +75,48 @@ export async function upsertItems(
  * stamps import time, so letting each re-import overwrite the last would march
  * every item's saved date forward forever.
  */
-export async function upsertItemsInTransaction(
+export interface UpsertPlan {
+  result: UpsertResult;
+  itemIds: Map<string, string>;
+  statements(db: AnansiDb): AtomicStatement[];
+}
+
+export async function prepareUpsertItems(
   db: AnansiDb,
   batch: IngestItem[],
   options: UpsertOptions = {},
-): Promise<UpsertResult> {
-  if (batch.length === 0) return { inserted: 0, updated: 0, mediaRows: 0 };
+): Promise<UpsertPlan> {
 
-  const existing = await db
-    .select({
-      id: items.id,
-      source: items.source,
-      externalId: items.externalId,
-      savedAt: items.savedAt,
-      savedAtExact: items.savedAtExact,
-    })
-    .from(items);
-
+  const selectionCaptures = batch.flatMap((item) => {
+    const raw = objectValue(item.raw);
+    return item.source === "web" && typeof raw.selection === "string" && raw.selection.trim()
+      ? [{ key: `${item.source}:${item.externalId}`, text: raw.selection.trim(), createdAt: item.savedAt }] : [];
+  });
+  const combined = new Map<string, IngestItem>();
+  for (const item of batch) {
+    const key = `${item.source}:${item.externalId}`;
+    const first = combined.get(key);
+    if (!first) combined.set(key, item);
+    else combined.set(key, { ...first, ...item, body: longer(first.body, item.body) ?? "",
+      raw: mergeUseful(objectValue(first.raw), objectValue(item.raw)),
+      media: [...first.media, ...item.media], links: [...new Set([...first.links, ...item.links])],
+      savedAt: first.savedAtIsExact ? first.savedAt : item.savedAtIsExact ? item.savedAt : Math.min(first.savedAt, item.savedAt),
+      savedAtIsExact: first.savedAtIsExact || item.savedAtIsExact });
+  }
+  batch = [...combined.values()];
+  // Bound reads to incoming identities, never scan the whole library per capture.
+  const existing: (typeof items.$inferSelect)[] = [];
+  for (let start = 0; start < batch.length; start += 40) {
+    const predicates = batch.slice(start, start + 40).map((item) =>
+      and(eq(items.source, item.source), eq(items.externalId, item.externalId)));
+    existing.push(...await db.select().from(items).where(or(...predicates)));
+  }
   const prior = new Map(existing.map((r) => [`${r.source}:${r.externalId}`, r]));
-
-  /**
-   * Media is replaced wholesale below, which is right for staleness — a post
-   * that lost an image should not keep a phantom row. But a fresh uuid and a
-   * null stored_key on every re-import would orphan every uploaded thumbnail
-   * and re-download the library each time. So the identity and the upload
-   * state are carried across, keyed by what actually identifies a media item:
-   * its item and its origin url.
-   */
-  const priorMedia = new Map(
-    (
-      await db
-        .select({
-          id: media.id,
-          itemId: media.itemId,
-          originUrl: media.originUrl,
-          storedKey: media.storedKey,
-        })
-        .from(media)
-    ).map((m) => [`${m.itemId}|${m.originUrl}`, m]),
-  );
-
   let inserted = 0;
   let updated = 0;
   const rows: NewDbItem[] = [];
   const mediaRows: (typeof media.$inferInsert)[] = [];
+  const highlightRows: (typeof highlights.$inferInsert)[] = [];
 
   for (const item of batch) {
     const was = prior.get(`${item.source}:${item.externalId}`);
@@ -141,59 +131,67 @@ export async function upsertItemsInTransaction(
           : Math.min(was.savedAt, item.savedAt)
       : item.savedAt;
 
+    const oldRaw = objectJson(was?.raw);
+    const newRaw = objectValue(item.raw);
+    const shallow = options.captureOrigin === "chrome_bookmark";
+    const keepRich = !!was && shallow && (was.captureOrigin !== "chrome_bookmark" || !!was.articleText || typeof oldRaw.capturedBy === "string");
+    const mergedRaw = mergeUseful(oldRaw, { ...newRaw, links: item.links });
+    const articleText = longer(was?.articleText, typeof newRaw.text === "string" ? newRaw.text : undefined);
+    for (const selection of selectionCaptures.filter((capture) => capture.key === `${item.source}:${item.externalId}`)) {
+      highlightRows.push({ id: crypto.randomUUID(), itemId: id, text: selection.text, createdAt: selection.createdAt });
+    }
     rows.push({
       id,
       source: item.source,
       externalId: item.externalId,
       url: item.url,
       kind: item.kind,
-      authorHandle: item.authorHandle ?? null,
-      authorName: item.authorName ?? null,
-      authorAvatar: item.authorAvatar ?? null,
-      title: item.title ?? null,
-      body: item.body,
-      lang: item.lang ?? null,
-      postedAt: item.postedAt ?? null,
+      authorHandle: (keepRich ? was?.authorHandle : item.authorHandle) || was?.authorHandle || null,
+      authorName: (keepRich ? was?.authorName : item.authorName) || was?.authorName || null,
+      authorAvatar: item.authorAvatar || was?.authorAvatar || null,
+      title: (keepRich ? was?.title : item.title) || was?.title || null,
+      body: keepRich ? was!.body : shallow ? item.body : longer(was?.body, item.body),
+      articleText,
+      articleFormat: articleText === was?.articleText ? was.articleFormat : newRaw.articleFormat === "markdown" ? "markdown" : "plain",
+      contentTruncated: articleText === was?.articleText ? was.contentTruncated : newRaw.contentTruncated === true ? 1 : 0,
+      lang: item.lang || was?.lang || null,
+      postedAt: item.postedAt ?? was?.postedAt ?? null,
       savedAt,
       savedAtExact: item.savedAtIsExact || was?.savedAtExact === 1 ? 1 : 0,
       captureOrigin: options.captureOrigin ?? "legacy_unknown",
       saveOrder: item.saveOrder ?? null,
-      metrics: JSON.stringify(item.metrics),
+      metrics: JSON.stringify({ ...objectJson(was?.metrics), ...item.metrics }),
       // links ride inside raw rather than earning a column: the spec's schema
       // has none, and they are read only when one item is opened. Folded in
       // here because the row shape drops every NormalizedItem field that has
       // no column, and get_item promises links.
-      raw: JSON.stringify(
-        item.raw && typeof item.raw === "object"
-          ? { ...(item.raw as Record<string, unknown>), links: item.links }
-          : { raw: item.raw, links: item.links },
-      ),
+      raw: JSON.stringify(mergedRaw),
     });
 
     for (const m of item.media) {
       if (!m.originUrl) continue;
-      const seen = priorMedia.get(`${id}|${m.originUrl}`);
       mediaRows.push({
-        id: seen?.id ?? crypto.randomUUID(),
+        id: crypto.randomUUID(),
         itemId: id,
         kind: m.kind,
         originUrl: m.originUrl,
-        storedKey: seen?.storedKey ?? null,
+        storedKey: null,
         width: m.width ?? null,
         height: m.height ?? null,
       });
     }
   }
 
-  // 15 columns per row; 200 rows is 3,000 bound parameters, well inside
-  // SQLite's limit and few enough statements that the overhead disappears.
-  const CHUNK = 200;
+  // D1 allows at most 100 bound values per statement. Item rows have 27 columns.
+  const CHUNK = 3;
 
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    await db
-      .insert(items)
-      .values(rows.slice(i, i + CHUNK))
-      .onConflictDoUpdate({
+  const statements = (target: AnansiDb): AtomicStatement[] => {
+    const pending: AtomicStatement[] = [];
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      pending.push(target
+        .insert(items)
+        .values(rows.slice(i, i + CHUNK))
+        .onConflictDoUpdate({
         target: [items.source, items.externalId],
         set: {
           url: sql`excluded.url`,
@@ -203,6 +201,9 @@ export async function upsertItemsInTransaction(
           authorAvatar: sql`excluded.author_avatar`,
           title: sql`excluded.title`,
           body: sql`excluded.body`,
+          articleText: sql`excluded.article_text`,
+          articleFormat: sql`excluded.article_format`,
+          contentTruncated: sql`excluded.content_truncated`,
           lang: sql`excluded.lang`,
           postedAt: sql`excluded.posted_at`,
           savedAt: sql`excluded.saved_at`,
@@ -220,24 +221,29 @@ export async function upsertItemsInTransaction(
           metrics: sql`excluded.metrics`,
           raw: sql`excluded.raw`,
         },
-      });
-  }
+        }));
+    }
 
-  // Media is replaced wholesale per item: cheap at this size, and it means
-  // a post that lost an image does not keep a phantom row forever.
-  const ids = rows.map((r) => r.id);
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    await db.delete(media).where(inArray(media.itemId, ids.slice(i, i + CHUNK)));
-  }
-  for (let i = 0; i < mediaRows.length; i += CHUNK) {
-    await db.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoNothing();
-  }
+    // An absent remote attachment is not a deletion request. Preserve existing IDs,
+    // downloaded keys and job state; only add newly discovered attachments.
+    for (let i = 0; i < mediaRows.length; i += CHUNK) {
+      pending.push(target.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoNothing());
+    }
+    for (let i = 0; i < highlightRows.length; i += CHUNK) {
+      pending.push(target.insert(highlights).values(highlightRows.slice(i, i + CHUNK)).onConflictDoNothing());
+    }
+    return pending;
+  };
 
-  return { inserted, updated, mediaRows: mediaRows.length };
+  return {
+    result: { inserted, updated, mediaRows: mediaRows.length },
+    itemIds: new Map(rows.map((row) => [`${row.source}:${row.externalId}`, row.id])),
+    statements,
+  };
 }
 
 export async function countItems(db: AnansiDb): Promise<number> {
-  const [row] = await db.select({ n: sql<number>`count(*)` }).from(items);
+  const [row] = await db.select({ n: sql<number>`count(*)` }).from(items).where(visibleSourceClause(sql`${items.source}`));
   return row?.n ?? 0;
 }
 
@@ -264,7 +270,7 @@ export async function creators(db: AnansiDb, limit = 20) {
            count(*) as saves,
            max(posted_at) as lastPosted
     from items
-    where author_handle is not null
+    where author_handle is not null and ${visibleSourceClause(sql`source`)}
     group by author_handle
     order by saves desc
     limit ${limit}
@@ -299,13 +305,14 @@ export async function tagItems(db: AnansiDb, ids: string[], label: string): Prom
   const clean = label.trim().toLowerCase();
   if (ids.length === 0 || !clean) return 0;
 
-  const existing = await db.select({ id: tags.id }).from(tags).where(eq(tags.label, clean)).limit(1);
+  const existing = await db.select({ id: tags.id, color: tags.color }).from(tags).where(eq(tags.label, clean)).limit(1);
   const tagId = existing[0]?.id ?? crypto.randomUUID();
   if (!existing[0]) {
-    await db.insert(tags).values({ id: tagId, label: clean, origin: "manual" }).onConflictDoNothing();
+    await db.insert(tags).values({ id: tagId, label: clean, color: randomTagColor(), origin: "manual" }).onConflictDoNothing();
   }
 
   for (let i = 0; i < ids.length; i += 200) {
+    await db.delete(itemTagOverrides).where(and(inArray(itemTagOverrides.itemId, ids.slice(i, i + 200)), eq(itemTagOverrides.tagId, tagId)));
     await db
       .insert(itemTags)
       .values(ids.slice(i, i + 200).map((itemId) => ({ itemId, tagId })))
@@ -316,11 +323,30 @@ export async function tagItems(db: AnansiDb, ids: string[], label: string): Prom
 
 /** Tags that exist, with how many items carry each. */
 export async function listTags(db: AnansiDb) {
-  return db.all<{ label: string; count: number }>(sql`
-    select t.label as label, count(it.item_id) as count
+  return db.all<{ label: string; color: string; count: number }>(sql`
+    select t.label as label, t.color as color, count(it.item_id) as count
     from tags t left join item_tags it on it.tag_id = t.id
+      and exists (select 1 from items visible_item where visible_item.id = it.item_id and ${visibleSourceClause(sql`visible_item.source`)})
     group by t.id order by count desc, t.label asc
   `);
+}
+
+const TAG_COLORS = [
+	"#ef4444",
+	"#f97316",
+	"#eab308",
+	"#22c55e",
+	"#14b8a6",
+	"#06b6d4",
+	"#3b82f6",
+	"#8b5cf6",
+	"#ec4899",
+] as const;
+
+function randomTagColor(): (typeof TAG_COLORS)[number] {
+	const random = new Uint32Array(1);
+	crypto.getRandomValues(random);
+	return TAG_COLORS[random[0]! % TAG_COLORS.length]!;
 }
 
 /** Sources switched off. Absence means enabled, so this is the exception list. */
@@ -346,4 +372,29 @@ export async function setSourceEnabled(
     target: sourceSettings.source,
     set: { enabled: row.enabled, updatedAt: row.updatedAt },
   });
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+function objectJson(value: string | null | undefined): Record<string, unknown> {
+  try { return objectValue(JSON.parse(value ?? "{}")); } catch { return {}; }
+}
+function longer(previous: string | null | undefined, incoming: string | null | undefined): string | null {
+  return (incoming?.trim().length ?? 0) >= (previous?.trim().length ?? 0) ? incoming || previous || null : previous || null;
+}
+/** Partial provider responses never clear useful fields; explicit user deletion is separate. */
+function mergeUseful(previous: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...previous };
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value === null || value === undefined || value === "") continue;
+    if (Array.isArray(value)) {
+      const old = Array.isArray(previous[key]) ? previous[key] as unknown[] : [];
+      result[key] = [...new Map([...old, ...value].map((v) => [JSON.stringify(v), v])).values()];
+    } else if (typeof value === "object") result[key] = mergeUseful(objectValue(previous[key]), objectValue(value));
+    else if (["text", "ownText", "readme", "description"].includes(key) && typeof value === "string")
+      result[key] = longer(typeof previous[key] === "string" ? previous[key] as string : undefined, value);
+    else result[key] = value;
+  }
+  return result;
 }

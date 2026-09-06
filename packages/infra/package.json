@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "check-types": "tsc --noEmit",
-    "dev": "alchemy dev",
-    "deploy": "alchemy deploy",
+    "prepare:migrations": "bun run scripts/prepare-migrations.ts",
+    "dev": "bun run prepare:migrations && alchemy dev",
+    "deploy": "bun run prepare:migrations && alchemy deploy",
     "destroy": "alchemy destroy"
   },
   "dependencies": {

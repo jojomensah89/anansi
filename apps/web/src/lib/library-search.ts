@@ -34,9 +34,14 @@ export interface LibrarySearch {
   tag?: string[];
   media?: string;
   archived?: boolean;
+  favorite?: boolean;
   /** "exclude" is only what is still saved; "only" is only what has gone. */
   removed?: string;
   view?: ViewMode;
+  /** Full search is a library state so it survives reload, back, and sharing. */
+  q?: string;
+  /** The drawer is URL state while the library underneath keeps its scroll. */
+  item?: string;
 }
 
 /** Long enough for any real handle or tag, short enough not to reach the query. */
@@ -74,6 +79,8 @@ function asList(value: unknown): string[] | undefined {
  */
 export function validateLibrarySearch(search: Record<string, unknown>): LibrarySearch {
   const media = typeof search.media === "string" ? search.media : undefined;
+  const q = typeof search.q === "string" ? search.q.trim().slice(0, 500) : "";
+  const item = typeof search.item === "string" ? search.item.trim().slice(0, 160) : "";
   return {
     source: asList(search.source),
     author: asList(search.author),
@@ -85,17 +92,24 @@ export function validateLibrarySearch(search: Record<string, unknown>): LibraryS
         ? search.removed
         : undefined,
     archived: search.archived === true || search.archived === "true" ? true : undefined,
+    favorite: search.favorite === true || search.favorite === "true" ? true : undefined,
     view: VIEWS.find((v) => v === search.view),
+    q: q || undefined,
+    item: item || undefined,
   };
 }
 
 const some = (value: string[] | undefined) =>
   value && value.length > 0 ? value : undefined;
 
-export type LibraryFilters = Omit<LibrarySearch, "view">;
+export type LibraryFilters = Omit<LibrarySearch, "view" | "q" | "item">;
 
 /** Absent rather than empty, so a cleared filter leaves no trace in the URL. */
-export function toLibrarySearch(filters: LibraryFilters, view: ViewMode): LibrarySearch {
+export function toLibrarySearch(
+  filters: LibraryFilters,
+  view: ViewMode,
+  state: Pick<LibrarySearch, "q" | "item"> = {},
+): LibrarySearch {
   return {
     source: some(filters.source),
     author: some(filters.author),
@@ -104,7 +118,10 @@ export function toLibrarySearch(filters: LibraryFilters, view: ViewMode): Librar
     media: filters.media,
     removed: filters.removed,
     archived: filters.archived ? true : undefined,
+    favorite: filters.favorite ? true : undefined,
     // The default view is the absence of the param, so a plain "/" stays plain.
     view: view === "grid" ? undefined : view,
+    q: state.q?.trim() || undefined,
+    item: state.item?.trim() || undefined,
   };
 }

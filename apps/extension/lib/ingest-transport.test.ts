@@ -73,7 +73,7 @@ describe("ingest transport", () => {
 		expect(JSON.parse(String(calledInit?.body))).toEqual(capture);
 	});
 
-	test("parses Retry-After without reading or reflecting an error body", async () => {
+	test("parses Retry-After without reflecting an unsafe error body", async () => {
 		const transport = createIngestTransport(
 			async () => ({
 				ingest: "https://anansi.example/api/ingest",
@@ -92,6 +92,89 @@ describe("ingest transport", () => {
 			status: 429,
 			retryAfterMs: 120_000,
 		});
+	});
+
+	test("keeps a bounded non-sensitive JSON explanation for a rejected capture", async () => {
+		const transport = createIngestTransport(
+			async () => ({
+				ingest: "https://anansi.example/api/ingest",
+				token: "token",
+			}),
+			async () =>
+				new Response(
+					JSON.stringify({
+						error: "capture did not match the X bookmark schema",
+					}),
+					{
+						status: 422,
+						headers: { "content-type": "application/json" },
+					},
+				),
+		);
+
+		expect(await transport.send(record)).toEqual({
+			kind: "http",
+			status: 422,
+			detail: "capture did not match the X bookmark schema",
+		});
+	});
+
+	test("drops any explanation that mentions credential material", async () => {
+		for (const error of [
+			"authorization header: CANARYsecret16",
+			"password is CANARYsecret16",
+			"access_token=CANARYsecret16",
+			"Bearer CANARYsecret16",
+			"api-key: CANARYsecret16",
+			"auth_token=CANARYsecret16",
+			"refresh_token=CANARYsecret16",
+			"client_secret=CANARYsecret16",
+			"session_key=CANARYsecret16",
+		]) {
+			const transport = createIngestTransport(
+				async () => ({
+					ingest: "https://anansi.example/api/ingest",
+					token: "token",
+				}),
+				async () =>
+					new Response(JSON.stringify({ error }), {
+						status: 422,
+						headers: { "content-type": "application/json" },
+					}),
+			);
+			expect(await transport.send(record)).toEqual({
+				kind: "http",
+				status: 422,
+			});
+		}
+	});
+
+	test("ignores HTML, malformed, nested, and oversized rejection bodies", async () => {
+		const target = async () => ({
+			ingest: "https://anansi.example/api/ingest",
+			token: "token",
+		});
+		for (const response of [
+			new Response("<h1>secret</h1>", { status: 422 }),
+			new Response("not-json", {
+				status: 422,
+				headers: { "content-type": "application/json" },
+			}),
+			new Response(JSON.stringify({ error: { token: "secret" } }), {
+				status: 422,
+				headers: { "content-type": "application/json" },
+			}),
+			new Response(JSON.stringify({ error: "x".repeat(5_000) }), {
+				status: 422,
+				headers: { "content-type": "application/json" },
+			}),
+		]) {
+			const transport = createIngestTransport(target, async () => response);
+			expect(await transport.send(record)).toEqual({
+				kind: "http",
+				status: 422,
+			});
+		}
 	});
 
 	test("classifies network failures and malformed success bodies", async () => {

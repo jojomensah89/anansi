@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type Creator, type ItemQuery } from "../lib/api.ts";
+import { api, sourceLabel, type Creator, type ItemQuery } from "../lib/api.ts";
 import { SourceMark } from "./sourcemark.tsx";
+import { storedAvatarSource } from "./avatar.tsx";
 
 /**
  * The filter bar.
@@ -26,7 +27,7 @@ import { SourceMark } from "./sourcemark.tsx";
  */
 export type Filters = Pick<
   ItemQuery,
-  "source" | "author" | "media" | "type" | "tag" | "archived" | "removed"
+  "source" | "author" | "media" | "type" | "tag" | "archived" | "favorite" | "removed"
 >;
 
 interface Option {
@@ -57,11 +58,10 @@ interface Field {
  * and the count decides what appears.
  */
 const SOURCES: { value: string; label: string }[] = [
-  { value: "x", label: "X" },
-  { value: "github", label: "GitHub" },
-  { value: "reddit", label: "Reddit" },
-  { value: "tiktok", label: "TikTok" },
-  { value: "web", label: "Web & bookmarks" },
+  { value: "x", label: sourceLabel("x") },
+  { value: "github", label: sourceLabel("github") },
+  { value: "reddit", label: sourceLabel("reddit") },
+  { value: "web", label: sourceLabel("web") },
 ];
 
 const MEDIA: Option[] = [
@@ -94,7 +94,6 @@ const TYPES_BY_SOURCE: Record<string, Option[]> = {
     { value: "comment", label: "Comment" },
     { value: "article", label: "Article" },
   ],
-  tiktok: [{ value: "video", label: "Video" }],
   github: [{ value: "repo", label: "Repo" }],
   web: [{ value: "article", label: "Page" }],
 };
@@ -177,7 +176,7 @@ export function useFilterBar({
 }): FilterBar {
   const [openChip, setOpenChip] = useState<FieldKey | null>(null);
   const [picking, setPicking] = useState<"fields" | FieldKey | null>(null);
-  const [tags, setTags] = useState<{ label: string; count: number }[]>([]);
+  const [tags, setTags] = useState<{ label: string; color: string; count: number }[]>([]);
   const [creators, setCreators] = useState<Creator[]>([]);
 
   useEffect(() => {
@@ -194,7 +193,7 @@ export function useFilterBar({
     const all: Field[] = [
       {
         key: "source",
-        label: "Platform",
+        label: "Source",
         multi: true,
         icon: FIELD_ICONS.source,
         options: SOURCES.filter((s) => (bySource[s.value] ?? 0) > 0).map((s) => ({
@@ -240,7 +239,12 @@ export function useFilterBar({
         multi: true,
         icon: FIELD_ICONS.tag,
         searchable: tags.length > 8 ? "Search tags…" : undefined,
-        options: tags.map((t) => ({ value: t.label, label: t.label, count: t.count })),
+        options: tags.map((t) => ({
+			value: t.label,
+			label: t.label,
+			count: t.count,
+			icon: <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: t.color || "#6b7280" }} />,
+		})),
       },
     ];
     return all.filter((f) => f.options.length > 0);
@@ -294,9 +298,10 @@ export function useFilterBar({
         tag: undefined,
         removed: undefined,
         archived: undefined,
+        favorite: undefined,
       }),
     clearArchived: () => onChange({ ...filters, archived: undefined }),
-    anyApplied: applied.length > 0 || filters.archived === true,
+    anyApplied: applied.length > 0 || filters.archived === true || filters.favorite === true,
     openChip,
     setOpenChip,
     picking,
@@ -329,17 +334,18 @@ function useDismiss(active: boolean, close: () => void) {
 }
 
 /**
- * The Add-filter button, for the toolbar.
+ * The Add-filter button, for the filter row.
  *
  * Its popover is two levels deep in one place — fields, then that field's
  * values — rather than opening a second popover somewhere else on screen.
  * Choosing a field and then hunting for where its values appeared is the
  * failure this shape avoids.
  */
-export function FilterTrigger({ bar }: { bar: FilterBar }) {
-  const close = useCallback(() => bar.setPicking(null), [bar]);
-  const ref = useDismiss(bar.picking !== null, close);
-  const field = bar.fields.find((f) => f.key === bar.picking);
+export function FilterTrigger({ bar, align = "right" }: { bar: FilterBar; align?: "left" | "right" }) {
+	const close = useCallback(() => bar.setPicking(null), [bar]);
+	const ref = useDismiss(bar.picking !== null, close);
+	const field = bar.fields.find((f) => f.key === bar.picking);
+	const menuAlign = align === "left" ? { left: 0 } : { right: 0 };
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -370,7 +376,7 @@ export function FilterTrigger({ bar }: { bar: FilterBar }) {
       </button>
 
       {bar.picking === "fields" && (
-        <Menu style={{ right: 0, width: 214 }}>
+        <Menu style={{ ...menuAlign, width: 214 }}>
           {bar.unapplied.length === 0 ? (
             <div className="mono" style={{ padding: "11px 12px", fontSize: 10.5, color: "var(--faint)" }}>
               every filter is already on
@@ -398,7 +404,7 @@ export function FilterTrigger({ bar }: { bar: FilterBar }) {
           onToggle={bar.toggleValue}
           onClear={() => bar.setValues(field.key, [])}
           onBack={() => bar.setPicking("fields")}
-          align={{ right: 0 }}
+			align={menuAlign}
         />
       )}
     </div>
@@ -408,16 +414,13 @@ export function FilterTrigger({ bar }: { bar: FilterBar }) {
 /**
  * The applied filters, on their own row.
  *
- * Absent entirely when nothing is applied rather than sitting empty: a
- * permanent strip of chrome for a state that is usually empty costs more than
- * it explains.
+ * The trigger lives on this same row as the chips so filtering remains a
+ * single, local gesture instead of a control stranded in the toolbar.
  */
 export function FilterChips({ bar, matched }: { bar: FilterBar; matched: number | null }) {
   const close = useCallback(() => bar.setOpenChip(null), [bar]);
   const ref = useDismiss(bar.openChip !== null, close);
   const open = bar.fields.find((f) => f.key === bar.openChip);
-
-  if (!bar.anyApplied) return null;
 
   return (
     <div ref={ref} style={{ position: "relative", borderTop: "1px solid var(--line-soft)" }}>
@@ -431,6 +434,8 @@ export function FilterChips({ bar, matched }: { bar: FilterBar; matched: number 
           padding: "7px 20px",
         }}
       >
+			<FilterTrigger bar={bar} align="left" />
+
         {bar.applied.map((field) => (
           <Chip
             key={field.key}
@@ -462,27 +467,29 @@ export function FilterChips({ bar, matched }: { bar: FilterBar; matched: number 
           </button>
         )}
 
-        <button
-          type="button"
-          onClick={bar.clearAll}
-          className="mono"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            height: 26,
-            padding: "0 8px",
-            border: "none",
-            background: "transparent",
-            color: "var(--faint)",
-            fontSize: 10.5,
-            cursor: "pointer",
-            fontFamily: "var(--mono)",
-          }}
-        >
-          <Icon d="M6 6l12 12M18 6 6 18" />
-          Clear all
-        </button>
+        {bar.anyApplied && (
+          <button
+            type="button"
+            onClick={bar.clearAll}
+            className="mono"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              height: 26,
+              padding: "0 8px",
+              border: "none",
+              background: "transparent",
+              color: "var(--faint)",
+              fontSize: 10.5,
+              cursor: "pointer",
+              fontFamily: "var(--mono)",
+            }}
+          >
+            <Icon d="M6 6l12 12M18 6 6 18" />
+            Clear all
+          </button>
+        )}
 
         {matched !== null && (
           <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faintest)" }}>
@@ -928,10 +935,11 @@ function ValueMenu({
 }
 
 function Avatar({ creator }: { creator: Creator }) {
-  if (creator.authorAvatar) {
+  const storedSrc = storedAvatarSource(creator.authorAvatar);
+  if (storedSrc) {
     return (
       <img
-        src={creator.authorAvatar}
+        src={storedSrc}
         alt=""
         width={16}
         height={16}

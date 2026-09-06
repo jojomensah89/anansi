@@ -200,7 +200,7 @@ export function RowsSkeleton({ count = 8 }: { count?: number }) {
 
 export function CreatorRowsSkeleton({ count = 10 }: { count?: number }) {
   return (
-    <Loading label="Loading creators">
+    <Loading label="Loading authors">
       <div>
         {Array.from({ length: count }, (_, index) => (
           <div

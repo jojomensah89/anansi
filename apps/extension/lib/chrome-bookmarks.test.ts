@@ -116,7 +116,8 @@ describe("toBookmarkCapture", () => {
   test("Chrome's own date is used, not the time the import ran", async () => {
     const capture = await toBookmarkCapture(bookmark(), "save", now);
 
-    expect(capture?.observedAt).toBe(1_756_684_800);
+    expect(capture?.normalizedItem?.savedAt).toBe(1_756_684_800);
+    expect(capture?.observedAt).toBe(now);
     expect(capture?.normalizedItem?.savedAtIsExact).toBe(true);
   });
 
@@ -141,12 +142,21 @@ describe("toBookmarkCapture", () => {
     expect(await toBookmarkCapture(bookmark({ url: "javascript:1" }), "save", now)).toBeNull();
   });
 
-  test("the event id is derived, so one rename is one event", async () => {
+  test("distinct edits in the same second have independent mutation IDs", async () => {
     const first = await toBookmarkCapture(bookmark(), "save", now);
     const again = await toBookmarkCapture(bookmark({ title: "Renamed" }), "save", now);
 
-    // Same node, same second: one event. The title rides along with it.
-    expect(again?.eventId).toBe(first?.eventId);
+    expect(again?.eventId).not.toBe(first?.eventId);
+  });
+
+  test("installation IDs namespace nodes, while a persisted mutation ID remains stable", async () => {
+    const first = await toBookmarkCapture(bookmark(), "save", now, { installationId: "profile-a", mutationId: "gesture-1" });
+    const replay = await toBookmarkCapture(bookmark(), "save", now, { installationId: "profile-a", mutationId: "gesture-1" });
+    const other = await toBookmarkCapture(bookmark(), "save", now, { installationId: "profile-b", mutationId: "gesture-1" });
+    expect(replay?.eventId).toBe(first?.eventId);
+    expect(other?.eventId).not.toBe(first?.eventId);
+    expect(first?.sourceLink?.externalId).toBe("profile-a:n1");
+    expect(other?.sourceLink?.externalId).toBe("profile-b:n1");
   });
 });
 

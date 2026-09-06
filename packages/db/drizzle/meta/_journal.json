@@ -71,6 +71,34 @@
       "when": 1788540250098,
       "tag": "0009_extension_clients",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788600000000,
+      "tag": "0010_preservation_organization",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788600000001,
+      "tag": "0011_media_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1788717596506,
+      "tag": "0012_tag_colors",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788720000000,
+      "tag": "0013_ai_enrichment",
+      "breakpoints": true
     }
   ]
 }

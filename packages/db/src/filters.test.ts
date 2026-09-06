@@ -43,13 +43,13 @@ describe("source is any of", () => {
 		const db = openTestDb();
 		await upsertItems(db, [
 			item({ source: "x", externalId: "a" }),
-			item({ source: "tiktok", externalId: "b" }),
+			item({ source: "reddit", externalId: "b" }),
 			item({ source: "reddit", externalId: "c" }),
 			item({ source: "github", externalId: "d", kind: "repo" }),
 		]);
 
-		const both = await ids(db, { source: ["x", "tiktok"] });
-		expect(both.sort()).toEqual(["tiktok", "x"]);
+		const both = await ids(db, { source: ["x", "github"] });
+		expect(both.sort()).toEqual(["github", "x"]);
 	});
 
 	test("a single value still works, so every existing caller does", async () => {
@@ -136,13 +136,13 @@ describe("filters combine", () => {
 		const db = openTestDb();
 		await upsertItems(db, [
 			item({ externalId: "a", source: "x", author: "ada" }),
-			item({ externalId: "b", source: "tiktok", author: "ada" }),
+			item({ externalId: "b", source: "reddit", author: "ada" }),
 			item({ externalId: "c", source: "x", author: "kwame" }),
 			item({ externalId: "d", source: "reddit", author: "maya" }),
 		]);
 
 		const page = await listItems(db, {
-			source: ["x", "tiktok"],
+			source: ["x", "reddit"],
 			author: ["ada"],
 			limit: 50,
 		});

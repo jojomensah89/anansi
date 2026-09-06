@@ -33,7 +33,8 @@ const WEB_PORT = Number(process.env.WEB_PORT ?? 3001);
 /** Absolute, always. This is mistake (1), and it costs a real library. */
 const DB_PATH = process.env.ANANSI_DB_PATH ?? join(ROOT, "data", "anansi.db");
 const MEDIA_DIR = process.env.ANANSI_MEDIA_DIR ?? join(ROOT, "data", "media");
-const TOKEN_FILE = join(ROOT, "data", "dev-ingest-token");
+const INGEST_TOKEN_FILE = join(ROOT, "data", "dev-ingest-token");
+const LIBRARY_TOKEN_FILE = join(ROOT, "data", "dev-library-token");
 
 const c = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -63,12 +64,12 @@ async function portIsFree(port: number): Promise<boolean> {
 /** Whether whatever holds the port at least looks like this API. */
 async function looksLikeAnansi(port: number): Promise<boolean> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/stats`, {
+    const res = await fetch(`http://127.0.0.1:${port}/api/auth/session`, {
       signal: AbortSignal.timeout(1_500),
     });
     if (!res.ok) return false;
-    const body = (await res.json()) as { items?: unknown; bySource?: unknown };
-    return typeof body.items === "number" && typeof body.bySource === "object";
+    const body = (await res.json()) as { configured?: unknown; authenticated?: unknown };
+    return typeof body.configured === "boolean" && typeof body.authenticated === "boolean";
   } catch {
     return false;
   }
@@ -80,17 +81,18 @@ async function looksLikeAnansi(port: number): Promise<boolean> {
  * Generated rather than defaulted: a well-known development token has a way of
  * becoming a deployed one.
  */
-async function ingestToken(): Promise<string> {
-  if (process.env.INGEST_TOKEN) return process.env.INGEST_TOKEN;
+async function developmentToken(envName: "INGEST_TOKEN" | "LIBRARY_TOKEN", path: string): Promise<string> {
+  const configured = process.env[envName];
+  if (configured) return configured;
   try {
-    const existing = (await readFile(TOKEN_FILE, "utf8")).trim();
+    const existing = (await readFile(path, "utf8")).trim();
     if (existing.length >= 16) return existing;
   } catch {
     // First run. Fall through and make one.
   }
   const token = crypto.randomUUID().replaceAll("-", "");
-  await mkdir(dirname(TOKEN_FILE), { recursive: true });
-  await writeFile(TOKEN_FILE, `${token}\n`, "utf8");
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${token}\n`, "utf8");
   return token;
 }
 
@@ -169,13 +171,16 @@ process.on("SIGTERM", () => shutdown(0));
 
 await preflight();
 
-const token = await ingestToken();
+const token = await developmentToken("INGEST_TOKEN", INGEST_TOKEN_FILE);
+const libraryToken = await developmentToken("LIBRARY_TOKEN", LIBRARY_TOKEN_FILE);
 
 run("bun", ["run", join(ROOT, "apps", "web", "scripts", "serve-local.ts")], ROOT, {
   PORT: String(API_PORT),
   ANANSI_DB_PATH: DB_PATH,
   ANANSI_MEDIA_DIR: MEDIA_DIR,
   INGEST_TOKEN: token,
+  LIBRARY_TOKEN: libraryToken,
+  ALLOWED_ORIGINS: `http://127.0.0.1:${WEB_PORT}`,
   ...(process.env.MCP_TOKEN ? { MCP_TOKEN: process.env.MCP_TOKEN } : {}),
 });
 
@@ -184,21 +189,22 @@ if (!(await waitForApi(API_PORT))) {
   shutdown(1);
 }
 
-run("bunx", ["vite", "dev", "--port", String(WEB_PORT)], join(ROOT, "apps", "web"), {
-  VITE_API_BASE: `http://127.0.0.1:${API_PORT}`,
-});
+run("bunx", ["vite", "dev", "--host", "127.0.0.1", "--port", String(WEB_PORT)], join(ROOT, "apps", "web"), {});
 
 setTimeout(() => {
   console.log(`
 ${c.bold("  anansi, locally")}
 
-  ${c.green("library")}   http://localhost:${WEB_PORT}
-  ${c.green("api")}       http://127.0.0.1:${API_PORT}
+  ${c.green("library")}   http://127.0.0.1:${WEB_PORT}
+  ${c.green("api")}       http://127.0.0.1:${WEB_PORT}/api
+  ${c.dim("internal")}  http://127.0.0.1:${API_PORT}
   ${c.dim("db")}        ${DB_PATH}
 
-  ${c.bold("extension")}  paste these into the popup's settings:
-    server  ${c.amber(`http://127.0.0.1:${API_PORT}`)}
-    token   ${c.amber(token)}
+  ${c.bold("extension")}  build once with ANANSI_EXTENSION_ORIGIN set to
+             ${c.amber(`http://127.0.0.1:${WEB_PORT}`)} and its private build
+             token set to the same value as INGEST_TOKEN.
+
+  ${c.bold("library sign-in")}  ${c.amber(libraryToken)}
 
   ${c.dim("ctrl-c stops both")}
 `);

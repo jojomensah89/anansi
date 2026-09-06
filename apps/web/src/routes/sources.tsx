@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Rail } from "../components/rail.tsx";
+import { ExtensionIcon } from "../components/extension-icon.tsx";
 import { SourceCardsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
 import {
@@ -74,6 +75,7 @@ function Sources() {
 	const [stats, setStats] = useState({
 		items: 0,
 		authors: 0,
+		archived: 0,
 		bySource: {} as Record<string, number>,
 	});
 
@@ -84,6 +86,7 @@ function Sources() {
 				setStats({
 					items: nextStats.items,
 					authors: nextStats.authors,
+					archived: nextStats.archived,
 					bySource: nextStats.bySource,
 				});
 				setData(nextSources);
@@ -131,10 +134,11 @@ function Sources() {
 	const slow = useSlowLoad(data === null && !loadFailed);
 
 	return (
-		<div style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+		<div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
 			<Rail
-				total={stats.items}
+				 total={stats.items}
 				authors={stats.authors}
+				archived={stats.archived}
 				bySource={stats.bySource}
 			/>
 
@@ -685,22 +689,5 @@ function Notice({ children }: { children: ReactNode }) {
 		>
 			{children}
 		</div>
-	);
-}
-
-function ExtensionIcon() {
-	return (
-		<svg
-			width="16"
-			height="16"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			strokeWidth="1.6"
-			strokeLinejoin="round"
-			aria-hidden="true"
-		>
-			<path d="M10 4a2 2 0 1 1 4 0v2h3a1 1 0 0 1 1 1v3h2a2 2 0 1 1 0 4h-2v3a1 1 0 0 1-1 1h-3v-2a2 2 0 1 0-4 0v2H7a1 1 0 0 1-1-1v-3H4a2 2 0 1 1 0-4h2V7a1 1 0 0 1 1-1h3z" />
-		</svg>
 	);
 }

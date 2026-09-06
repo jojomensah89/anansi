@@ -26,14 +26,14 @@ Anansi captures the things you save online — bookmarks, saved posts, GitHub st
 
 ## ✨ Why Anansi?
 
-Bookmarks rot across X, Reddit, GitHub, TikTok, and 200 open tabs. Pocket-style tools own your data, and agents can't read them.
+Bookmarks rot across X, Reddit, GitHub, and 200 open tabs. Pocket-style tools own your data, and agents can't read them.
 
 Anansi fixes that:
 
 - 📥 **Capture where you browse** — extension uses your existing signed-in session, no scraping service
 - 💸 **~$0 hosting in your account** — one Worker, one D1, one R2. No server to babysit, no account controlled by anyone else, no paid Queues or Durable Objects by design
 - 🔍 **One searchable library** — full text, authors, recency, source filters
-- 🏷️ **Organize your way** — manual tags (bulk included), saved filter collections, highlights, private notes, favorites
+- 🏷️ **Organize your way** — manual tags (bulk included), saved views, highlights, private notes, favorites
 - 🧠 **Agent-native** — Streamable HTTP MCP server with 4 read-focused tools
 - 🔒 **Conservative by design** — bearer-auth ingest, no `<all_urls>`, no `cookies` permission, no GitHub OAuth/PAT
 - 🔁 **Durable** — queued capture with retry + resume cursors, survives restarts and rate limits
@@ -45,13 +45,13 @@ Anansi fixes that:
 | X bookmarks | History import + live saves | Supported |
 | Reddit saves | History import + live saves | Supported |
 | GitHub stars | Full import + live star/unstar events | Supported |
-| Web pages | Toolbar, context menu, and selection capture | Supported |
-| Chrome bookmarks | Optional mirroring into the web library | Supported |
-| TikTok favourites | Observe while browsing your favourites | Experimental |
+| Web pages & bookmarks | Save pages, selections, and Chrome bookmarks | Supported |
+| Chrome bookmarks (web submode) | Optional mirroring into Web pages & bookmarks | Supported |
+| TikTok favorites | — | Paused for repair; existing rows retained but hidden |
 
 > GitHub capture is extension-only. It reads the signed-in GitHub stars pages in your browser, includes repositories visible to that account — including visible private repositories — and needs no GitHub OAuth or personal access token.
 
-Live saves are delivered immediately. Anansi also performs one daily incremental catch-up for sources that support history import, covering changes made while Chrome or the extension was inactive. GitHub and Reddit import via background session requests without opening tabs. X may use a signed-in inactive tab; TikTok remains observation-based. Anansi closes only tabs it created. If a provider session is missing, the popup asks you to sign in — use the explicit **Sign in** button, then retry. Network and rate-limit failures keep the resume cursor.
+Live saves are delivered immediately. Anansi also performs one daily incremental catch-up for sources that support history import, covering changes made while Chrome or the extension was inactive. GitHub and Reddit import via background session requests without opening tabs. Anansi closes only tabs it created. If a provider session is missing, the popup asks you to sign in — use the explicit **Sign in** button, then retry. Network and rate-limit failures keep the resume cursor. TikTok capture is paused in the shipped extension and web UI while its authenticated path is repaired; old rows are retained for a deliberate future re-enable.
 
 ## 🚀 Quickstart
 
@@ -91,7 +91,7 @@ GitHub first import: sign in to GitHub in the same browser profile → popup →
 
 > ⚠️ The hosted path is the intended shape — one Worker, one D1, one R2, deployed with `bun run deploy` — but no clean-account deploy has succeeded yet. Treat this section as the plan, not instructions. First verified deploy will turn it into real steps.
 
-The shape (`packages/infra/alchemy.run.ts`): D1 holds searchable metadata and text (migrations live in `packages/db/drizzle`, never `db:push` — the FTS5 virtual table and triggers need the migration path); R2 holds accepted image copies; retry state lives in D1 in small batches via request `waitUntil` plus scheduled recovery, so there is nothing paid to provision. Three separate secrets gate the three doors: `LIBRARY_TOKEN` (web UI session), `INGEST_TOKEN` (extension), `MCP_TOKEN` (agents). Absent means closed, never open.
+The shape (`packages/infra/alchemy.run.ts`): D1 holds searchable metadata and text (migrations live in `packages/db/drizzle`, never `db:push` — the FTS5 virtual table and triggers need the migration path); R2 holds accepted image copies; retry state lives in D1 in small batches via request `waitUntil` plus scheduled recovery, so there is nothing paid to provision. Workers AI and a 384-dimensional Vectorize index are provisioned but both AI features start off; enable Semantic search or Automatic tags from `/settings` when you want to spend your own Cloudflare quota. Three separate secrets gate the three doors: `LIBRARY_TOKEN` (web UI session), `INGEST_TOKEN` (extension), `MCP_TOKEN` (agents). Absent means closed, never open.
 
 Cloudflare credentials for deploy (unverified — least-privilege list to be confirmed on first successful deploy):
 
@@ -190,7 +190,7 @@ packages/env/      Typed runtime environment bindings
 ```text
 GET  /api/stats   GET /api/items   GET /api/items/:id   GET /api/search?q=...
 GET  /api/recent  GET /api/authors?handle=...           GET /api/creators
-GET  /api/sources POST /api/ingest POST /api/extension/heartbeat
+GET  /api/sources GET/PATCH /api/ai POST /api/ingest POST /api/extension/heartbeat
 GET  /api/extension/config
 ```
 
@@ -212,7 +212,7 @@ bun run anansi serve --mcp
 ## 🔒 Privacy by design
 
 - No `<all_urls>` permission · No `cookies` permission · No GitHub OAuth / PAT for extension capture
-- GitHub + Reddit use browser-managed session cookies; X + TikTok use signed-in page scripts. Cookie values are never read or uploaded.
+- GitHub + Reddit use browser-managed session cookies; X uses signed-in page scripts. Cookie values are never read or uploaded.
 - Raw payloads are bounded and validated before server-side parsing; extension traffic is bearer-authed
 - Chrome bookmark access is optional, requested only when mirroring is enabled
 - Local DB + media live under `data/` (local dev); D1 + R2 in your account (hosted). Never commit `.env`, database files, raw captures, or media.

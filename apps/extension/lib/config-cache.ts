@@ -10,6 +10,12 @@ export function normalizeServerOrigin(value: string): string | null {
 		const url = new URL(value.trim());
 		if (url.protocol !== "http:" && url.protocol !== "https:") return null;
 		if (url.username || url.password) return null;
+		if (
+			url.protocol === "http:" &&
+			url.hostname !== "localhost" &&
+			url.hostname !== "127.0.0.1" &&
+			url.hostname !== "[::1]"
+		) return null;
 		return url.origin;
 	} catch {
 		return null;

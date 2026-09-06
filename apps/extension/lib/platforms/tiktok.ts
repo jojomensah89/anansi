@@ -129,6 +129,25 @@ export function readHandle(scope: unknown): string | null {
 	return null;
 }
 
+/**
+ * Current TikTok builds no longer expose either hydration object, but keep a
+ * stable navigation link to the signed-in account. Accept only TikTok profile
+ * paths and run the result through the same handle validation as hydration.
+ */
+export function readHandleFromProfileHref(href: unknown): string | null {
+	if (typeof href !== "string") return null;
+	try {
+		const parsed = new URL(href, "https://www.tiktok.com");
+		if (parsed.hostname !== "www.tiktok.com" && parsed.hostname !== "tiktok.com") return null;
+		const parts = parsed.pathname.split("/").filter(Boolean);
+		if (parts.length !== 1 || !parts[0]?.startsWith("@")) return null;
+		const handle = parts[0].slice(1);
+		return HANDLE.test(handle) ? handle : null;
+	} catch {
+		return null;
+	}
+}
+
 export function profileUrl(handle: string): string | null {
 	return HANDLE.test(handle) ? `https://www.tiktok.com/@${handle}` : null;
 }

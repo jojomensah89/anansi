@@ -1,21 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
-import type { RemoteConfig, SourceConfig, Status } from "../background.ts";
+import { extensionConnection } from "../../lib/connection.ts";
 import { MESSAGE_PROTOCOL_VERSION } from "../../lib/messages.ts";
+import {
+  CONNECTED_CONNECTION,
+  connectionFromStatus,
+  LOADING_CONNECTION,
+  type PopupConnectionState,
+  popupSourceRows,
+  UNREACHABLE_CONNECTION,
+  validatePopupRemoteConfig,
+} from "../../lib/popup-connection.ts";
 import {
   describeQueue,
   describeSource,
   redactError,
   type SourceSnapshot,
   type Tone,
+  withoutStartingSource,
 } from "../../lib/popup-state.ts";
+import type { RemoteConfig, SourceConfig, Status } from "../background.ts";
 import "./App.css";
 
 /**
  * The popup.
- *
- * Shaped after [removed]'s, which gets one thing right that a row of counters
- * does not: the question you open this for is "is it working", and a number
- * only answers that if you remember what it was last time.
  *
  * So each source says its state in words — but the words are derived, here,
  * from durable run records and durable outbox counts, and never read out of a
@@ -53,14 +60,6 @@ const TONES: Record<Tone, string> = {
   faint: S.faint,
 };
 
-const INTERVALS = [
-  { value: 0, label: "off" },
-  { value: 60, label: "1h" },
-  { value: 120, label: "2h" },
-  { value: 360, label: "6h" },
-  { value: 1440, label: "daily" },
-];
-
 interface Stats {
   items: number;
   today: number;
@@ -77,6 +76,7 @@ interface QueueStatus {
 interface RunRecord {
   phase: "idle" | "running";
   startedAt?: number;
+  updatedAt?: number;
   paused?: boolean;
   lastErrorCode?: string;
 }
@@ -94,14 +94,10 @@ const EMPTY_QUEUE: QueueStatus = {
   failed: 0,
 };
 
-/** What the server can offer. Anything missing from its config is switched off. */
-const KNOWN_SOURCES = ["x", "reddit", "tiktok", "github"];
-
 const NAMES: Record<string, string> = {
-  x: "Twitter / X",
-  reddit: "Reddit",
-  tiktok: "TikTok",
-  github: "GitHub",
+  x: "X bookmarks",
+  reddit: "Reddit saves",
+  github: "GitHub stars",
 };
 
 const MARK_PROPS = {
@@ -135,37 +131,27 @@ const savePage = () => command({ action: "save-page" });
 const mirror = (action: "mirror-status" | "mirror-on" | "mirror-off") =>
   command({ action }) as Promise<{ ok?: boolean; mirroring?: boolean; error?: string } | undefined>;
 
-const retry = (source?: string) =>
-  command(source ? { action: "retry-queue", source } : { action: "retry-queue" });
+const retry = (source?: string) => command(source ? { action: "retry-queue", source } : { action: "retry-queue" });
 
 export default function App() {
-  const [server, setServer] = useState("");
-  const [token, setToken] = useState("");
-  const [syncEvery, setSyncEvery] = useState(0);
   const [status, setStatus] = useState<Status>({});
   const [config, setConfig] = useState<RemoteConfig | null>(null);
+  const [connectionState, setConnectionState] = useState<PopupConnectionState>(LOADING_CONNECTION);
   const [stats, setStats] = useState<Stats | null>(null);
   const [snapshot, setSnapshot] = useState<DurableSnapshot | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [saving, setSaving] = useState<null | "saving" | "saved" | string>(null);
   const [mirroring, setMirroring] = useState<boolean | null>(null);
   const [mirrorNote, setMirrorNote] = useState<string | null>(null);
+  const [startingSources, setStartingSources] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     void mirror("mirror-status").then((r) => setMirroring(r?.mirroring ?? false));
   }, []);
 
   useEffect(() => {
-    void browser.storage.local.get(["server", "token", "syncEvery", "status"]).then((s) => {
-      const hasServer = !!String(s.server ?? "").trim();
-      setServer(String(s.server ?? ""));
-      setToken(String(s.token ?? ""));
-      setSyncEvery(Number(s.syncEvery ?? 0));
+    void browser.storage.local.get("status").then((s) => {
       setStatus((s.status as Status) ?? {});
-      // First run opens on the settings, every run after that on the sources.
-      setSettingsOpen(!hasServer);
     });
     const onChange = (changes: Record<string, { newValue?: unknown }>) => {
       if (changes.status) setStatus((changes.status.newValue as Status) ?? {});
@@ -174,7 +160,7 @@ export default function App() {
     return () => browser.storage.local.onChanged.removeListener(onChange);
   }, []);
 
-  const base = server.replace(/\/+$/, "");
+  const { origin: base, token } = extensionConnection();
 
   /**
    * Ask the worker what is actually persisted.
@@ -192,26 +178,82 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!base || !token.trim()) return;
-    const load = () => {
-      fetch(`${base}/api/extension/config`).then((r) => (r.ok ? r.json() : null)).then(setConfig).catch(() => setConfig(null));
-      fetch(`${base}/api/stats`).then((r) => (r.ok ? r.json() : null)).then(setStats).catch(() => setStats(null));
-      refresh();
+    let current = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let requestController: AbortController | undefined;
+    const load = async () => {
+      requestController = new AbortController();
+      const requestTimeout = setTimeout(() => requestController?.abort(), 10_000);
+      try {
+        const options = {
+          headers: { Authorization: `Bearer ${token}` },
+          redirect: "error" as const,
+          signal: requestController.signal,
+        };
+        const configResponse = await fetch(`${base}/api/extension/config`, options);
+        if (!configResponse.ok) {
+          if (current) {
+            setConfig(null);
+            setStats(null);
+            setConnectionState(connectionFromStatus(configResponse.status));
+          }
+          return;
+        }
+        const nextConfig: unknown = await configResponse.json();
+        if (!validatePopupRemoteConfig(nextConfig)) {
+          if (current) {
+            setConfig(null);
+            setConnectionState({
+              kind: "incompatible",
+              message: "Incompatible server — update or redeploy Anansi",
+            });
+          }
+          return;
+        }
+        if (current) {
+          setConfig(nextConfig as RemoteConfig);
+          setConnectionState(CONNECTED_CONNECTION);
+        }
+
+        const statsResponse = await fetch(`${base}/api/extension/stats`, options);
+        if (current) {
+          setStats(statsResponse.ok ? ((await statsResponse.json()) as Stats) : null);
+        }
+      } catch {
+        if (current) {
+          setConfig(null);
+          setStats(null);
+          setConnectionState(UNREACHABLE_CONNECTION);
+        }
+      } finally {
+        clearTimeout(requestTimeout);
+        requestController = undefined;
+        if (current) {
+          refresh();
+          timer = setTimeout(() => void load(), 4000);
+        }
+      }
     };
-    load();
-    // Refresh while a run is in flight, so the numbers move as it works.
-    const timer = setInterval(load, 4000);
-    return () => clearInterval(timer);
+    void load();
+    return () => {
+      current = false;
+      if (timer !== undefined) clearTimeout(timer);
+      requestController?.abort();
+    };
   }, [base, token, refresh]);
 
-  const save = async () => {
-    await browser.storage.local.set({ server: base, token, syncEvery });
-    await command({ action: "reschedule" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  };
-
-  const configured = base !== "" && token.trim() !== "";
+  // The worker's durable run record is authoritative once it exists. Until
+  // then, keep an optimistic per-source label so a click has immediate proof
+  // of life instead of waiting for the next polling cycle.
+  useEffect(() => {
+    if (!snapshot || startingSources.size === 0) return;
+    const settled = new Set(startingSources);
+    for (const source of startingSources) {
+      const run = snapshot.runs[source];
+      if (run?.phase === "running" || run?.lastErrorCode || run?.paused) settled.delete(source);
+    }
+    if (settled.size !== startingSources.size) setStartingSources(settled);
+  }, [snapshot, startingSources]);
   const queue = snapshot?.queue ?? EMPTY_QUEUE;
   const outbox = describeQueue(queue);
 
@@ -222,26 +264,27 @@ export default function App() {
    * vanishes reads as a bug rather than a setting. So the known sources are
    * appended back, marked off, and say so.
    */
-  const rows: Array<SourceConfig & { enabled: boolean }> = [
-    ...(config?.sources ?? []).map((s) => ({ ...s, enabled: true })),
-    ...KNOWN_SOURCES.filter(
-      (source) => config && !config.sources.some((s) => s.source === source),
-    ).map((source) => ({
-      source,
-      host: source,
-      mode: "page" as const,
-      enabled: false,
-    })),
-  ];
+  const rows = popupSourceRows(config?.sources ?? null);
 
   /** Everything one row needs, entirely from persisted state. */
-  const viewOf = (s: SourceConfig & { enabled: boolean }) => {
+  const viewOf = (s: SourceConfig & { enabled: boolean; configured: boolean }) => {
+    if (!s.configured && config === null) {
+      return {
+        state: "ready" as const,
+        text: connectionState.message,
+        tone: connectionState.kind === "loading" ? ("faint" as const) : ("warn" as const),
+        action: "none" as const,
+        actionLabel: "Import",
+        settled: false,
+      };
+    }
     const run = snapshot?.runs[s.source];
     const input: SourceSnapshot = {
       source: s.source,
       enabled: s.enabled,
       phase: run?.phase ?? "idle",
       startedAt: run?.startedAt,
+      updatedAt: run?.updatedAt,
       paused: run?.paused,
       lastErrorCode: run?.lastErrorCode,
       queue: snapshot?.bySource?.[s.source] ?? EMPTY_QUEUE,
@@ -253,13 +296,11 @@ export default function App() {
 
   const act = (s: SourceConfig, action: string) => {
     if (action === "pause") return void pause(s.source);
-    if (action === "retry") return void retry(s.source).then(refresh);
-    if (action === "sign-in") {
-      return void browser.tabs.create({
-        url: s.source === "github" ? (s.url ?? "https://github.com/stars") : `https://${s.host}`,
-      });
-    }
-    return void start(s.source);
+    setStartingSources((previous) => new Set(previous).add(s.source));
+    void start(s.source).then(
+      () => setStartingSources((previous) => withoutStartingSource(previous, s.source)),
+      () => setStartingSources((previous) => withoutStartingSource(previous, s.source)),
+    );
   };
 
   /**
@@ -270,299 +311,470 @@ export default function App() {
    */
   const running = rows.filter((s) => viewOf(s).state === "running").length;
   const summary =
-    running > 0
-      ? `${running} running`
-      : outbox.total > 0
-        ? `${outbox.total} in the outbox`
-        : "nothing waiting";
+    running > 0 ? `${running} running` : outbox.total > 0 ? `${outbox.total} in the outbox` : "nothing waiting";
 
   // Whatever last went wrong, with anything credential-shaped removed.
-  const diagnostics = Object.entries(status)
-    .filter(([, st]) => !!st.message)
-    .map(([source, st]) => `${source}: ${redactError(st.message ?? "")}`);
+  const diagnostics = [
+    ...(connectionState.kind === "connected" || connectionState.kind === "loading"
+      ? []
+      : [`connection: ${connectionState.message}`]),
+    ...Object.entries(status).flatMap(([source, st]) =>
+      st.message && !(source === "_" && connectionState.kind === "connected")
+        ? [`${source}: ${redactError(st.message)}`]
+        : [],
+    ),
+  ];
 
   return (
-    <div className="anansi-popup" style={{ width: 344, background: S.ink, color: S.text, fontFamily: "system-ui, sans-serif", fontSize: 13 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 16px 0" }}>
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={S.accent} strokeWidth="1.6" strokeLinecap="round">
+    <div
+      className="anansi-popup"
+      style={{
+        width: 344,
+        background: S.ink,
+        color: S.text,
+        fontFamily: "system-ui, sans-serif",
+        fontSize: 13,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "14px 16px 0",
+        }}
+      >
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={S.accent}
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        >
           <circle cx="12" cy="12" r="3.2" />
           <path d="M12 8.8V3M12 15.2V21M8.8 12H3M15.2 12H21M9.7 9.7 5.6 5.6M14.3 9.7l4.1-4.1M9.7 14.3l-4.1 4.1M14.3 14.3l4.1 4.1" />
         </svg>
         <strong style={{ fontSize: 14 }}>Anansi</strong>
-        <button
-          type="button"
-          onClick={() => setSettingsOpen((o) => !o)}
-          aria-label="Settings"
-          aria-expanded={settingsOpen}
-          style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: settingsOpen ? S.text : S.faint, padding: 2 }}
-        >
-          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-2.87 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 3 15H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.87 1.2l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 21 9h0a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 2z" />
-          </svg>
-        </button>
       </div>
 
-      {configured && (
-        <div style={{ padding: "12px 16px 14px", display: "flex", alignItems: "baseline", gap: 9 }}>
-          <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.02em" }}>
-            {stats ? stats.items.toLocaleString() : "—"}
+      <div
+        style={{
+          padding: "12px 16px 14px",
+          display: "flex",
+          alignItems: "baseline",
+          gap: 9,
+        }}
+      >
+        <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.02em" }}>
+          {stats ? stats.items.toLocaleString() : "—"}
+        </span>
+        <span style={{ fontSize: 12.5, color: S.muted }}>saved items</span>
+        {stats && stats.today > 0 && (
+          <span
+            style={{
+              marginLeft: "auto",
+              fontFamily: S.mono,
+              fontSize: 11,
+              color: S.ok,
+              border: `1px solid ${S.edge}`,
+              borderRadius: 20,
+              padding: "3px 9px",
+            }}
+          >
+            +{stats.today} today
           </span>
-          <span style={{ fontSize: 12.5, color: S.muted }}>saved</span>
-          {stats && stats.today > 0 && (
-            <span style={{ marginLeft: "auto", fontFamily: S.mono, fontSize: 11, color: S.ok, border: `1px solid ${S.edge}`, borderRadius: 20, padding: "3px 9px" }}>
-              +{stats.today} today
-            </span>
-          )}
-          {stats === null && (
-            <span style={{ marginLeft: "auto", fontFamily: S.mono, fontSize: 10.5, color: S.warn }}>
-              server unreachable
-            </span>
-          )}
-        </div>
-      )}
+        )}
+        {stats === null && (
+          <span
+            style={{
+              marginLeft: "auto",
+              fontFamily: S.mono,
+              fontSize: 10.5,
+              color: connectionState.kind === "loading" ? S.faint : S.warn,
+            }}
+          >
+            {connectionState.message.toLowerCase()}
+          </span>
+        )}
+      </div>
 
-      {configured && outbox.total > 0 && (
-        <div style={{ margin: "0 16px 12px", padding: "8px 10px", border: `1px solid ${queue.failed ? S.warn : S.edge}`, borderRadius: 7, display: "flex", alignItems: "center", gap: 8, color: TONES[outbox.tone], fontSize: 10.5, fontFamily: S.mono }}>
+      {outbox.total > 0 && (
+        <div
+          style={{
+            margin: "0 16px 12px",
+            padding: "8px 10px",
+            border: `1px solid ${queue.failed ? S.warn : S.edge}`,
+            borderRadius: 7,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            color: TONES[outbox.tone],
+            fontSize: 10.5,
+            fontFamily: S.mono,
+          }}
+        >
           <span>outbox · {outbox.text}</span>
           {outbox.canRetry && (
-            <button type="button" onClick={() => void retry().then(refresh)} style={{ ...button, marginLeft: "auto", height: 23, padding: "0 8px", fontSize: 10 }}>
+            <button
+              type="button"
+              onClick={() => void retry().then(refresh)}
+              style={{
+                ...button,
+                marginLeft: "auto",
+                height: 23,
+                padding: "0 8px",
+                fontSize: 10,
+              }}
+            >
               Retry all
             </button>
           )}
         </div>
       )}
 
-      {settingsOpen && (
-        <div style={{ padding: "0 16px 14px", borderBottom: `1px solid ${S.line}` }}>
-          <Label htmlFor="anansi-server">Server</Label>
-          <input id="anansi-server" value={server} onChange={(e) => setServer(e.target.value)} placeholder="http://127.0.0.1:8788" style={input} />
-          <Label htmlFor="anansi-token">Ingest token</Label>
-          <input id="anansi-token" value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="INGEST_TOKEN" style={input} />
-          <Label>Sync automatically</Label>
-          <div style={{ display: "flex", gap: 5, marginBottom: 10 }}>
-            {INTERVALS.map((i) => (
-              <button
-                key={i.value}
-                type="button"
-                onClick={() => setSyncEvery(i.value)}
-                aria-pressed={syncEvery === i.value}
-                style={{
-                  flex: 1,
-                  height: 26,
-                  borderRadius: 5,
-                  fontSize: 11,
-                  cursor: "pointer",
-                  fontFamily: S.mono,
-                  background: syncEvery === i.value ? S.accent : S.card,
-                  color: syncEvery === i.value ? S.ink : S.muted,
-                  border: `1px solid ${syncEvery === i.value ? S.accent : S.edge}`,
-                }}
-              >
-                {i.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 10.5, color: S.faint, lineHeight: 1.5, marginBottom: 10 }}>
-            A scheduled sync opens the site in a background tab and closes it
-            again, using the session your browser already has. Saving something
-            syncs it straight away either way.
-          </div>
-          <button type="button" onClick={save} style={{ ...button, width: "100%" }}>
-            {saved ? "Saved" : "Save"}
-          </button>
-        </div>
-      )}
-
-      {configured && (
-        <div className="anansi-sources">
+      <div className="anansi-sources">
           {rows.map((s) => {
             const view = viewOf(s);
+            const isStarting = startingSources.has(s.source) && view.action === "import";
             return (
-              <div key={s.source} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
-                <span style={{ width: 26, height: 26, borderRadius: 7, background: S.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: S.muted }}>
-                  <Mark source={s.source} />
-                </span>
-                <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{NAMES[s.source] ?? s.host}</span>
-                  <span style={{ fontSize: 11, color: TONES[view.tone], overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {view.text}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  disabled={view.action === "none"}
-                  onClick={() => act(s, view.action)}
-                  aria-label={`${view.actionLabel} ${NAMES[s.source] ?? s.host}`}
+            <div
+              key={s.source}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 11,
+                padding: "11px 16px",
+                borderTop: `1px solid ${S.line}`,
+              }}
+            >
+              <span
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 7,
+                  background: S.raised,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  color: S.muted,
+                }}
+              >
+                <Mark source={s.source} />
+              </span>
+              <span
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  minWidth: 0,
+                  flex: 1,
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{NAMES[s.source] ?? s.host}</span>
+                <span
                   style={{
-                    ...button,
-                    height: 27,
-                    padding: "0 12px",
-                    fontSize: 11.5,
-                    flexShrink: 0,
-                    opacity: view.action === "none" ? 0.4 : 1,
-                    cursor: view.action === "none" ? "default" : "pointer",
-                    background: view.action === "pause" ? S.raised : S.card,
-                    color: view.action === "pause" ? S.faint : S.text,
+                    fontSize: 11,
+                    color: TONES[view.tone],
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  {view.actionLabel}
-                </button>
-              </div>
-            );
-          })}
-          {/*
+                  {view.text}
+                </span>
+              </span>
+              <button
+                type="button"
+                disabled={!s.configured || view.action === "none" || isStarting}
+                onClick={() => act(s, view.action)}
+                aria-label={`${isStarting ? "Starting" : view.actionLabel} ${NAMES[s.source] ?? s.host}`}
+                aria-busy={isStarting}
+                style={{
+                  ...button,
+                  height: 27,
+                  padding: "0 12px",
+                  fontSize: 11.5,
+                  flexShrink: 0,
+                  opacity: !s.configured || view.action === "none" || isStarting ? 0.65 : 1,
+                  cursor: !s.configured || view.action === "none" || isStarting ? "default" : "pointer",
+                  background: view.action === "pause" ? S.raised : S.card,
+                  color: view.action === "pause" ? S.faint : S.text,
+                }}
+              >
+                {isStarting && <span className="anansi-spinner" aria-hidden="true" />}
+                {isStarting ? "Starting…" : view.actionLabel}
+              </button>
+            </div>
+          );
+        })}
+        {/*
             The page you are on. Not a platform row — there is nothing to
             import and nothing to watch — so it says what it does and offers
             the one action it has.
           */}
-          <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
-            <span style={{ width: 26, height: 26, borderRadius: 7, background: S.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: S.muted }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z" />
-              </svg>
-            </span>
-            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>This page</span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: saving === "saved" ? S.ok : saving && saving !== "saving" ? S.warn : S.muted,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {saving === "saving"
-                  ? "Saving…"
-                  : saving === "saved"
-                    ? "Saved to your library"
-                    : (saving ?? "Save this page, or right-click a selection")}
-              </span>
-            </span>
-            <button
-              type="button"
-              disabled={saving === "saving"}
-              onClick={async () => {
-                setSaving("saving");
-                const result = (await savePage()) as { ok?: boolean; error?: string } | undefined;
-                setSaving(result?.ok ? "saved" : (result?.error ?? "could not save that page"));
-                setTimeout(() => setSaving(null), 4000);
-                refresh();
-              }}
-              style={{ ...button, height: 27, padding: "0 12px", fontSize: 11.5, flexShrink: 0 }}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            padding: "11px 16px",
+            borderTop: `1px solid ${S.line}`,
+          }}
+        >
+          <span
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 7,
+              background: S.raised,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              color: S.muted,
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              aria-hidden="true"
             >
-              Save
-            </button>
-          </div>
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z" />
+            </svg>
+          </span>
+          <span
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              minWidth: 0,
+              flex: 1,
+            }}
+          >
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>This page</span>
+            <span
+              style={{
+                fontSize: 11,
+                color: saving === "saved" ? S.ok : saving && saving !== "saving" ? S.warn : S.muted,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {saving === "saving"
+                ? "Saving…"
+                : saving === "saved"
+                  ? "Saved to your library"
+                  : (saving ?? "Save this page, or right-click a selection")}
+            </span>
+          </span>
+          <button
+            type="button"
+            disabled={saving === "saving"}
+            onClick={async () => {
+              setSaving("saving");
+              const result = (await savePage()) as
+                | {
+                    ok?: boolean;
+                    delivery?: "queued" | "uploaded";
+                    error?: string;
+                  }
+                | undefined;
+              setSaving(
+                result?.ok
+                  ? result.delivery === "uploaded"
+                    ? "saved"
+                    : "Saved on this device; waiting to upload"
+                  : (result?.error ?? "could not save that page"),
+              );
+              setTimeout(() => setSaving(null), 4000);
+              refresh();
+            }}
+            style={{
+              ...button,
+              height: 27,
+              padding: "0 12px",
+              fontSize: 11.5,
+              flexShrink: 0,
+            }}
+          >
+            Save
+          </button>
+        </div>
 
-          {/*
+        {/*
             Chrome, kept separate from the sources above and from "This page".
             It is not a platform being watched and not a page being clipped —
             it is the browser's own list, mirrored only if you ask, and the
             permission arrives when you do.
           */}
-          <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
-            <span style={{ width: 26, height: 26, borderRadius: 7, background: S.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: S.muted }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true">
-                <path d="M6 4h12v17l-6-4-6 4z" />
-              </svg>
-            </span>
-            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Chrome bookmarks</span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: mirrorNote ? S.warn : mirroring ? S.faint : S.muted,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {mirrorNote ??
-                  (mirroring === null
-                    ? "Checking…"
-                    : mirroring
-                      ? "Mirroring — new bookmarks arrive as you make them"
-                      : "Off. Turning it on asks Chrome for access")}
-              </span>
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={mirroring === true}
-              aria-label="Mirror Chrome bookmarks"
-              disabled={mirroring === null}
-              onClick={async () => {
-                setMirrorNote(null);
-                const next = !mirroring;
-                const result = await mirror(next ? "mirror-on" : "mirror-off");
-                setMirroring(result?.mirroring ?? false);
-                if (result?.error) setMirrorNote(result.error);
-                refresh();
-              }}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            padding: "11px 16px",
+            borderTop: `1px solid ${S.line}`,
+          }}
+        >
+          <span
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 7,
+              background: S.raised,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              color: S.muted,
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 4h12v17l-6-4-6 4z" />
+            </svg>
+          </span>
+          <span
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              minWidth: 0,
+              flex: 1,
+            }}
+          >
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Chrome bookmarks</span>
+            <span
               style={{
-                width: 36,
-                height: 20,
-                flexShrink: 0,
-                borderRadius: 10,
-                padding: "0 2px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: mirroring ? "flex-end" : "flex-start",
-                background: mirroring ? "#2a3f36" : S.raised,
-                border: `1px solid ${mirroring ? "#3d6353" : S.edge}`,
-                cursor: mirroring === null ? "default" : "pointer",
+                fontSize: 11,
+                color: mirrorNote ? S.warn : mirroring ? S.faint : S.muted,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
               }}
             >
-              <span
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: "50%",
-                  background: mirroring ? S.ok : S.faint,
-                }}
-              />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {configured && (
-        <div style={{ display: "flex", alignItems: "center", padding: "11px 16px", borderTop: `1px solid ${S.line}` }}>
-          <span className="mono" style={{ fontSize: 10.5, color: S.faintest, fontFamily: S.mono }}>
-            {summary}
+              {mirrorNote ??
+                (mirroring === null
+                  ? "Checking…"
+                  : mirroring
+                    ? "Mirroring — new bookmarks arrive as you make them"
+                    : "Off. Turning it on asks Chrome for access")}
+            </span>
           </span>
           <button
             type="button"
-            onClick={() => void browser.tabs.create({ url: base })}
-            style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", font: "inherit", fontSize: 11.5, color: S.accent }}
+            role="switch"
+            aria-checked={mirroring === true}
+            aria-label="Mirror Chrome bookmarks"
+            disabled={mirroring === null}
+            onClick={async () => {
+              setMirrorNote(null);
+              const next = !mirroring;
+              const result = await mirror(next ? "mirror-on" : "mirror-off");
+              setMirroring(result?.mirroring ?? false);
+              if (result?.error) setMirrorNote(result.error);
+              refresh();
+            }}
+            style={{
+              width: 36,
+              height: 20,
+              flexShrink: 0,
+              borderRadius: 10,
+              padding: "0 2px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: mirroring ? "flex-end" : "flex-start",
+              background: mirroring ? "#2a3f36" : S.raised,
+              border: `1px solid ${mirroring ? "#3d6353" : S.edge}`,
+              cursor: mirroring === null ? "default" : "pointer",
+            }}
           >
-            Open library ↗
+            <span
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: "50%",
+                background: mirroring ? S.ok : S.faint,
+              }}
+            />
           </button>
         </div>
-      )}
+      </div>
 
-      {configured && diagnostics.length > 0 && (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "11px 16px",
+          borderTop: `1px solid ${S.line}`,
+        }}
+      >
+        <span className="mono" style={{ fontSize: 10.5, color: S.faintest, fontFamily: S.mono }}>
+          {summary}
+        </span>
+        <button
+          type="button"
+          onClick={() => void browser.tabs.create({ url: new URL("/", base).toString() })}
+          style={{
+            marginLeft: "auto",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            font: "inherit",
+            fontSize: 11.5,
+            color: S.accent,
+          }}
+        >
+          Open library ↗
+        </button>
+      </div>
+
+      {diagnostics.length > 0 && (
         <details className="anansi-diagnostics" style={{ borderTop: `1px solid ${S.line}`, padding: "9px 16px 12px" }}>
-          <summary style={{ fontSize: 10.5, color: S.faint, fontFamily: S.mono }}>
-            Details
-          </summary>
-          <div style={{ marginTop: 7, display: "flex", flexDirection: "column", gap: 5 }}>
+          <summary style={{ fontSize: 10.5, color: S.faint, fontFamily: S.mono }}>Details</summary>
+          <div
+            style={{
+              marginTop: 7,
+              display: "flex",
+              flexDirection: "column",
+              gap: 5,
+            }}
+          >
             {diagnostics.map((line) => (
-              <div key={line} style={{ fontSize: 10.5, fontFamily: S.mono, color: S.muted, lineHeight: 1.45, wordBreak: "break-word" }}>
+              <div
+                key={line}
+                style={{
+                  fontSize: 10.5,
+                  fontFamily: S.mono,
+                  color: S.muted,
+                  lineHeight: 1.45,
+                  wordBreak: "break-word",
+                }}
+              >
                 {line}
               </div>
             ))}
           </div>
         </details>
-      )}
-
-      {!configured && !settingsOpen && (
-        <div style={{ padding: "0 16px 16px", fontSize: 12, color: S.faint, lineHeight: 1.5 }}>
-          Open settings and enter your server address and ingest token.
-        </div>
       )}
     </div>
   );
@@ -573,12 +785,6 @@ function Mark({ source }: { source: string }) {
     return (
       <svg {...MARK_PROPS} aria-hidden="true">
         <path d="M22 12.06a2.19 2.19 0 0 0-3.7-1.56c-1.49-1.03-3.52-1.7-5.78-1.78l.99-4.62 3.23.69a1.56 1.56 0 1 0 .17-.95l-3.6-.77a.47.47 0 0 0-.56.36l-1.1 5.28c-2.3.06-4.37.73-5.88 1.78A2.18 2.18 0 0 0 2 12.06c0 .87.51 1.62 1.25 1.97a3.9 3.9 0 0 0-.05.63c0 3.2 3.83 5.8 8.55 5.8s8.55-2.6 8.55-5.8c0-.21-.02-.42-.05-.62A2.18 2.18 0 0 0 22 12.06zM7.4 13.6a1.56 1.56 0 1 1 3.12 0 1.56 1.56 0 0 1-3.12 0zm8.72 4.12c-1.07 1.07-3.1 1.15-3.7 1.15-.6 0-2.64-.08-3.7-1.15a.4.4 0 0 1 .57-.57c.67.67 2.1.91 3.13.91 1.04 0 2.47-.24 3.14-.91a.4.4 0 1 1 .56.57zm-.19-2.56a1.56 1.56 0 1 1 0-3.12 1.56 1.56 0 0 1 0 3.12z" />
-      </svg>
-    );
-  if (source === "tiktok")
-    return (
-      <svg {...MARK_PROPS} aria-hidden="true">
-        <path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06v-3.1a5.66 5.66 0 0 0-.77-.05A5.66 5.66 0 1 0 15.54 15.4V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3a4.29 4.29 0 0 1-3.24-1.48z" />
       </svg>
     );
   if (source === "github")
@@ -594,20 +800,6 @@ function Mark({ source }: { source: string }) {
   );
 }
 
-const input: React.CSSProperties = {
-  width: "100%",
-  height: 29,
-  padding: "0 9px",
-  marginBottom: 9,
-  background: S.card,
-  border: `1px solid ${S.edge}`,
-  borderRadius: 5,
-  color: S.text,
-  fontSize: 12,
-  fontFamily: S.mono,
-  outline: "none",
-};
-
 const button: React.CSSProperties = {
   height: 31,
   borderRadius: 5,
@@ -617,23 +809,3 @@ const button: React.CSSProperties = {
   fontSize: 12.5,
   cursor: "pointer",
 };
-
-const labelStyle: React.CSSProperties = {
-  fontFamily: S.mono,
-  fontSize: 10,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  color: S.faint,
-  marginBottom: 5,
-};
-
-function Label({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
-  if (htmlFor) {
-    return <label htmlFor={htmlFor} style={labelStyle}>{children}</label>;
-  }
-  return (
-    <div style={labelStyle}>
-      {children}
-    </div>
-  );
-}

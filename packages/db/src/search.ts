@@ -1,5 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { AnansiDb } from "./types.ts";
+import { visibleSourceClause } from "./visibility.ts";
 
 /**
  * FTS5 query syntax is a real grammar, not a search box.
@@ -46,7 +47,7 @@ export function toFtsQuery(input: string): string {
   return terms.join(" ");
 }
 
-export interface SearchOptions {
+export interface SearchOptions extends ListOptions {
   query: string;
   /** One value or several. Several means "is any of". */
   source?: string | string[];
@@ -62,6 +63,11 @@ export interface CardMedia {
   key: string;
   kind: string;
   url: string;
+}
+
+export interface TagSummary {
+	label: string;
+	color: string;
 }
 
 export interface SearchHit {
@@ -82,6 +88,9 @@ export interface SearchHit {
   savedAtExact: number;
   source: string;
   score: number;
+  favorite?: boolean;
+  media?: CardMedia[];
+  metrics?: Record<string, number>;
   /**
    * 0 once the platform no longer has it saved.
    *
@@ -91,7 +100,28 @@ export interface SearchHit {
    */
   platformSaved?: number;
   removedFromSourceAt?: number | null;
+  /** Lightweight organization metadata for library cards. */
+  hasNote?: boolean;
+  tags?: TagSummary[];
 }
+
+type SearchPageRow = Omit<SearchHit, "favorite" | "hasNote" | "tags"> & {
+	favorite: number;
+	mediaJson: string;
+	metricsJson: string;
+	tagsJson: string;
+	hasNote: number;
+};
+
+type ListPageRow = Omit<SearchHit, "favorite" | "hasNote" | "tags"> & {
+	saveOrder: number | null;
+	favorite: number;
+	mediaJson: string;
+	metricsJson: string;
+	quotedJson: string;
+	tagsJson: string;
+	hasNote: number;
+};
 
 /**
  * Hybrid search is day-2-of-phase-2 work; this is keyword only, and honest
@@ -102,37 +132,86 @@ export interface SearchHit {
  * context around the hit, already marked, which is exactly the excerpt shape
  * search_memory hands back. In Postgres you would assemble that yourself.
  */
-export async function searchItems(db: AnansiDb, opts: SearchOptions): Promise<SearchHit[]> {
+export class InvalidSearchCursorError extends Error {
+  constructor() { super("invalid search cursor"); this.name = "InvalidSearchCursorError"; }
+}
+
+/** Relevance keyset cursor. Query/filter identity prevents accidental cross-query paging. */
+export async function searchItemsPage(db: AnansiDb, opts: SearchOptions): Promise<{ items: SearchHit[]; nextCursor: string | null }> {
   const match = toFtsQuery(opts.query);
-  if (!match) return [];
-
+  if (!match) return { items: [], nextCursor: null };
   const [open, close] = opts.mark ?? ["", ""];
-  const limit = opts.limit ?? 10;
-
-  const rows = await db.all<SearchHit>(sql`
-    select
-      i.id            as id,
-      i.url           as url,
-      i.author_handle as author,
-      i.author_name   as authorName,
-      i.title         as title,
-      i.posted_at     as postedAt,
-      i.saved_at      as savedAt,
-      i.saved_at_exact as savedAtExact,
-      i.source        as source,
-      snippet(items_fts, 0, ${open}, ${close}, '…', 20) as excerpt,
-      bm25(items_fts, 1.0, 0.6, 0.4) as score
-    from items_fts
-    join items i on i.rowid = items_fts.rowid
+  const limit = Math.min(Math.max(Math.floor(opts.limit ?? 30), 1), 100);
+  const key = JSON.stringify([match, opts.source, opts.author, opts.tag, opts.media, opts.contentType, opts.archived ?? false, opts.removed ?? "include", opts.favorite, opts.since]);
+  let afterScore = 0;
+  let afterId = "";
+  if (opts.cursor) {
+    try {
+      const cursor = JSON.parse(decodeURIComponent(opts.cursor));
+      if (cursor.key !== key || typeof cursor.score !== "number" || !Number.isFinite(cursor.score) || typeof cursor.id !== "string" || !cursor.id) throw new Error();
+      afterScore = cursor.score; afterId = cursor.id;
+    } catch { throw new InvalidSearchCursorError(); }
+  }
+  const rows = await db.all<SearchPageRow>(sql`
+    select i.id, i.url, i.author_handle as author, i.author_name as authorName,
+      i.author_avatar as authorAvatar, i.title, i.posted_at as postedAt,
+      i.saved_at as savedAt, i.saved_at_exact as savedAtExact, i.source,
+      i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
+      i.favorite, i.metrics as metricsJson,
+      json_extract(i.raw, '$.language') as language,
+      json_extract(i.raw, '$.visibility') as visibility,
+      (select count(*) from media m where m.item_id=i.id) as mediaCount,
+      (select json_group_array(json_object('key',m.stored_key,'kind',m.kind,'url',m.origin_url)) from media m where m.item_id=i.id and m.stored_key is not null) as mediaJson,
+      (select json_group_array(json_object('label',t.label,'color',t.color)) from item_tags it join tags t on t.id=it.tag_id where it.item_id=i.id) as tagsJson,
+      case when length(coalesce(i.note, '')) > 0 then 1 else 0 end as hasNote,
+      snippet(items_fts, -1, ${open}, ${close}, '…', 28) as excerpt,
+      bm25(items_fts, 1.0, 2.0, 0.4, 1.0, 1.5) as score
+    from items_fts join items i on i.rowid = items_fts.rowid
     where items_fts match ${match}
+      and ${visibleSourceClause(sql`i.source`)}
       ${anyOf(sql`i.source`, opts.source)}
       ${anyOf(sql`i.author_handle`, opts.author)}
+      ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+      ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
+      ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
       and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
-    order by score
-    limit ${limit}
+      ${opts.cursor ? sql`and (bm25(items_fts,1.0,2.0,0.4,1.0,1.5) > ${afterScore} or (bm25(items_fts,1.0,2.0,0.4,1.0,1.5) = ${afterScore} and i.id > ${afterId}))` : sql``}
+    order by score asc, i.id asc limit ${limit + 1}
   `);
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit).map((rawRow) => {
+		return {
+			id: rawRow.id,
+			url: rawRow.url,
+			author: rawRow.author,
+			authorName: rawRow.authorName,
+			authorAvatar: rawRow.authorAvatar,
+			language: rawRow.language,
+			visibility: rawRow.visibility,
+			title: rawRow.title,
+			postedAt: rawRow.postedAt,
+			savedAt: rawRow.savedAt,
+			savedAtExact: rawRow.savedAtExact,
+			source: rawRow.source,
+			platformSaved: rawRow.platformSaved,
+			removedFromSourceAt: rawRow.removedFromSourceAt,
+			favorite: rawRow.favorite === 1,
+			mediaCount: rawRow.mediaCount,
+			excerpt: rawRow.excerpt,
+			score: rawRow.score,
+			hasNote: rawRow.hasNote === 1,
+			tags: parseTagSummary(rawRow.tagsJson),
+			media: JSON.parse(rawRow.mediaJson ?? "[]") as CardMedia[],
+			metrics: JSON.parse(rawRow.metricsJson ?? "{}") as Record<string, number>,
+		};
+	});
+  const last = page.at(-1);
+  return { items: page, nextCursor: hasMore && last ? encodeURIComponent(JSON.stringify({ key, score: last.score, id: last.id })) : null };
+}
 
-  return rows;
+/** Compatibility for MCP and existing quick-search clients. */
+export async function searchItems(db: AnansiDb, opts: SearchOptions): Promise<SearchHit[]> {
+  return (await searchItemsPage(db, { ...opts, limit: opts.limit ?? 10 })).items;
 }
 
 /** "What did I save this week?" */
@@ -143,7 +222,8 @@ export async function recentSaves(db: AnansiDb, source?: string, limit = 20) {
            i.saved_at_exact as savedAtExact, i.source,
            substr(coalesce(i.body, ''), 1, 300) as excerpt, 0 as score
     from items i
-    where (${source ?? null} is null or i.source = ${source ?? null})
+    where ${visibleSourceClause(sql`i.source`)}
+      and (${source ?? null} is null or i.source = ${source ?? null})
     -- Source order keys are not globally comparable: X sort indexes, Reddit
     -- listing positions, and GitHub timestamps use different scales. Saved
     -- time orders sources; source order only breaks ties within an import.
@@ -160,7 +240,8 @@ export async function findByAuthor(db: AnansiDb, handle: string, limit = 20) {
            i.saved_at_exact as savedAtExact, i.source,
            substr(coalesce(i.body, ''), 1, 300) as excerpt, 0 as score
     from items i
-    where i.author_handle = ${handle} collate nocase
+    where ${visibleSourceClause(sql`i.source`)}
+      and i.author_handle = ${handle} collate nocase
     order by i.posted_at desc
     limit ${limit}
   `);
@@ -175,6 +256,15 @@ export interface ItemDetail {
   authorAvatar: string | null;
   title: string | null;
   fullText: string;
+  articleText: string | null;
+  articleFormat: "plain" | "markdown";
+  contentTruncated: boolean;
+  highlights: { id: string; text: string; createdAt: number }[];
+  note: string;
+  favorite: boolean;
+  tags: string[];
+  tagMeta: TagSummary[];
+  archived: boolean;
   postedAt: number | null;
   savedAt: number;
   savedAtExact: boolean;
@@ -219,15 +309,15 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     authorAvatar: string | null;
     title: string | null; body: string | null; postedAt: number | null; savedAt: number;
     savedAtExact: number; platformSaved: number; removedFromSourceAt: number | null;
-    metrics: string; raw: string;
+    metrics: string; raw: string; articleText: string | null; articleFormat: string; contentTruncated: number; note: string; favorite: number; archivedAt: number | null;
   }>(sql`
     select id, url, source, author_handle as author, author_name as authorName,
            author_avatar as authorAvatar,
            platform_saved as platformSaved,
            removed_from_source_at as removedFromSourceAt,
            title, body, posted_at as postedAt, saved_at as savedAt,
-           saved_at_exact as savedAtExact, metrics, raw
-    from items where id = ${id} limit 1
+           saved_at_exact as savedAtExact, metrics, raw, article_text as articleText, article_format as articleFormat, content_truncated as contentTruncated, note, favorite, archived_at as archivedAt
+    from items where id = ${id} and ${visibleSourceClause(sql`source`)} limit 1
   `);
 
   const row = rows[0];
@@ -262,7 +352,8 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     ? await db.all<{ id: string; url: string; author: string | null; excerpt: string }>(sql`
         select id, url, author_handle as author, substr(coalesce(body,''), 1, 200) as excerpt
         from items
-        where json_extract(raw, '$.conversationId') = ${conversationId}
+        where ${visibleSourceClause(sql`source`)}
+          and json_extract(raw, '$.conversationId') = ${conversationId}
           and id != ${id}
         limit 10
       `)
@@ -285,7 +376,16 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     title: row.title,
     // The post's own words. `body` carries the folded quote for FTS, which
     // would read as a run-on if it reached the screen.
-    fullText: parsed.ownText ?? row.body ?? "",
+    fullText: row.articleText ?? parsed.ownText ?? row.body ?? "",
+    articleText: row.articleText,
+    articleFormat: row.articleFormat === "markdown" ? "markdown" : "plain",
+    contentTruncated: row.contentTruncated === 1,
+    highlights: await db.all<{id:string; text:string; createdAt:number}>(sql`select id,text,created_at as createdAt from highlights where item_id=${id} order by created_at,id`),
+    note: row.note,
+    favorite: row.favorite === 1,
+    tags: (await db.all<{label:string}>(sql`select t.label from tags t join item_tags it on it.tag_id=t.id where it.item_id=${id} order by t.label`)).map(t => t.label),
+    tagMeta: await db.all<TagSummary>(sql`select t.label, t.color from tags t join item_tags it on it.tag_id=t.id where it.item_id=${id} order by t.label`),
+    archived: row.archivedAt !== null,
     postedAt: row.postedAt,
     savedAt: row.savedAt,
     savedAtExact: row.savedAtExact === 1,
@@ -458,6 +558,7 @@ export interface ListOptions {
   removed?: "include" | "exclude" | "only";
   /** Bookmark order by default; "posted" is chronological by the post's date. */
   order?: ListOrder;
+  favorite?: boolean;
 }
 
 /**
@@ -514,13 +615,14 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
     ? sql`order by coalesce(i.posted_at, 0) desc, i.id asc`
     : sql`order by i.saved_at desc, coalesce(i.save_order, 0) desc, i.id asc`;
 
-  const rows = await db.all<SearchHit & { saveOrder: number | null }>(sql`
+  const rows = await db.all<ListPageRow>(sql`
     select i.id, i.url, i.author_handle as author, i.author_name as authorName,
            i.author_avatar as authorAvatar,
            json_extract(i.raw, '$.language') as language,
            json_extract(i.raw, '$.visibility') as visibility,
            i.title, i.posted_at as postedAt, i.saved_at as savedAt,
            i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
+           i.favorite,
            i.platform_saved as platformSaved,
            i.removed_from_source_at as removedFromSourceAt,
            substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
@@ -531,10 +633,13 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
            (select json_group_array(json_object('key', m.stored_key, 'kind', m.kind, 'url', m.origin_url))
               from media m where m.item_id = i.id and m.stored_key is not null) as mediaJson,
            (select count(*) from media m where m.item_id = i.id) as mediaCount,
+           (select json_group_array(json_object('label',t.label,'color',t.color)) from item_tags it join tags t on t.id=it.tag_id where it.item_id=i.id) as tagsJson,
+           case when length(coalesce(i.note, '')) > 0 then 1 else 0 end as hasNote,
            json_extract(i.raw, '$.quoted') as quotedJson,
            i.metrics as metricsJson
     from items i
     where 1 = 1
+      and ${visibleSourceClause(sql`i.source`)}
       ${anyOf(sql`i.source`, opts.source)}
       ${anyOf(sql`i.author_handle`, opts.author)}
       ${keyset}
@@ -543,18 +648,13 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
       ${removedClause(opts.removed)}
       ${mediaClause(opts.media)}
       ${typeClause(opts.contentType)}
+      ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
     ${ordering}
     limit ${limit + 1}
   `);
 
   const hasMore = rows.length > limit;
-  const page = (hasMore ? rows.slice(0, limit) : rows).map((row) => {
-    const { metricsJson, mediaJson, quotedJson, ...rest } = row as typeof row & {
-      metricsJson?: string;
-      mediaJson?: string;
-      quotedJson?: string;
-    };
-
+  const page = (hasMore ? rows.slice(0, limit) : rows).map((rawRow) => {
     const parse = <T,>(text: string | undefined, fallback: T): T => {
       try {
         return (JSON.parse(text ?? "") as T) ?? fallback;
@@ -564,18 +664,38 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
       }
     };
 
-    const all = parse<{ key: string; kind: string; url: string }[]>(mediaJson, []);
+    const all = parse<{ key: string; kind: string; url: string }[]>(rawRow.mediaJson, []);
     const quoted = parse<{
       handle: string | null; name: string | null; avatar: string | null;
       text: string; url: string | null; mediaUrls: string[];
-    } | null>(quotedJson, null);
+    } | null>(rawRow.quotedJson, null);
 
     // A quote's images live on the parent row; split them back apart so the
     // card can nest them where they belong.
     const quotedUrls = new Set(quoted?.mediaUrls ?? []);
     return {
-      ...rest,
-      metrics: parse<Record<string, number>>(metricsJson, {}),
+      id: rawRow.id,
+      url: rawRow.url,
+      author: rawRow.author,
+      authorName: rawRow.authorName,
+      authorAvatar: rawRow.authorAvatar,
+      language: rawRow.language,
+      visibility: rawRow.visibility,
+      title: rawRow.title,
+      postedAt: rawRow.postedAt,
+      savedAt: rawRow.savedAt,
+      savedAtExact: rawRow.savedAtExact,
+      source: rawRow.source,
+      saveOrder: rawRow.saveOrder,
+      platformSaved: rawRow.platformSaved,
+      removedFromSourceAt: rawRow.removedFromSourceAt,
+      favorite: rawRow.favorite === 1,
+      mediaCount: rawRow.mediaCount,
+      excerpt: rawRow.excerpt,
+      score: rawRow.score,
+      hasNote: rawRow.hasNote === 1,
+      tags: parseTagSummary(rawRow.tagsJson),
+      metrics: parse<Record<string, number>>(rawRow.metricsJson, {}),
       media: all.filter((m) => !quotedUrls.has(m.url)),
       quoted: quoted ? { ...quoted, media: all.filter((m) => quotedUrls.has(m.url)) } : null,
     };
@@ -588,6 +708,18 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
       : `${last.savedAt}.${last.saveOrder ?? 0}.${last.id}`;
 
   return { items: page, nextCursor };
+}
+
+function parseTagSummary(text: string | undefined): TagSummary[] {
+	try {
+		const value = JSON.parse(text ?? "[]") as unknown;
+		if (!Array.isArray(value)) return [];
+		return value.filter((tag): tag is TagSummary =>
+			tag !== null && typeof tag === "object" && typeof (tag as { label?: unknown }).label === "string" && typeof (tag as { color?: unknown }).color === "string",
+		);
+	} catch {
+		return [];
+	}
 }
 
 /**
@@ -612,14 +744,16 @@ export async function libraryStats(db: AnansiDb) {
                       and saved_at >= ${Math.floor(new Date().setHours(0, 0, 0, 0) / 1000)}
                     then 1 else 0 end) as today
     from items
+    where ${visibleSourceClause(sql`source`)}
   `);
   const bySource = await db.all<{ source: string; n: number }>(sql`
-    select source, count(*) as n from items where archived_at is null group by source
+    select source, count(*) as n from items where archived_at is null and ${visibleSourceClause(sql`source`)} group by source
   `);
   const media = await db.all<{ total: number; stored: number }>(sql`
     select count(*) as total,
            sum(case when stored_key is null then 0 else 1 end) as stored
-    from media
+    from media m join items i on i.id = m.item_id
+    where ${visibleSourceClause(sql`i.source`)}
   `);
   return {
     items: totals?.items ?? 0,
@@ -681,6 +815,7 @@ export async function sourceHealth(db: AnansiDb): Promise<SourceHealth[]> {
          join items mi on mi.id = m.item_id
         where mi.source = i.source and m.stored_key is not null)   as mediaStored
     from items i
+    where ${visibleSourceClause(sql`i.source`)}
     group by i.source
     order by items desc
   `);

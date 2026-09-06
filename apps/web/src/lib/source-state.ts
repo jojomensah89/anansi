@@ -91,7 +91,7 @@ export function sourcePresentation(
 	}
 	return {
 		state: "ready",
-		text: source.mode === "manual" ? "Right-click any page to clip" : "Ready",
+		text: source.mode === "manual" ? "Save a page or selection" : "Ready",
 		tone: "ok",
 	};
 }

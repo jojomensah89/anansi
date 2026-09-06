@@ -1,7 +1,11 @@
 import { Toaster } from "@anansi/ui/components/sonner";
+import { SidebarProvider } from "@anansi/ui/components/sidebar";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HeadContent, Outlet, Scripts, createRootRouteWithContext } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
+import { useState } from "react";
 
+import { ConnectionGate } from "../components/connection-gate.tsx";
 
 import appCss from "../index.css?url";
 
@@ -36,17 +40,27 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 });
 
 function RootDocument() {
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: { queries: { refetchOnWindowFocus: false } },
+  }));
+
   return (
     <html lang="en" className="dark">
       <head>
         <HeadContent />
       </head>
       <body>
-        <div>
-          <Outlet />
-        </div>
-        <Toaster richColors />
-        <TanStackRouterDevtools position="bottom-left" />
+        <QueryClientProvider client={queryClient}>
+          <SidebarProvider>
+            <ConnectionGate>
+              <div>
+                <Outlet />
+              </div>
+            </ConnectionGate>
+          </SidebarProvider>
+          <Toaster richColors />
+          <TanStackRouterDevtools position="bottom-right" />
+        </QueryClientProvider>
         <Scripts />
       </body>
     </html>

@@ -17,7 +17,7 @@ const observedAt = 1_788_390_000;
 
 const capture = (
 	eventId: string,
-	source: "x" | "reddit" | "tiktok" | "web" = "x",
+	source: "x" | "reddit" | "github" | "web" = "x",
 	overrides: Partial<ItemEventCapture> = {},
 ): ItemEventCapture => ({
 	schemaVersion: 1,
@@ -39,7 +39,7 @@ const capture = (
 			source === "web"
 				? `https://example.com/${eventId}`
 				: `https://${source}.example/${eventId}`,
-		kind: source === "tiktok" ? "video" : source === "web" ? "article" : "post",
+		kind: source === "web" ? "article" : "post",
 		body: `bookmark ${eventId}`,
 		savedAt: observedAt,
 		savedAtIsExact: true,
@@ -169,6 +169,18 @@ describe("CaptureQueue", () => {
 		});
 	}
 
+	test("persists a safe server explanation with a permanent failure", async () => {
+		const { queue, store } = setup([
+			{ kind: "http", status: 422, detail: "invalid X bookmark payload" },
+		]);
+		await queue.enqueue(capture("failed-detail"));
+		await queue.retry();
+
+		expect((await store.list())[0]?.lastError?.message).toBe(
+			"ingest returned HTTP 422: invalid X bookmark payload",
+		);
+	});
+
 	test("retries permanent failures only after an explicit user request", async () => {
 		const event = capture("manual-retry");
 		const { queue, store, transport } = setup([
@@ -260,7 +272,7 @@ describe("CaptureQueue", () => {
 			queue.enqueue(capture("x-1", "x")),
 			queue.enqueue(capture("x-2", "x")),
 			queue.enqueue(capture("reddit-1", "reddit")),
-			queue.enqueue(capture("tiktok-1", "tiktok")),
+			queue.enqueue(capture("github-1", "github")),
 		]);
 
 		await queue.retry();
@@ -312,7 +324,7 @@ describe("CaptureQueue", () => {
 		await Promise.all([
 			queue.enqueue(capture("status-queued")),
 			queue.enqueue(capture("status-retry", "reddit")),
-			queue.enqueue(capture("status-failed", "tiktok")),
+			queue.enqueue(capture("status-failed", "github")),
 		]);
 		const records = await store.list();
 		await Promise.all(

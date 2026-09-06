@@ -25,7 +25,7 @@ const extensionRuntimeContext: MessageContext = {
 };
 
 const pageEvent = (
-	source: "x" | "reddit" | "tiktok" | "github",
+	source: "x" | "reddit" | "github",
 	action: string,
 ) => ({
 	anansi: "page-event",
@@ -42,16 +42,6 @@ describe("parseExtensionMessage", () => {
 		["https://www.reddit.com/user/example/saved", pageEvent("reddit", "saved")],
 		["https://old.reddit.com/user/example/saved", pageEvent("reddit", "saved")],
 		["https://reddit.com/user/example/saved", pageEvent("reddit", "saved")],
-		[
-			"https://www.tiktok.com/@example/favorites",
-			{
-				...pageEvent("tiktok", "observed"),
-				operation: "/api/user/collect/item_list/",
-				raw: { itemList: [] },
-				items: 0,
-			},
-		],
-		["https://tiktok.com/@example/favorites", pageEvent("tiktok", "scanned")],
 		[
 			"https://github.com/stars",
 			{
@@ -103,21 +93,6 @@ describe("parseExtensionMessage", () => {
 		).toBe(false);
 	});
 
-	test("rejects a claimed source that does not match the page URL", () => {
-		const result = parseExtensionMessage(
-			pageEvent("tiktok", "scanned"),
-			pageContext("https://www.reddit.com/user/example/saved"),
-		);
-
-		expect(result).toEqual({
-			ok: false,
-			error: {
-				code: "source_mismatch",
-				message: "message source does not match the verified page",
-			},
-		});
-	});
-
 	test("rejects spoofed and unsupported origins", () => {
 		expect(
 			parseExtensionMessage(
@@ -149,31 +124,6 @@ describe("parseExtensionMessage", () => {
 		expect(result).toMatchObject({
 			ok: false,
 			error: { code: "direction_mismatch" },
-		});
-	});
-
-	test("accepts relay-to-page commands only for the matching source and nonce", () => {
-		const context: MessageContext = {
-			path: "relay-to-page",
-			pageUrl: "https://www.tiktok.com/@example/favorites",
-			expectedNonce: NONCE,
-		};
-		const result = parseExtensionMessage(
-			{
-				anansi: "page-command",
-				messageVersion: MESSAGE_PROTOCOL_VERSION,
-				source: "tiktok",
-				nonce: NONCE,
-				action: "scan",
-				config: { watchUrls: ["/api/user/collect/item_list/"] },
-			},
-			context,
-		);
-
-		expect(result).toMatchObject({
-			ok: true,
-			path: "relay-to-page",
-			source: "tiktok",
 		});
 	});
 

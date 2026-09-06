@@ -13,6 +13,9 @@ apps/web/.env.local
 # turbo build cache
 .turbo/
 
+# Alchemy state, logs, and staged migration files are generated locally.
+**/.alchemy/
+
 # build outputs
 dist/
 apps/extension/.output/

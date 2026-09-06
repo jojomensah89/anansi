@@ -17,6 +17,7 @@
  * window.fetch is a different object from the one Reddit's page calls.
  */
 import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
+import { observeRedditFetch } from "../lib/reddit-fetch-observer.ts";
 import {
   infoUrl,
   readInfoObject,
@@ -108,24 +109,16 @@ export default defineContentScript({
       })();
     };
 
-    const patched = async function (this: unknown, ...args: Parameters<typeof fetch>) {
-      const res = await nativeFetch.apply(this, args);
+    window.fetch = observeRedditFetch(nativeFetch, (value) => {
       try {
-        const input = args[0];
-        const url =
-          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
-        if (matchUrl(url) || readSaveMutation(url, args[1]?.body ?? null)) {
-          const request = input instanceof Request ? input.clone() : null;
-          const body = args[1]?.body ?? (request ? await request.text() : null);
-          // Only on success: a failed save is not a save.
-          noteMutation(url, body, res.ok);
-        }
+        const url = new URL(value, window.location.origin);
+        if (url.protocol !== "https:" ||
+            !["www.reddit.com", "old.reddit.com", "reddit.com"].includes(url.hostname)) return false;
+        return /\/(?:save|unsave)\/?$/.test(url.pathname) || matchUrl(url.toString());
       } catch {
-        // Observation must never break the page.
+        return false;
       }
-      return res;
-    };
-    window.fetch = Object.assign(patched, nativeFetch) as typeof fetch;
+    }, noteMutation);
 
     type WatchedXhr = XMLHttpRequest & { __anansiUrl?: string };
 

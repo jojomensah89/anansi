@@ -37,6 +37,8 @@ export interface PageDetails {
   selection?: string | null;
   /** Rendered text, from innerText. See readPage for why that matters. */
   text?: string | null;
+  articleFormat?: "plain" | "markdown";
+  contentTruncated?: boolean;
 }
 
 export type UnsupportedReason =
@@ -112,7 +114,7 @@ function trimTo(value: unknown, max: number): string | undefined {
 function trimBlock(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const cleaned = value
-    .replace(/[ \t ]+/g, " ")
+    .replace(/\r\n?/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   if (cleaned.length === 0) return undefined;
@@ -207,6 +209,8 @@ export async function toWebCapture(
       description,
       selection,
       text,
+      articleFormat: details.articleFormat ?? "plain",
+      contentTruncated: details.contentTruncated === true || (details.text?.length ?? 0) > LIMITS.text,
       capturedBy: options.method,
     },
   };
@@ -229,7 +233,7 @@ export async function toWebCapture(
        * is a new event rather than a no-op, while a double-click is one.
        */
       eventId: `web:${externalId}:${options.observedAt}:${await shortDigest(
-        JSON.stringify([item.body, text ?? "", title ?? ""]),
+        JSON.stringify([item.body, text ?? "", title ?? "", selection ?? ""]),
       )}`,
       source: "web",
       action: "save",
@@ -264,6 +268,10 @@ export function readPage(): PageDetails {
   const link = (selector: string): string | null =>
     document.querySelector(selector)?.getAttribute("href") ?? null;
 
+  // Select semantic article content where available. Rendered innerText avoids
+  // scripts, hidden nodes and form values while preserving code indentation.
+  const root = document.querySelector<HTMLElement>("article, [role=main], main") ?? document.body;
+  const readable = root?.innerText ?? "";
   return {
     url: location.href,
     title:
@@ -287,6 +295,8 @@ export function readPage(): PageDetails {
     selection: window.getSelection()?.toString() ?? null,
     // Capped here as well as in the pure layer: a 40MB page should not be
     // serialized across the extension boundary just to be trimmed after.
-    text: (document.body?.innerText ?? "").slice(0, 60_000),
+    text: readable.slice(0, 20_000),
+    articleFormat: "plain",
+    contentTruncated: readable.length > 20_000,
   };
 }

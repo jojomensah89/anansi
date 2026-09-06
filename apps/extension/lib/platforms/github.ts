@@ -359,6 +359,7 @@ export function extractGitHubStarsPage(
 	const nextUrl = nextHref
 		? validatedGitHubStarsPageUrl(nextHref, pageUrl)
 		: null;
+	if (nextHref && !nextUrl) return { kind: "page_shape_changed" };
 	return {
 		kind: "page",
 		page: {

@@ -29,7 +29,7 @@ export function SelectBar({
   const [tagging, setTagging] = useState(false);
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
-  const [tags, setTags] = useState<{ label: string; count: number }[]>([]);
+  const [tags, setTags] = useState<{ label: string; color: string; count: number }[]>([]);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -124,6 +124,7 @@ export function SelectBar({
                     fontFamily: "var(--mono)",
                   }}
                 >
+					<span style={{ width: 7, height: 7, borderRadius: "50%", background: t.color || "#6b7280" }} />
                   {t.label}
                   <span style={{ color: "var(--fainter)" }}>{t.count}</span>
                 </button>
@@ -160,7 +161,7 @@ export function SelectBar({
         <div style={{ display: "flex", gap: 7, marginLeft: 14 }}>
           <Action label="Tag" onClick={() => setTagging((t) => !t)} busy={busy} />
           <Action
-            label={archived ? "Unarchive" : "Archive"}
+            label={archived ? "Restore" : "Archive"}
             onClick={() => void run(() => api.archive(ids, !archived))}
             busy={busy}
           />

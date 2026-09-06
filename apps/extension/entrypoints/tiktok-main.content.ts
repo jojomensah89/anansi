@@ -25,6 +25,7 @@ import {
   FAVOURITES_TAB_SELECTORS,
   isFavouritesRequest,
   readHandle,
+  readHandleFromProfileHref,
   readItemList,
 } from "../lib/platforms/tiktok.ts";
 
@@ -40,6 +41,9 @@ interface ScanConfig {
 }
 
 export default defineContentScript({
+  // Retired from the shipped extension while the authenticated capture path
+  // is repaired. Keep this adapter source-local for future reactivation.
+  exclude: ["chrome", "firefox", "edge", "safari"],
   matches: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
   world: "MAIN",
   runAt: "document_start",
@@ -139,6 +143,11 @@ export default defineContentScript({
           (window as unknown as { SIGI_STATE?: unknown }).SIGI_STATE;
         const handle = readHandle(scope);
         if (handle) return handle;
+		const profileHref = document
+			.querySelector<HTMLAnchorElement>('a[data-e2e="nav-profile"][href]')
+			?.getAttribute("href");
+		const profileHandle = readHandleFromProfileHref(profileHref);
+		if (profileHandle) return profileHandle;
         if (Date.now() >= deadline) return null;
         await new Promise((r) => setTimeout(r, 250));
       }

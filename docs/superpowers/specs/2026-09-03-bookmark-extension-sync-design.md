@@ -22,14 +22,8 @@ Anansi remains local-first: SQLite is the canonical library. Extension IndexedDB
 
 This design combines public product documentation, open-source implementations, Chrome extension documentation, and inspection of the current Anansi repository.
 
-Public evidence establishes patterns, not the private source code of [removed] or [removed]:
+Public evidence establishes useful product patterns, not private implementation details:
 
-- [[removed]: How saving works]([source removed]) describes native platform saves, local queueing, retries, visible failures, and short-term retention of unsent captures.
-- [[removed]: Importing your saves]([source removed]) describes using the user's signed-in browser session, platform requests, pagination, resumable imports, deduplication, and stopping after already-known items.
-- [[removed]: Saving from X]([source removed]) and [Saving from TikTok]([source removed]) document the user-facing source behavior.
-- [[removed] privacy]([source removed]) describes extension-local queue/sign-in state and fixed supported-site access. It does not establish that [removed] copies platform cookies.
-- [[removed] privacy]([source removed]) states that its extension keeps canonical data in local IndexedDB and intercepts X bookmark responses. Anansi deliberately adopts response interception but keeps SQLite canonical.
-- [[removed] bookmark features]([source removed]) provides product-level behavior for bookmark capture and organization.
 - [Chrome extension service-worker lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle) establishes that global variables and ordinary timers are not durable across worker termination.
 - [Chrome cookies API](https://developer.chrome.com/docs/extensions/reference/api/cookies) confirms that explicit cookie permissions are needed to query or mutate cookies. Anansi does not need this capability.
 - The open-source [X Post Archive interceptor](https://github.com/FUMIHITO-EGUCHI/x-post-archive-extension/blob/bda1ca30fadccc00e0d8cc81f6cae870c709cff9/src/features/x/intercept-like-bookmark-actions.ts) demonstrates extracting bookmark mutation identifiers and validating responses.
@@ -88,7 +82,7 @@ Three approaches were considered:
 
 1. Patch direct uploads. This is smaller but cannot make transient worker memory reliable.
 2. Add a durable extension outbox while keeping SQLite canonical. **Chosen.**
-3. Make extension IndexedDB the canonical library and replicate to SQLite. This resembles [removed] but creates two authoritative stores and unnecessary conflict resolution.
+3. Make extension IndexedDB the canonical library and replicate to SQLite. This creates two authoritative stores and unnecessary conflict resolution.
 
 The chosen flow is:
 

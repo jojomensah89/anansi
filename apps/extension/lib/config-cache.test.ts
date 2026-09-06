@@ -19,6 +19,7 @@ describe("extension config cache", () => {
 		expect(normalizeServerOrigin("file:///tmp/anansi")).toBeNull();
 		expect(normalizeServerOrigin("https://user:pass@example.com")).toBeNull();
 		expect(normalizeServerOrigin("not a url")).toBeNull();
+		expect(normalizeServerOrigin("http://anansi.example.com")).toBeNull();
 	});
 
 	test("never reuses one server's config for another server", () => {

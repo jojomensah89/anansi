@@ -1,6 +1,12 @@
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema.ts";
 import type { AnansiDb } from "./types.ts";
+import { registerAtomicExecutor } from "./atomic.ts";
+
+// Workers Free permits 50 D1 queries per invocation. Leave room for the
+// reads which prepare an atomic write instead of discovering the platform
+// limit only after a user's capture has reached the server.
+export const D1_ATOMIC_STATEMENT_LIMIT = 40;
 
 /**
  * The other half of the driver seam.
@@ -15,5 +21,16 @@ import type { AnansiDb } from "./types.ts";
  * where that decision either pays off or does not.
  */
 export function openD1(binding: D1Database): AnansiDb {
-  return drizzle(binding, { schema }) as unknown as AnansiDb;
+  const db = drizzle(binding, { schema });
+  registerAtomicExecutor(db as unknown as AnansiDb, async (build) => {
+    const statements = build(db as unknown as AnansiDb);
+    if (statements.length === 0) return;
+    if (statements.length > D1_ATOMIC_STATEMENT_LIMIT) {
+      throw new Error(
+        `D1 atomic write exceeds the ${D1_ATOMIC_STATEMENT_LIMIT}-statement personal-tier limit`,
+      );
+    }
+    await db.batch(statements as unknown as Parameters<typeof db.batch>[0]);
+  });
+  return db as unknown as AnansiDb;
 }

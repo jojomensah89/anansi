@@ -2,73 +2,48 @@
  * The background worker: the only part of the extension that knows a server
  * exists, and the only part that holds the token.
  *
- * The thin pipe in one place — fetch a config, hand the right piece of it to
- * the right tab, upload whatever comes back untouched. There is no parsing
- * here on purpose: when a platform reshapes a response the fix ships
- * server-side and every install is repaired on its next run, which is what
- * makes distributing this load-unpacked reasonable rather than a maintenance
- * trap.
+ * Coordinates session imports, page observers, and durable delivery. GitHub
+ * HTML is reduced to repository records locally; JSON source payloads are
+ * normalized by the server. Session credentials stay in the browser.
  */
 
-import {
-  cachedForServer,
-  normalizeServerOrigin,
-  type ServerCache,
-} from "../lib/config-cache.ts";
-import {
-  createCaptureQueue,
-  type CaptureQueue,
-} from "../lib/capture-queue.ts";
-import {
-  createIndexedDbOutbox,
-  type IndexedDbOutbox,
-} from "../lib/idb-outbox.ts";
-import { createIngestTransport } from "../lib/ingest-transport.ts";
+import type {
+  CaptureQueueStatus,
+  HeartbeatSourceState,
+  ItemEventCapture,
+  RawPageCapture,
+  CaptureSource as SharedCaptureSource,
+} from "@anansi/sources";
+import { type CaptureQueue, createCaptureQueue } from "../lib/capture-queue.ts";
+import { type BookmarkNode, importCaptures, removalCaptures, toBookmarkCapture } from "../lib/chrome-bookmarks.ts";
+import { cachedForServer, type ServerCache } from "../lib/config-cache.ts";
+import { extensionConnection } from "../lib/connection.ts";
 import { createHeartbeatClient, type HeartbeatClient } from "../lib/heartbeat.ts";
+import { createIndexedDbOutbox, type IndexedDbOutbox } from "../lib/idb-outbox.ts";
+import { createIngestTransport, safeHttpErrorDetail } from "../lib/ingest-transport.ts";
 import {
   MESSAGE_PROTOCOL_VERSION,
-  parseExtensionMessage,
   type PageEventMessage,
   type PlatformSource,
   type PopupCommandMessage,
+  parseExtensionMessage,
 } from "../lib/messages.ts";
+import { capturablePage, type PageDetails, readPage, toWebCapture, UNSUPPORTED_MESSAGES } from "../lib/page-capture.ts";
+import { tweetUrl } from "../lib/platforms/x.ts";
+import { SYNC_ALARM, scheduleDailyCatchUp } from "../lib/schedule.ts";
+import { runSessionImport, SessionImportError, type SessionSource } from "../lib/session-import.ts";
 import {
+  type CaptureSource,
   captureDeliveryMode,
   createSourceRuns,
   isExpectedImportTab,
   SOURCE_RUN_LEASE_MS,
-  type CaptureSource,
   type SourceRuns,
 } from "../lib/source-runs.ts";
-import {
-  capturablePage,
-  readPage,
-  toWebCapture,
-  UNSUPPORTED_MESSAGES,
-  type PageDetails,
-} from "../lib/page-capture.ts";
-import {
-  importCaptures,
-  removalCaptures,
-  toBookmarkCapture,
-  type BookmarkNode,
-} from "../lib/chrome-bookmarks.ts";
-import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
-import { validatedGitHubStarsPageUrl } from "../lib/platforms/github.ts";
-import { tweetUrl } from "../lib/platforms/x.ts";
-import type {
-  CaptureQueueStatus,
-  CaptureSource as SharedCaptureSource,
-  HeartbeatSourceState,
-  ItemEventCapture,
-  RawPageCapture,
-} from "@anansi/sources";
 
 export interface Settings {
   server: string;
   token: string;
-  /** Minutes between automatic syncs. 0 disables them. */
-  syncEvery: number;
 }
 
 export interface SourceConfig {
@@ -93,7 +68,7 @@ export interface RemoteConfig {
   ingest: string;
   ingestProtocolVersion?: number;
   features?: {
-    captureV2?: Partial<Record<"x" | "reddit" | "tiktok" | "github" | "web", boolean>>;
+    captureV2?: Partial<Record<"x" | "reddit" | "github" | "web", boolean>>;
     chromeBookmarks?: boolean;
   };
   sources: SourceConfig[];
@@ -120,18 +95,20 @@ export interface SourceStatus {
 export type Status = Record<string, SourceStatus>;
 
 const CONFIG_TTL_MS = 60 * 60 * 1000;
-const ALARM = "anansi-sync";
+const ALARM = SYNC_ALARM;
 const OUTBOX_ALARM = "anansi-outbox";
 const HEARTBEAT_ALARM = "anansi-heartbeat";
 const SOURCE_RUN_RECOVERY_ALARM_PREFIX = "anansi-source-run-recovery:";
-const CAPTURE_SOURCES = ["x", "reddit", "tiktok", "github"] as const;
-const HEARTBEAT_SOURCES = ["x", "reddit", "tiktok", "github", "web"] as const;
+const CAPTURE_SOURCES = ["x", "reddit", "github"] as const;
+const HEARTBEAT_SOURCES = ["x", "reddit", "github", "web"] as const;
 const tabNonces = new Map<number, string>();
 
 let cached: ServerCache<RemoteConfig> | null = null;
+let cachedToken: string | null = null;
 let persistent: { outbox: IndexedDbOutbox; runs: SourceRuns } | null = null;
 let durableQueue: CaptureQueue | null = null;
 let healthHeartbeat: HeartbeatClient | null = null;
+const sessionImports = new Map<SessionSource, { controller: AbortController; task: Promise<void> }>();
 
 function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
   if (persistent) return persistent;
@@ -148,23 +125,40 @@ function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
 }
 
 async function settings(): Promise<Settings | null> {
-  const stored = await browser.storage.local.get(["server", "token", "syncEvery"]);
-  const server = normalizeServerOrigin(String(stored.server ?? ""));
-  const token = String(stored.token ?? "");
-  const syncEvery = Number(stored.syncEvery ?? 0);
-  return server && token ? { server, token, syncEvery } : null;
+  const { origin, token } = extensionConnection();
+  return { server: origin, token };
 }
 
 async function patchStatus(source: string, patch: Partial<SourceStatus>): Promise<void> {
   const all = ((await browser.storage.local.get("status")).status ?? {}) as Status;
-  const current = all[source] ?? { startedAt: null, lastRun: null, pages: 0, items: 0, uploaded: 0, failed: 0, message: null };
-  await browser.storage.local.set({ status: { ...all, [source]: { ...current, ...patch } } });
+  const current = all[source] ?? {
+    startedAt: null,
+    lastRun: null,
+    pages: 0,
+    items: 0,
+    uploaded: 0,
+    failed: 0,
+    message: null,
+  };
+  await browser.storage.local.set({
+    status: { ...all, [source]: { ...current, ...patch } },
+  });
   requestHeartbeat();
 }
 
 async function readStatus(source: string): Promise<SourceStatus> {
   const all = ((await browser.storage.local.get("status")).status ?? {}) as Status;
-  return all[source] ?? { startedAt: null, lastRun: null, pages: 0, items: 0, uploaded: 0, failed: 0, message: null };
+  return (
+    all[source] ?? {
+      startedAt: null,
+      lastRun: null,
+      pages: 0,
+      items: 0,
+      uploaded: 0,
+      failed: 0,
+      message: null,
+    }
+  );
 }
 
 /**
@@ -175,13 +169,22 @@ async function readStatus(source: string): Promise<SourceStatus> {
 async function loadConfig(force = false): Promise<RemoteConfig | null> {
   const s = await settings();
   if (!s) return null;
+  if (cachedToken !== s.token) {
+    cached = null;
+    cachedToken = s.token;
+  }
   const now = Date.now();
   const fresh = cachedForServer(cached, s.server, now, CONFIG_TTL_MS);
   if (!force && fresh) return fresh;
 
   const url = `${s.server}/api/extension/config`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${s.token}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.status === 401 || res.status === 403) cached = null;
     if (res.status === 404) {
       throw new Error(`404 at ${url} — is an older Anansi server still on that port?`);
     }
@@ -189,6 +192,7 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
     const config = (await res.json()) as RemoteConfig;
     if (!Array.isArray(config.sources)) throw new Error(`unexpected config shape from ${url}`);
     cached = { serverOrigin: s.server, at: Date.now(), value: config };
+    await patchStatus("_", { message: null });
     return config;
   } catch (err) {
     await patchStatus("_", { message: (err as Error).message });
@@ -213,7 +217,9 @@ function queue(): CaptureQueue {
     random: Math.random,
     scheduler: {
       schedule(at) {
-        browser.alarms.create(OUTBOX_ALARM, { when: Math.max(Date.now() + 100, at) });
+        browser.alarms.create(OUTBOX_ALARM, {
+          when: Math.max(Date.now() + 100, at),
+        });
       },
     },
   });
@@ -279,10 +285,7 @@ function requestHeartbeat(): void {
   void heartbeat().send();
 }
 
-async function wakeDurableQueue(
-  includeFailed = false,
-  source?: CaptureSource,
-): Promise<CaptureQueueStatus> {
+async function wakeDurableQueue(includeFailed = false, source?: CaptureSource): Promise<CaptureQueueStatus> {
   const status = await queue().retry(
     includeFailed ? { includeFailed: true, ...(source ? { source } : {}) } : undefined,
   );
@@ -298,26 +301,33 @@ async function legacyUpload(source: string, raw: unknown): Promise<void> {
   try {
     const res = await fetch(config.ingest, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${s.token}` },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${s.token}`,
+      },
       body: JSON.stringify({ source, raw }),
     });
     const current = await readStatus(source);
     if (res.ok) {
-      await patchStatus(source, { uploaded: current.uploaded + 1, message: null });
+      await patchStatus(source, {
+        uploaded: current.uploaded + 1,
+        message: null,
+      });
     } else {
       // 422 is the server's zero-parse alarm. It means the payload shape
       // changed, and it must be visible rather than swallowed.
-      const body = await res.text().catch(() => "");
-      // A 422 carries the shape the server could not parse. Keep more of it
-      // than a normal error, because it is the whole diagnosis.
+      const detail = await safeHttpErrorDetail(res);
       await patchStatus(source, {
         failed: current.failed + 1,
-        message: `ingest ${res.status}: ${body.slice(0, res.status === 422 ? 600 : 120)}`,
+        message: `ingest ${res.status}${detail ? `: ${detail}` : ""}`,
       });
     }
   } catch (err) {
     const current = await readStatus(source);
-    await patchStatus(source, { failed: current.failed + 1, message: (err as Error).message });
+    await patchStatus(source, {
+      failed: current.failed + 1,
+      message: (err as Error).message,
+    });
   }
 }
 
@@ -330,11 +340,7 @@ async function deliverRaw(
   captureMethod: "platform_import" | "platform_event" = "platform_import",
 ): Promise<void> {
   const config = await loadConfig();
-  const delivery = captureDeliveryMode(
-    config?.ingestProtocolVersion,
-    config?.features?.captureV2,
-    source,
-  );
+  const delivery = captureDeliveryMode(config?.ingestProtocolVersion, config?.features?.captureV2, source);
   if (delivery === "legacy") {
     await legacyUpload(source, raw);
     return;
@@ -361,19 +367,21 @@ async function deliverRaw(
   if (cursor !== undefined) await runs.setCursor(source, cursor);
   await wakeDurableQueue();
 
-  const [pending, current] = await Promise.all([
-    outbox.get(enqueued.eventId),
-    readStatus(source),
-  ]);
+  const [pending, current] = await Promise.all([outbox.get(enqueued.eventId), readStatus(source)]);
   if (!pending) {
-    await patchStatus(source, { uploaded: current.uploaded + 1, message: null });
+    await patchStatus(source, {
+      uploaded: current.uploaded + 1,
+      message: null,
+    });
   } else if (pending.state === "failed") {
     await patchStatus(source, {
       failed: current.failed + 1,
       message: pending.lastError?.message ?? "capture delivery failed",
     });
   } else {
-    await patchStatus(source, { message: "saved locally; delivery will retry" });
+    await patchStatus(source, {
+      message: "saved locally; delivery will retry",
+    });
   }
 }
 
@@ -392,11 +400,7 @@ async function deliverItemEvent(
 ): Promise<void> {
   const mode = async (force: boolean) => {
     const config = await loadConfig(force);
-    return captureDeliveryMode(
-      config?.ingestProtocolVersion,
-      config?.features?.captureV2,
-      source,
-    );
+    return captureDeliveryMode(config?.ingestProtocolVersion, config?.features?.captureV2, source);
   };
 
   /**
@@ -428,9 +432,7 @@ async function deliverItemEvent(
 
   const observedAt = Math.floor(Date.now() / 1000);
   const identity =
-    source === "github"
-      ? `sequence:${await persistentState().runs.nextItemEventSequence(source)}`
-      : String(observedAt);
+    source === "github" ? `sequence:${await persistentState().runs.nextItemEventSequence(source)}` : String(observedAt);
   const capture: ItemEventCapture = {
     schemaVersion: 1,
     payloadType: "item_event",
@@ -440,11 +442,7 @@ async function deliverItemEvent(
     observedAt,
     captureMethod: "platform_event",
     externalId,
-    canonicalUrl:
-      canonicalUrl ??
-      (source === "github"
-        ? `https://github.com/${externalId}`
-        : tweetUrl(externalId)),
+    canonicalUrl: canonicalUrl ?? (source === "github" ? `https://github.com/${externalId}` : tweetUrl(externalId)),
   };
   await queue().enqueue(capture);
   await wakeDurableQueue();
@@ -506,11 +504,13 @@ async function capturePage(
   tabId: number,
   method: "toolbar" | "context_menu",
   selectionText?: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; delivery: "queued" | "uploaded" } | { ok: false; error: string }> {
   const tab = await browser.tabs.get(tabId).catch(() => null);
   const supported = capturablePage(tab?.url);
   if (!supported.ok) {
-    await patchStatus("web", { message: UNSUPPORTED_MESSAGES[supported.reason] });
+    await patchStatus("web", {
+      message: UNSUPPORTED_MESSAGES[supported.reason],
+    });
     return { ok: false, error: UNSUPPORTED_MESSAGES[supported.reason] };
   }
 
@@ -551,7 +551,7 @@ async function capturePage(
       ? { message: "saved locally; delivery will retry" }
       : { uploaded: current.uploaded + 1, message: null }),
   });
-  return { ok: true };
+  return { ok: true, delivery: pending ? "queued" : "uploaded" };
 }
 
 type MenuSpec = Parameters<typeof browser.contextMenus.create>[0];
@@ -559,6 +559,19 @@ type MenuSpec = Parameters<typeof browser.contextMenus.create>[0];
 /* ------------------------------------------------- chrome bookmarks --- */
 
 const MIRROR_KEY = "mirrorChromeBookmarks";
+let bookmarkInstallation: Promise<string> | undefined;
+function bookmarkInstallationId(): Promise<string> {
+  return (bookmarkInstallation ??= (async () => {
+    const stored = await browser.storage.local.get("bookmarkInstallationId");
+    if (typeof stored.bookmarkInstallationId === "string") return stored.bookmarkInstallationId;
+    const id = crypto.randomUUID();
+    await browser.storage.local.set({ bookmarkInstallationId: id });
+    return id;
+  })().catch((error) => {
+    bookmarkInstallation = undefined;
+    throw error;
+  }));
+}
 
 async function mirroringOn(): Promise<boolean> {
   const stored = await browser.storage.local.get(MIRROR_KEY);
@@ -570,13 +583,24 @@ async function mirroringOn(): Promise<boolean> {
 
 async function enqueueBookmarks(captures: Awaited<ReturnType<typeof importCaptures>>) {
   if (captures.length === 0) return;
-  for (const capture of captures) await queue().enqueue(capture).catch(() => undefined);
+  let accepted = 0;
+  for (const capture of captures) {
+    try {
+      await queue().enqueue(capture);
+      accepted++;
+    } catch {
+      /* Report partial persistence below; never count it as saved. */
+    }
+  }
   await wakeDurableQueue();
   const current = await readStatus("web");
   await patchStatus("web", {
     lastRun: Date.now(),
-    items: current.items + captures.length,
-    message: null,
+    items: current.items + accepted,
+    message:
+      accepted < captures.length
+        ? `${captures.length - accepted} bookmarks could not be saved on this device; turn mirroring off and on to retry`
+        : null,
   });
 }
 
@@ -597,9 +621,10 @@ async function startMirroring(): Promise<void> {
   if (bookmarkListeners || !(await mirroringOn())) return;
 
   const now = () => Math.floor(Date.now() / 1000);
+  const options = { installationId: await bookmarkInstallationId() };
 
   const created = async (_id: string, node: BookmarkNode) => {
-    const capture = await toBookmarkCapture(node, "save", now());
+    const capture = await toBookmarkCapture(node, "save", now(), options);
     if (capture) await enqueueBookmarks([capture]);
   };
 
@@ -612,12 +637,13 @@ async function startMirroring(): Promise<void> {
       { ...(node as BookmarkNode), title: info.title ?? node.title },
       "save",
       now(),
+      options,
     );
     if (capture) await enqueueBookmarks([capture]);
   };
 
   const removed = async (_id: string, info: { node: BookmarkNode }) => {
-    await enqueueBookmarks(await removalCaptures(info.node, now()));
+    await enqueueBookmarks(await removalCaptures(info.node, now(), options));
   };
 
   bookmarkListeners = {
@@ -655,39 +681,46 @@ async function setMirroring(on: boolean): Promise<BackgroundResult> {
     return { ok: true, mirroring: false };
   }
 
-  const granted = await browser.permissions
-    .request({ permissions: ["bookmarks"] })
-    .catch(() => false);
+  const granted = await browser.permissions.request({ permissions: ["bookmarks"] }).catch(() => false);
   if (!granted) {
     await browser.storage.local.set({ [MIRROR_KEY]: false });
-    return { ok: false, error: "Chrome did not grant access to your bookmarks" };
+    return {
+      ok: false,
+      error: "Chrome did not grant access to your bookmarks",
+    };
   }
 
   await browser.storage.local.set({ [MIRROR_KEY]: true });
   await startMirroring();
 
   const tree = (await browser.bookmarks.getTree().catch(() => [])) as BookmarkNode[];
-  await enqueueBookmarks(await importCaptures(tree, Math.floor(Date.now() / 1000)));
+  await enqueueBookmarks(
+    await importCaptures(tree, Math.floor(Date.now() / 1000), {
+      installationId: await bookmarkInstallationId(),
+    }),
+  );
   return { ok: true, mirroring: true };
 }
 
 const MENUS: MenuSpec[] = [
   { id: "anansi-save-page", title: "Save page to Anansi", contexts: ["page"] },
-  { id: "anansi-save-selection", title: "Save selection to Anansi", contexts: ["selection"] },
+  {
+    id: "anansi-save-selection",
+    title: "Save selection to Anansi",
+    contexts: ["selection"],
+  },
 ];
 
 /** Where to open a tab when there isn't one, per source. */
 const ENTRY_URLS: Record<string, string> = {
   x: "https://x.com/i/bookmarks",
   reddit: "https://www.reddit.com/user/me/saved/",
-  tiktok: "https://www.tiktok.com/",
   github: "https://github.com/stars",
 };
 
 const HOST_PATTERNS: Record<string, string[]> = {
   x: ["https://x.com/*", "https://twitter.com/*"],
   reddit: ["https://www.reddit.com/*", "https://old.reddit.com/*", "https://reddit.com/*"],
-  tiktok: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
   github: ["https://github.com/*"],
 };
 
@@ -697,9 +730,7 @@ async function findTab(source: string, expectedUrl?: string) {
   const tabs = await browser.tabs.query({ url: patterns });
   return tabs.find(
     (tab) =>
-      tab.url &&
-      isExpectedImportTab(source as CaptureSource, tab.url) &&
-      (!expectedUrl || tab.url === expectedUrl),
+      tab.url && isExpectedImportTab(source as CaptureSource, tab.url) && (!expectedUrl || tab.url === expectedUrl),
   );
 }
 
@@ -709,17 +740,8 @@ async function findTab(source: string, expectedUrl?: string) {
  * Opened inactive, so an import does not yank you out of what you were doing,
  * and closed again afterwards if we were the ones who opened it.
  */
-async function openTab(
-  source: string,
-  preferredUrl?: string,
-): Promise<{ id: number; ours: boolean } | null> {
-  // Once TikTok has told us who you are, later runs skip the front page and
-  // open your own profile, which is where favourites live.
-  const known =
-    source === "tiktok"
-      ? (await persistentState().runs.current("tiktok")).handle
-      : undefined;
-  const url = preferredUrl ?? (known ? profileUrl(known) : null) ?? ENTRY_URLS[source];
+async function openTab(source: string, preferredUrl?: string): Promise<{ id: number; ours: boolean } | null> {
+  const url = preferredUrl ?? ENTRY_URLS[source];
   if (!url) return null;
   const tab = await browser.tabs.create({ url, active: false });
   if (!tab.id) return null;
@@ -740,46 +762,6 @@ async function openTab(
   });
 
   return { id, ours: true };
-}
-
-/**
- * Wait for the page to say who is signed in.
- *
- * The answer arrives as an ordinary page event rather than a reply, because
- * MAIN-world code reaches the background only through the relay. So this polls
- * the durable state the handler writes, which has the useful side effect of
- * working even if the worker was restarted in between.
- */
-async function waitForHandle(
-  source: CaptureSource,
-  timeoutMs: number,
-): Promise<string | null> {
-  const runs = persistentState().runs;
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const state = await runs.current(source);
-    if (state.handle) return state.handle;
-    if (Date.now() >= deadline) return null;
-    await new Promise((r) => setTimeout(r, 300));
-  }
-}
-
-/** Send a tab somewhere and wait for it to finish arriving. */
-async function navigateTab(tabId: number, url: string): Promise<void> {
-  await browser.tabs.update(tabId, { url }).catch(() => {});
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(finish, 25_000);
-    function finish() {
-      clearTimeout(timer);
-      browser.tabs.onUpdated.removeListener(onUpdated);
-      // document_idle scripts land a beat after "complete".
-      setTimeout(resolve, 900);
-    }
-    function onUpdated(updatedId: number, info: { status?: string }) {
-      if (updatedId === tabId && info.status === "complete") finish();
-    }
-    browser.tabs.onUpdated.addListener(onUpdated);
-  });
 }
 
 async function closeOwnedTab(source: CaptureSource, expectedTabId?: number): Promise<void> {
@@ -821,16 +803,12 @@ async function expireOwnedRun(source: CaptureSource, expectedTabId: number): Pro
 }
 
 /**
- * Capture runs in a browser tab, using the session it already has — never
- * from the background worker, which would mean taking the `cookies`
- * permission to rebuild a session the page is already holding.
- *
- * It no longer has to be a tab YOU opened, though. If none is open the
- * extension opens one in the background and closes it when the run is done,
- * so importing does not depend on you being on the site.
+ * GitHub and Reddit use credentialed worker requests. X still uses a page
+ * script and opens an inactive tab when it needs one.
  */
 async function startCapture(source: string, quiet = false, live = false): Promise<void> {
   if (!isCaptureSource(source)) return;
+  if ((source === "github" || source === "reddit") && sessionImports.has(source)) return;
   const runs = persistentState().runs;
   const begun = await runs.begin(source, live ? "live" : "full");
   if (!begun.started) {
@@ -854,23 +832,33 @@ async function startCapture(source: string, quiet = false, live = false): Promis
     return;
   }
 
-  const preferredUrl =
-    source === "github" && !live && begun.run.cursor
-      ? validatedGitHubStarsPageUrl(begun.run.cursor, "https://github.com/stars") ?? undefined
-      : source === "github"
-        ? entry.url
-        : undefined;
+  if (source === "github" || source === "reddit") {
+    const controller = new AbortController();
+    const task = importWithoutTab(source, begun.run.runId, entry, live, controller.signal);
+    sessionImports.set(source, { controller, task });
+    try {
+      await task;
+    } finally {
+      sessionImports.delete(source);
+    }
+    if (!controller.signal.aborted) await processPendingRefreshes();
+    return;
+  }
+
   let target: { id: number; ours: boolean } | null = null;
-  const existing = await findTab(source, preferredUrl);
+  const existing = await findTab(source);
   if (existing?.id) target = { id: existing.id, ours: false };
   else {
     await patchStatus(source, { message: `opening ${entry.host}…` });
-    target = await openTab(source, preferredUrl);
+    target = await openTab(source);
   }
 
   if (!target) {
     await finishRun(source);
-    await patchStatus(source, { startedAt: null, message: `could not open ${entry.host}` });
+    await patchStatus(source, {
+      startedAt: null,
+      message: `could not open ${entry.host}`,
+    });
     return;
   }
   const tab = { id: target.id };
@@ -895,48 +883,6 @@ async function startCapture(source: string, quiet = false, live = false): Promis
       return;
     }
 
-    /**
-     * Find the favourites, rather than asking you to.
-     *
-     * The page reports the signed-in handle, and the tab goes to that
-     * profile — which is the difference between "press Import" and "press
-     * Import, then scroll your favourites yourself". The handle is
-     * remembered, so every later run opens the right place immediately.
-     */
-    if (source === "tiktok") {
-      await patchStatus(source, { message: "finding your favourites…" });
-      await talk(tab.id, {
-        anansi: "page-command",
-        messageVersion: MESSAGE_PROTOCOL_VERSION,
-        source,
-        action: "identify",
-        config: entry,
-      });
-
-      const handle = await waitForHandle(source, 12_000);
-      if (!handle) {
-        await finishRun(source);
-        await patchStatus(source, {
-          startedAt: null,
-          message: `sign in to ${entry.host}, then press Import`,
-        });
-        return;
-      }
-
-      const current = await browser.tabs.get(tab.id).catch(() => null);
-      const destination = profileUrl(handle);
-      if (destination && !(current?.url && isProfileView(current.url, handle))) {
-        await navigateTab(tab.id, destination);
-        if (!(await configure())) {
-          await finishRun(source);
-          await patchStatus(source, {
-            startedAt: null,
-            message: `could not reach the ${entry.host} tab`,
-          });
-          return;
-        }
-      }
-    }
     // Nothing to request, so the capture is a scroll: the app fetches its own
     // item lists as the page grows, and those are what get kept.
     await patchStatus(source, {
@@ -973,10 +919,17 @@ async function startCapture(source: string, quiet = false, live = false): Promis
    * spare — and the upsert makes the nineteen you already have free.
    */
   const job = live
-    ? { ...entry, pageLimit: 1, variables: { ...(entry.variables ?? {}), count: 20 } }
+    ? {
+        ...entry,
+        pageLimit: 1,
+        variables: { ...(entry.variables ?? {}), count: 20 },
+      }
     : // A full run picks up where the last acknowledged page left off, so an
       // import interrupted at page nine does not start again at page one.
-      { ...entry, ...(begun.run.cursor ? { resumeCursor: begun.run.cursor } : {}) };
+      {
+        ...entry,
+        ...(begun.run.cursor ? { resumeCursor: begun.run.cursor } : {}),
+      };
   await patchStatus(source, {
     startedAt: begun.run.startedAt,
     pages: 0,
@@ -1013,6 +966,112 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   // Close a tab we opened once the run reports in, or after a ceiling.
   if (target.ours) {
     setTimeout(() => void expireOwnedRun(source, tab.id), 180_000);
+  }
+}
+
+async function importWithoutTab(
+  source: SessionSource,
+  runId: string,
+  entry: SourceConfig,
+  live: boolean,
+  signal: AbortSignal,
+): Promise<void> {
+  const runs = persistentState().runs;
+  const ownsRun = async () => {
+    const run = await runs.current(source);
+    return !signal.aborted && run.phase === "running" && run.runId === runId;
+  };
+  try {
+    const run = await runs.current(source);
+    await patchStatus(source, {
+      startedAt: run.startedAt,
+      pages: 0,
+      items: 0,
+      uploaded: 0,
+      failed: 0,
+      message: "importing in the background…",
+    });
+    const result = await runSessionImport({
+      source,
+      cursor: run.cursor,
+      pageLimit: entry.pageLimit ?? 40,
+      live,
+      signal,
+      isCurrent: async () => {
+        if (!(await ownsRun())) return false;
+        const config = await loadConfig(true);
+        if (!(await ownsRun())) return false;
+        if (!config?.enabled || !config.sources.some((candidate) => candidate.source === source)) {
+          await runs.stop(source);
+          await clearSourceRunRecovery(source);
+          await patchStatus(source, {
+            startedAt: null,
+            message: "switched off in Sources",
+          });
+          return false;
+        }
+        return true;
+      },
+      onPage: async (page, number) => {
+        await deliverRaw(
+          source,
+          page.raw,
+          number,
+          live ? undefined : page.cursor,
+          live ? "platform_event" : "platform_import",
+        );
+        const current = await readStatus(source);
+        await patchStatus(source, {
+          pages: number,
+          items: current.items + page.items,
+        });
+        scheduleSourceRunRecovery(source, (await runs.current(source)).updatedAt);
+      },
+    });
+    if (result.state === "cancelled" || !(await ownsRun())) return;
+    if (result.state === "limited") {
+      await runs.stop(source);
+      await clearSourceRunRecovery(source);
+      await patchStatus(source, {
+        startedAt: null,
+        message: "import paused at its safety limit; press Resume to continue",
+      });
+      return;
+    }
+    if (!(await runs.current(source)).pendingRefresh) await flushPendingSaves(source);
+    if (!live) await runs.completeInitialImport(source);
+    await finishRun(source);
+    await patchStatus(source, {
+      startedAt: null,
+      lastRun: Date.now(),
+      pages: result.pages,
+      items: result.items,
+      message: null,
+    });
+  } catch (error) {
+    if (!(await ownsRun())) return;
+    const code = error instanceof SessionImportError ? error.code : "platform_request_failed";
+    await runs.noteError(source, code);
+    if (code === "rate_limited") {
+      const retryAfterMs =
+        error instanceof SessionImportError ? (error.retryAfterMs ?? SOURCE_RUN_LEASE_MS) : SOURCE_RUN_LEASE_MS;
+      // Keep the durable run and cursor alive. The alarm is set after both the
+      // provider's delay and our MV3 recovery lease, so a sleeping worker can
+      // resume without a popup staying open.
+      browser.alarms.create(sourceRunRecoveryAlarm(source), {
+        when: Date.now() + Math.max(SOURCE_RUN_LEASE_MS + 100, retryAfterMs),
+      });
+      await patchStatus(source, {
+        startedAt: null,
+        message: "the platform temporarily limited the import; Anansi will retry automatically",
+      });
+      return;
+    }
+    await finishRun(source);
+    await patchStatus(source, {
+      startedAt: null,
+      message: SAFE_PLATFORM_ERRORS[code],
+    });
   }
 }
 
@@ -1089,12 +1148,7 @@ async function talk(tabId: number, message: unknown): Promise<boolean> {
 }
 
 async function rescheduleAlarm(): Promise<void> {
-  await browser.alarms.clear(ALARM);
-  const s = await settings();
-  const minutes = s?.syncEvery ?? 0;
-  if (minutes > 0) {
-    browser.alarms.create(ALARM, { periodInMinutes: minutes, delayInMinutes: minutes });
-  }
+  await scheduleDailyCatchUp(browser.alarms);
 }
 
 async function rescheduleHeartbeat(): Promise<void> {
@@ -1116,10 +1170,7 @@ async function maybeStartInitialGitHubImport(): Promise<void> {
   const runs = persistentState().runs;
   if (!(await runs.initialImportDue("github"))) return;
   const config = await loadConfig();
-  if (
-    !config?.enabled ||
-    !config.sources.some((entry) => entry.source === "github")
-  ) {
+  if (!config?.enabled || !config.sources.some((entry) => entry.source === "github")) {
     return;
   }
   await startCapture("github", true);
@@ -1170,6 +1221,7 @@ async function durableSnapshot() {
 type BackgroundResult =
   | {
       ok: true;
+      delivery?: "queued" | "uploaded";
       snapshot?: Awaited<ReturnType<typeof durableSnapshot>>;
       /** Whether Chrome bookmark mirroring is on and still permitted. */
       mirroring?: boolean;
@@ -1222,11 +1274,11 @@ type PlatformErrorCode = Extract<PageEventMessage, { action: "error" }>["errorCo
 
 const SAFE_PLATFORM_ERRORS: Record<PlatformErrorCode, string> = {
   platform_request_failed: "the platform request failed; retry after checking the signed-in tab",
-  not_signed_in: "the platform tab is not signed in",
+  not_signed_in: "sign in to the platform in this browser, then press Import",
   query_unavailable: "the bookmark query is unavailable; open the bookmarks page and retry",
   capture_failed: "capture failed inside the platform tab",
-  page_shape_changed: "GitHub's stars page changed; update the extension before retrying",
-  rate_limited: "GitHub temporarily limited the stars import; retry later",
+  page_shape_changed: "the platform returned an unexpected page; update the extension before retrying",
+  rate_limited: "the platform temporarily limited the import; retry later",
 };
 
 async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundResult> {
@@ -1247,22 +1299,23 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
     case "mirror-off":
       return await setMirroring(false);
     case "save-page": {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (!tab?.id) return { ok: false, error: "no active tab" };
       return await capturePage(tab.id, "toolbar");
     }
     case "start": {
-      const creds = await settings();
-      if (!creds) {
-        await patchStatus(msg.source, {
-          message: "enter the server and token, then press Save",
-        });
-        return { ok: false, error: "extension is not configured" };
-      }
       await startCapture(msg.source);
       return { ok: true };
     }
     case "stop": {
+      if (msg.source === "github" || msg.source === "reddit") {
+        const importing = sessionImports.get(msg.source);
+        importing?.controller.abort();
+        await importing?.task;
+      }
       await clearSourceRunRecovery(msg.source);
       const tabId = await persistentState().runs.stop(msg.source);
       if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
@@ -1272,140 +1325,19 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
   }
 }
 
-async function finishSuccessfulGitHubRun(pages: number, items: number): Promise<void> {
-  const runs = persistentState().runs;
-  const run = await runs.current("github");
-  if (!run.pendingRefresh) await flushPendingSaves("github");
-  if (run.runMode === "full" && !run.cursor) {
-    await runs.completeInitialImport("github");
+async function handlePageEvent(msg: PageEventMessage, source: PlatformSource): Promise<BackgroundResult> {
+  // Import results for these sources are owned by the worker. Old content
+  // scripts in already-open tabs must not advance or finish its run.
+  if ((source === "github" || source === "reddit") && ["page", "done", "error", "scanned"].includes(msg.action)) {
+    return {
+      ok: false,
+      error: "import results are owned by the background worker",
+    };
   }
-  await finishRun("github");
-  await patchStatus("github", {
-    startedAt: null,
-    lastRun: Date.now(),
-    pages,
-    items,
-    message: null,
-  });
-  await processPendingRefreshes();
-}
-
-async function continueGitHubImport(
-  msg: Extract<PageEventMessage, { action: "page" }>,
-  tabId?: number,
-): Promise<void> {
-  const runs = persistentState().runs;
-  const current = await runs.current("github");
-  if (current.phase !== "running") return;
-
-  const config = await loadConfig(true);
-  const entry = config?.enabled
-    ? config.sources.find((candidate) => candidate.source === "github")
-    : undefined;
-  if (!entry) {
-    await clearSourceRunRecovery("github");
-    const ownedTab = await runs.stop("github");
-    if (ownedTab !== null) await browser.tabs.remove(ownedTab).catch(() => {});
-    await patchStatus("github", { startedAt: null, message: "switched off in Sources" });
-    return;
-  }
-
-  const nextUrl = msg.cursor
-    ? validatedGitHubStarsPageUrl(msg.cursor, "https://github.com/stars")
-    : null;
-  if (msg.cursor && !nextUrl) {
-    await runs.noteError("github", "page_shape_changed");
-    await finishRun("github");
-    await patchStatus("github", {
-      startedAt: null,
-      message: SAFE_PLATFORM_ERRORS.page_shape_changed,
-    });
-    return;
-  }
-
-  const status = await readStatus("github");
-  const totalItems = status.items + msg.items;
-  await deliverRaw(
-    "github",
-    msg.raw,
-    msg.page,
-    current.runMode === "full" ? (msg.cursor ?? null) : undefined,
-    current.runMode === "live" ? "platform_event" : "platform_import",
-  );
-  await patchStatus("github", { pages: msg.page, items: totalItems });
-
-  if (current.runMode === "live") {
-    await finishSuccessfulGitHubRun(msg.page, totalItems);
-    return;
-  }
-
-  if (!msg.cursor) {
-    await finishSuccessfulGitHubRun(msg.page, totalItems);
-    return;
-  }
-
-  if (msg.page >= (entry.pageLimit ?? 40)) {
-    await finishRun("github");
-    await patchStatus("github", {
-      startedAt: null,
-      lastRun: Date.now(),
-      message: "import paused at its safety limit; press Import to continue",
-    });
-    return;
-  }
-
-  if (!tabId) {
-    await runs.noteError("github", "capture_failed");
-    await finishRun("github");
-    await patchStatus("github", {
-      startedAt: null,
-      message: SAFE_PLATFORM_ERRORS.capture_failed,
-    });
-    return;
-  }
-
-  if (!nextUrl) throw new Error("validated GitHub cursor is missing");
-
-  await navigateTab(tabId, nextUrl);
-  const job = { ...entry, page: msg.page + 1 };
-  const reached =
-    (await talk(tabId, {
-      anansi: "page-command",
-      messageVersion: MESSAGE_PROTOCOL_VERSION,
-      source: "github",
-      action: "configure",
-      config: job,
-    })) &&
-    (await talk(tabId, {
-      anansi: "page-command",
-      messageVersion: MESSAGE_PROTOCOL_VERSION,
-      source: "github",
-      action: "backfill",
-      config: job,
-    }));
-  if (!reached) {
-    await runs.noteError("github", "capture_failed");
-    await finishRun("github");
-    await patchStatus("github", {
-      startedAt: null,
-      message: "could not continue the GitHub stars import",
-    });
-  }
-}
-
-async function handlePageEvent(
-  msg: PageEventMessage,
-  source: PlatformSource,
-  tabId?: number,
-): Promise<BackgroundResult> {
   switch (msg.action) {
     case "ready":
       return { ok: true };
     case "page":
-      if (source === "github") {
-        await continueGitHubImport(msg, tabId);
-        return { ok: true };
-      }
       await deliverRaw(source, msg.raw, msg.page, msg.cursor ?? null);
       await patchStatus(source, { pages: msg.page, items: msg.items });
       return { ok: true };
@@ -1414,13 +1346,7 @@ async function handlePageEvent(
       browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
       return { ok: true };
     case "bookmark":
-      await handleBookmarkMutation(
-        source,
-        msg.bookmarkAction,
-        msg.externalId,
-        msg.canonicalUrl,
-        msg.raw,
-      );
+      await handleBookmarkMutation(source, msg.bookmarkAction, msg.externalId, msg.canonicalUrl, msg.raw);
       return { ok: true };
     case "observed": {
       await deliverRaw(source, msg.raw);
@@ -1432,14 +1358,6 @@ async function handlePageEvent(
       return { ok: true };
     }
     case "done":
-      if (source === "github") {
-        const run = await persistentState().runs.current("github");
-        if (run.runMode === "full") {
-          await persistentState().runs.setCursor("github", null);
-        }
-        await finishSuccessfulGitHubRun(msg.pages, msg.items);
-        return { ok: true };
-      }
       // Before finishing: the pages this run queued are what give the held
       // saves their content, and the queue is serial per source.
       await flushPendingSaves(source);
@@ -1469,12 +1387,7 @@ async function handlePageEvent(
     }
     case "error":
       await persistentState().runs.noteError(source, msg.errorCode);
-      if (source === "github" && msg.errorCode === "not_signed_in") {
-        await clearSourceRunRecovery(source);
-        await persistentState().runs.finish(source);
-      } else {
-        await finishRun(source);
-      }
+      await finishRun(source);
       await patchStatus(source, {
         startedAt: null,
         message: SAFE_PLATFORM_ERRORS[msg.errorCode],
@@ -1484,10 +1397,7 @@ async function handlePageEvent(
   }
 }
 
-async function handleRuntimeMessage(
-  message: unknown,
-  sender: RuntimeMessageSender,
-): Promise<BackgroundResult> {
+async function handleRuntimeMessage(message: unknown, sender: RuntimeMessageSender): Promise<BackgroundResult> {
   const parsed = validateRuntimeMessage(message, sender);
   if (!parsed.ok) return { ok: false, error: parsed.error.message };
 
@@ -1496,12 +1406,15 @@ async function handleRuntimeMessage(
       return await handlePopupCommand(parsed.message);
     }
     if (parsed.message.anansi === "page-event" && parsed.source) {
-      return await handlePageEvent(parsed.message, parsed.source, sender.tab?.id);
+      return await handlePageEvent(parsed.message, parsed.source);
     }
     return { ok: false, error: "message family is not allowed on this path" };
   } catch {
     const source = parsed.source ?? "_";
-    await patchStatus(source, { startedAt: null, message: "background action failed" });
+    await patchStatus(source, {
+      startedAt: null,
+      message: "background action failed",
+    });
     return { ok: false, error: "background action failed" };
   }
 }
@@ -1594,20 +1507,17 @@ export default defineBackground(() => {
   browser.tabs.onUpdated.addListener((tabId, info, tab) => {
     if (info.status !== "complete" || !tab.url) return;
     void loadConfig().then((config) => {
-      const entry = config?.sources.find((candidate) =>
-        tab.url?.includes(candidate.host.replace("www.", "")),
-      );
+      const entry = config?.sources.find((candidate) => tab.url?.includes(candidate.host.replace("www.", "")));
       if (entry) {
-        void browser.tabs.sendMessage(
-          tabId,
-          {
+        void browser.tabs
+          .sendMessage(tabId, {
             anansi: "page-command",
             messageVersion: MESSAGE_PROTOCOL_VERSION,
             source: entry.source,
             action: "configure",
             config: entry,
-          },
-        ).catch(() => {});
+          })
+          .catch(() => {});
       }
     });
   });

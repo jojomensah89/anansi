@@ -1,20 +1,23 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Rail } from "../components/rail.tsx";
 import { Card } from "../components/card.tsx";
 import { Palette } from "../components/palette.tsx";
 import { Detail } from "../components/detail.tsx";
-import { FilterChips, FilterTrigger, useFilterBar, type Filters } from "../components/filters.tsx";
+import { FilterChips, useFilterBar, type Filters } from "../components/filters.tsx";
 import { SelectBar } from "../components/selectbar.tsx";
 import { RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
 import { useMasonry } from "../components/masonry.tsx";
+import { LibraryActions } from "../components/library-actions.tsx";
 import {
   CountBone,
   GridSkeleton,
   RowsSkeleton,
   useSlowLoad,
 } from "../components/skeleton.tsx";
-import { api, type ItemRow } from "../lib/api.ts";
+import { api, type Collection, type ItemRow } from "../lib/api.ts";
+import { libraryKeys, useLibraryQuery } from "../lib/library-query.ts";
 import { useHideRemoved } from "../lib/settings.ts";
 import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
 
@@ -35,23 +38,15 @@ export const Route = createFileRoute("/")({
  * that will happen.
  */
 function Library() {
-  const [items, setItems] = useState<ItemRow[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const [total, setTotal] = useState(0);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [authors, setAuthors] = useState(0);
+  const queryClient = useQueryClient();
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
   const view: ViewMode = search.view ?? "grid";
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [focusNoteId, setFocusNoteId] = useState<string | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
-  const masonry = useMasonry(items);
 
   const filters: Filters = useMemo(
     () => ({
@@ -62,6 +57,7 @@ function Library() {
       media: search.media,
       removed: search.removed as Filters["removed"],
       archived: search.archived,
+      favorite: search.favorite,
     }),
     [search],
   );
@@ -74,13 +70,13 @@ function Library() {
    * the back button is for.
    */
   const setFilters = useCallback(
-    (next: Filters) => void navigate({ search: toLibrarySearch(next, view), replace: true }),
-    [navigate, view],
+    (next: Filters) => void navigate({ search: toLibrarySearch(next, view, { q: search.q, item: search.item }), replace: true }),
+    [navigate, search.item, search.q, view],
   );
 
   const setView = useCallback(
-    (next: ViewMode) => void navigate({ search: toLibrarySearch(filters, next), replace: true }),
-    [navigate, filters],
+    (next: ViewMode) => void navigate({ search: toLibrarySearch(filters, next, { q: search.q, item: search.item }), replace: true }),
+    [navigate, filters, search.item, search.q],
   );
 
   /**
@@ -92,84 +88,37 @@ function Library() {
    */
   const [hideRemoved] = useHideRemoved();
 
+  const ordering = view === "timeline" ? "posted" : "saved";
+  const library = useLibraryQuery({ filters, query: search.q ?? "", order: ordering, hideRemoved });
+  const items = library.items;
+  const masonry = useMasonry(items);
+  const stats = useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000 });
+  const total = stats.data?.items ?? 0;
+  const authors = stats.data?.authors ?? 0;
+  const visibleCount = search.archived ? (stats.data?.archived ?? 0) : total;
+  const counts = stats.data?.bySource ?? {};
+
   const bar = useFilterBar({ filters, onChange: setFilters, bySource: counts });
 
-  const firstLoad = useSlowLoad(loading && items.length === 0);
+  const firstLoad = useSlowLoad(library.isPending && items.length === 0);
 
   /**
    * A count has three states, not two: arrived, obviously late, and neither.
    * Drawing a placeholder in the third would put a grey box on screen for a
    * query that answers in twenty milliseconds.
    */
-  const statsReady = total > 0;
-  const statsSlow = useSlowLoad(!statsReady);
-
-  const refreshStats = useCallback(() => {
-    api
-      .stats()
-      .then((s) => {
-        setTotal(s.items);
-        setAuthors(s.authors);
-        setCounts(s.bySource);
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => refreshStats(), [refreshStats]);
-
-  // A filter change is a different query, not more of the same one — and so
-  // is switching to or from Timeline, which changes the sort order.
-  const ordering = view === "timeline" ? "posted" : "saved";
-  useEffect(() => {
-    setItems([]);
-    setCursor(null);
-    setDone(false);
-  }, [filters, ordering, hideRemoved]);
-
-  const loadMore = useCallback(async () => {
-    if (done) return;
-    setLoading(true);
-    try {
-      const page = await api.items({
-        ...filters,
-        /*
-          The chip wins over the preference. Asking to see what has been
-          removed while the setting hides removed items would otherwise return
-          nothing — and an empty grid is indistinguishable from a broken one.
-        */
-        removed: filters.removed ?? (hideRemoved ? "exclude" : "include"),
-        cursor,
-        // Timeline needs the whole library in date order, not the loaded page
-        // re-sorted — otherwise its groups are only true of what you happen
-        // to have scrolled past.
-        order: view === "timeline" ? "posted" : "saved",
-        limit: 60,
-      });
-      setItems((prev) => [...prev, ...page.items]);
-      setCursor(page.nextCursor);
-      if (page.nextCursor === null) setDone(true);
-      setError(null);
-    } catch (e) {
-      setError((e as Error).message);
-      setDone(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [cursor, done, filters, view, hideRemoved]);
-
-  useEffect(() => {
-    if (items.length === 0 && !done) void loadMore();
-  }, [items.length, done, loadMore]);
+  const statsReady = stats.isSuccess;
+  const statsSlow = useSlowLoad(stats.isPending);
 
   useEffect(() => {
     const node = sentinel.current;
     if (!node) return;
     const io = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting && !loading && !done) void loadMore();
+      if (entries[0]?.isIntersecting && library.hasNextPage && !library.isFetchingNextPage) void library.fetchNextPage();
     });
     io.observe(node);
     return () => io.disconnect();
-  }, [loadMore, loading, done]);
+  }, [library.fetchNextPage, library.hasNextPage, library.isFetchingNextPage]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -199,15 +148,33 @@ function Library() {
   const afterBulk = () => {
     setPicked(new Set());
     setSelecting(false);
-    setItems([]);
-    setCursor(null);
-    setDone(false);
-    refreshStats();
+    void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
   };
 
+  const afterCardChange = useCallback(() => {
+		void queryClient.invalidateQueries({ queryKey: libraryKeys.pages() });
+		void queryClient.invalidateQueries({ queryKey: ["tags"] });
+	}, [queryClient]);
+
+  const openItem = useCallback((item: Pick<ItemRow, "id">, focusNote = false) => {
+    setFocusNoteId(focusNote ? item.id : null);
+    void navigate({ search: { ...search, item: item.id } });
+  }, [navigate, search]);
+
+  const applyCollection = useCallback((collection: Collection) => {
+    const { query, cursor: _cursor, limit: _limit, order: _order, ...saved } = collection.filters;
+    void navigate({ search: toLibrarySearch(saved, view, { q: query }) });
+  }, [navigate, view]);
+  const collectionFilters = useMemo<Collection["filters"]>(() => ({
+    ...filters,
+    removed: filters.removed ?? (hideRemoved ? "exclude" : "include"),
+    order: ordering,
+    query: search.q,
+  }), [filters, hideRemoved, ordering, search.q]);
+
   return (
-    <div style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
-      <Rail total={total} authors={authors} bySource={counts} />
+    <div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+      <Rail total={total} authors={authors} archived={stats.data?.archived ?? 0} bySource={counts} ready={statsReady} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div className="scroll" style={{ flex: 1 }}>
@@ -227,12 +194,12 @@ function Library() {
                 padding: "0 20px",
               }}
             >
-              <span style={{ fontSize: 14, fontWeight: 600 }}>Library</span>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{search.q ? "Search results" : search.archived ? "Archived" : "Library"}</span>
               <span className="mono" style={{ fontSize: 11, color: "var(--faint)", display: "flex", alignItems: "center", gap: 5 }}>
-                {statsReady && `${total.toLocaleString()} items · ${authors} authors`}
+                {statsReady && `${visibleCount.toLocaleString()} saved items`}
                 {!statsReady && statsSlow && (
                   <>
-                    <CountBone digits={5} height={9} /> items · <CountBone digits={4} height={9} /> authors
+                    <CountBone digits={5} height={9} /> saved items
                   </>
                 )}
               </span>
@@ -278,7 +245,7 @@ function Library() {
                     <path d="m20 20-4.2-4.2" />
                   </svg>
                   <span style={{ fontSize: 12.5, color: "var(--fainter)" }}>
-                    Search {total.toLocaleString()} saves
+                    {search.q ? search.q : `Search ${visibleCount.toLocaleString()} saved items`}
                   </span>
                   <span
                     className="mono"
@@ -295,7 +262,14 @@ function Library() {
                   </span>
                 </button>
 
-                <FilterTrigger bar={bar} />
+                {search.q && (
+                  <button type="button" onClick={() => void navigate({ search: toLibrarySearch(filters, view, { item: search.item }), replace: true })} style={{ height: 30, border: "none", background: "transparent", color: "var(--faint)", cursor: "pointer", font: "inherit", fontSize: 11.5 }}>
+                    Clear search
+                  </button>
+                )}
+                {stats.isError && <button type="button" onClick={() => void stats.refetch()} style={{ border: "none", background: "transparent", color: "#f2a7a7", cursor: "pointer", font: "inherit" }}>Counts unavailable · retry</button>}
+
+                <LibraryActions current={collectionFilters} onApply={applyCollection} />
 
                 <button
                   type="button"
@@ -326,7 +300,7 @@ function Library() {
               </div>
             </div>
 
-            <FilterChips bar={bar} matched={done ? items.length : null} />
+            <FilterChips bar={bar} matched={!library.hasNextPage && !library.isPending && !library.isError ? items.length : null} />
           </div>
 
           <div style={{ padding: "16px 20px" }}>
@@ -335,30 +309,28 @@ function Library() {
             screen needs a shape; a screen you are already reading needs a line
             at the bottom, not a wall of grey pushing your place away.
           */}
-          {firstLoad && !error && view === "grid" && (
+          {firstLoad && !library.isError && !search.q && view === "grid" && (
             <GridSkeleton columns={masonry.columns} containerRef={masonry.ref} />
           )}
-          {firstLoad && !error && view === "row" && <RowsSkeleton />}
-          {firstLoad && !error && view === "timeline" && <RowsSkeleton count={6} />}
-          {error && (
-            <div style={{ color: "var(--muted)", fontSize: 13, padding: 12 }}>
-              {error}
-              <div className="mono" style={{ fontSize: 11, color: "var(--faint)", marginTop: 6 }}>
-                Is the API running? bun run apps/web/scripts/serve-local.ts
-              </div>
+          {firstLoad && !library.isError && (search.q || view === "row") && <RowsSkeleton />}
+          {firstLoad && !library.isError && !search.q && view === "timeline" && <RowsSkeleton count={6} />}
+          {library.isError && (
+            <div role="alert" style={{ color: "var(--muted)", fontSize: 13, padding: 12 }}>
+              {library.error instanceof Error ? library.error.message : "The library could not be loaded."}
+              <button type="button" onClick={() => void library.refetch()} style={{ marginLeft: 10, border: "1px solid var(--edge)", borderRadius: 5, background: "var(--card)", color: "var(--text-dim)", padding: "5px 9px", cursor: "pointer" }}>Retry</button>
             </div>
           )}
 
-          {!loading && !error && items.length === 0 && (
+          {!library.isPending && !library.isError && items.length === 0 && (
             <div style={{ padding: "40px 12px", color: "var(--muted)", fontSize: 13.5 }}>
-              Nothing matches these filters.
+              {search.q ? `No results for “${search.q}” in this view.` : bar.anyApplied ? "Nothing matches these filters." : "Your library is ready for its first save."}
               <div className="mono" style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 6 }}>
-                Clear one from the bar above.
+                {search.q || bar.anyApplied ? "Try a broader search or clear one filter above." : "Use the Anansi extension to save a page, star, post, or selection."}
               </div>
             </div>
           )}
 
-          {!firstLoad && view === "grid" && (
+          {!firstLoad && !search.q && view === "grid" && (
             /*
               Columns packed shortest-first rather than a CSS grid. Grid rows
               are as tall as their tallest member, so a 137px card beside a
@@ -373,8 +345,9 @@ function Library() {
                       item={item}
                       selectable={selecting}
                       selected={picked.has(item.id)}
-                      onOpen={(i) => setOpenId(i.id)}
+                      onOpen={openItem}
                       onToggle={toggle}
+                      onChanged={afterCardChange}
                     />
                   ))}
                 </div>
@@ -382,12 +355,18 @@ function Library() {
             </div>
           )}
 
-          {!firstLoad && view === "row" && <RowView items={items} onOpen={(i) => setOpenId(i.id)} />}
-          {!firstLoad && view === "timeline" && <TimelineView items={items} onOpen={(i) => setOpenId(i.id)} />}
+          {!firstLoad && (search.q || view === "row") && <RowView items={items} onOpen={openItem} />}
+          {!firstLoad && !search.q && view === "timeline" && <TimelineView items={items} onOpen={openItem} />}
           <div ref={sentinel} style={{ height: 40 }} />
-            {loading && items.length > 0 && (
+            {library.isFetchingNextPage && items.length > 0 && (
               <div className="mono" style={{ fontSize: 11, color: "var(--faint)", padding: 8 }} aria-live="polite">
                 loading more…
+              </div>
+            )}
+            {library.isFetchNextPageError && (
+              <div role="alert" style={{ display: "flex", alignItems: "center", gap: 9, color: "#f2a7a7", fontSize: 12, padding: 8 }}>
+                More results could not be loaded.
+                <button type="button" onClick={() => void library.fetchNextPage()} style={{ border: "1px solid var(--edge)", borderRadius: 5, background: "var(--card)", color: "var(--text-dim)", padding: "4px 8px", cursor: "pointer" }}>Retry</button>
               </div>
             )}
           </div>
@@ -409,12 +388,17 @@ function Library() {
         open={paletteOpen}
         total={total}
         onClose={() => setPaletteOpen(false)}
+        filters={filters}
         onOpen={(hit) => {
           setPaletteOpen(false);
-          setOpenId(hit.id);
+          openItem(hit as ItemRow);
+        }}
+        onSearch={(query) => {
+          setPaletteOpen(false);
+          void navigate({ search: toLibrarySearch(filters, view, { q: query }), replace: true });
         }}
       />
-      <Detail id={openId} onClose={() => setOpenId(null)} />
+      <Detail id={search.item ?? null} focusNote={focusNoteId === search.item} onClose={() => { setFocusNoteId(null); void navigate({ search: { ...search, item: undefined }, replace: true }); }} />
     </div>
   );
 }

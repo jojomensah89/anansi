@@ -1,151 +1,144 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import {
+	Sidebar,
+	SidebarContent,
+	SidebarFooter,
+	SidebarGroup,
+	SidebarGroupContent,
+	SidebarGroupLabel,
+	SidebarHeader,
+	SidebarMenu,
+	SidebarMenuButton,
+	SidebarMenuItem,
+	SidebarTrigger,
+} from "@anansi/ui/components/sidebar";
 import { CountBone, useSlowLoad } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
+import { ExtensionIcon } from "./extension-icon.tsx";
+import { api, sourceLabel, type ExtensionHealth } from "../lib/api.ts";
+import { extensionLabel } from "../lib/source-state.ts";
 
-/**
- * The 228px rail from the Library artboard.
- *
- * Counts are passed in rather than fetched here: two components fetching the
- * same numbers is how a sidebar ends up disagreeing with the page beside it.
- */
+/** The library rail. The shell owns counts so navigation and content agree. */
 export interface RailProps {
-  total: number;
-  authors: number;
-  archived?: number;
-  bySource: Record<string, number>;
+	total: number;
+	authors: number;
+	archived?: number;
+	bySource: Record<string, number>;
+	ready?: boolean;
 }
 
 function Web() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round">
-      <circle cx="12" cy="12" r="3.2" />
-      <path d="M12 8.8V3M12 15.2V21M8.8 12H3M15.2 12H21M9.7 9.7 5.6 5.6M14.3 9.7l4.1-4.1M9.7 14.3l-4.1 4.1M14.3 14.3l4.1 4.1" />
-    </svg>
-  );
+	return (
+		<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+			<circle cx="12" cy="12" r="3.2" />
+			<path d="M12 8.8V3M12 15.2V21M8.8 12H3M15.2 12H21M9.7 9.7 5.6 5.6M14.3 9.7l4.1-4.1M9.7 14.3l-4.1 4.1M14.3 14.3l4.1 4.1" />
+		</svg>
+	);
 }
 
-function Item({
-  to, label, count, active, children,
-}: {
-  to: string; label: string; count?: React.ReactNode; active: boolean; children: React.ReactNode;
-}) {
-  return (
-    <Link
-      to={to}
-      style={{
-        display: "flex", alignItems: "center", gap: 10, padding: "7px 8px",
-        borderRadius: 5, fontSize: 13,
-        background: active ? "var(--raised)" : "transparent",
-        color: active ? "var(--text)" : "var(--muted)",
-        fontWeight: active ? 500 : 400,
-      }}
-    >
-      {children}
-      {label}
-      {count !== undefined && (
-        <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: active ? "var(--faint)" : "var(--fainter)" }}>
-          {count}
-        </span>
-      )}
-    </Link>
-  );
+function NavIcon({ path, active }: { path: string; active: boolean }) {
+	return (
+		<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={active ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+			<path d={path} />
+		</svg>
+	);
 }
 
-export function Rail({ total, authors, bySource }: RailProps) {
-  const path = useRouterState({ select: (s) => s.location.pathname });
+function Item({ to, label, count, active, children }: { to: string; label: string; count?: React.ReactNode; active: boolean; children: React.ReactNode }) {
+	return (
+		<SidebarMenuItem>
+			<SidebarMenuButton render={<Link to={to} />} isActive={active} tooltip={label} aria-label={label}>
+				{children}
+				<span className="anansi-sidebar-label">{label}</span>
+				{count !== undefined && <span className="anansi-sidebar-count mono">{count}</span>}
+			</SidebarMenuButton>
+		</SidebarMenuItem>
+	);
+}
 
-  /**
-   * The rail's counts are the app's first impression, and zero is a lie while
-   * they are still in flight — "Bookmarks 0" beside a library of 1,274 reads
-   * as data loss. So a count that has not arrived is a shape, not a number,
-   * and only once the wait is long enough to see.
-   */
-  const ready = total > 0;
-  const slow = useSlowLoad(!ready);
-  const count = (n: number) =>
-    ready ? String(n) : slow ? <CountBone digits={4} height={8} /> : null;
+export function Rail({ total, authors, archived = 0, bySource, ready: readyProp }: RailProps) {
+	const [extension, setExtension] = useState<ExtensionHealth | null>(null);
+	const path = useRouterState({ select: (s) => s.location.pathname });
+	const archivedView = useRouterState({ select: (s) => s.location.pathname === "/" && (s.location.search as Record<string, unknown>).archived === true });
+	const ready = readyProp ?? (total > 0 || archived > 0);
+	const slow = useSlowLoad(!ready);
+	const count = (n: number) => ready ? String(n) : slow ? <CountBone digits={4} height={8} /> : null;
+	useEffect(() => {
+		const controller = new AbortController();
+		api.sources(controller.signal).then((result) => setExtension(result.extension)).catch(() => setExtension(null));
+		return () => controller.abort();
+	}, []);
+	const extensionText = extension ? extensionLabel(extension) : "Extension status unavailable";
+	const extensionColor = extension?.connection === "connected" ? "var(--ok)" : extension ? "var(--accent-text)" : "var(--faint)";
 
-  return (
-    <div style={{
-      width: 228, flexShrink: 0, background: "var(--rail)",
-      borderRight: "1px solid var(--line)", display: "flex",
-      flexDirection: "column", padding: "16px 0",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 16px 18px" }}>
-        <Web />
-        <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em" }}>Anansi</span>
-      </div>
+	return (
+		<Sidebar className="anansi-rail" collapsible="icon">
+			<SidebarHeader className="anansi-rail-brand">
+				<div className="anansi-rail-brand-name">
+					<Web />
+					<span className="anansi-sidebar-label">Anansi</span>
+				</div>
+				<SidebarTrigger />
+			</SidebarHeader>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "0 8px" }}>
-        <Item to="/" label="Library" count={count(total)} active={path === "/"}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={path === "/" ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinejoin="round">
-            <path d="M6 4h12v17l-6-4-6 4z" />
-          </svg>
-        </Item>
-        <Item to="/creators" label="Creators" count={count(authors)} active={path === "/creators"}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={path === "/creators" ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="9" cy="8" r="3.2" />
-            <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5M16 6.2a3 3 0 0 1 0 5.6M17.5 19c0-2-.6-3.6-1.7-4.6" />
-          </svg>
-        </Item>
-        <Item to="/sources" label="Sources" active={path === "/sources"}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={path === "/sources" ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 7h16M4 12h16M4 17h9" />
-          </svg>
-        </Item>
-        <Item to="/mcp" label="MCP server" active={path === "/mcp"}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={path === "/mcp" ? "var(--accent)" : "var(--faint)"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="4" y="4" width="16" height="6" rx="1.5" />
-            <rect x="4" y="14" width="16" height="6" rx="1.5" />
-            <path d="M7 7h.01M7 17h.01M11 7h6M11 17h6" />
-          </svg>
-        </Item>
-      </div>
+			<SidebarContent>
+				<SidebarGroup className="anansi-rail-primary">
+					<SidebarGroupContent>
+						<SidebarMenu>
+							<Item to="/" label="Library" count={count(total)} active={!archivedView && (path === "" || path === "/")}>
+								<NavIcon active={!archivedView && (path === "" || path === "/")} path="M6 4h12v17l-6-4-6 4z" />
+							</Item>
+							<SidebarMenuItem>
+								<SidebarMenuButton render={<Link to="/" search={{ archived: true }} />} isActive={archivedView} tooltip="Archived" aria-label="Archived">
+									<NavIcon active={archivedView} path="M4 7h16v13H4zM3 4h18v3H3zM9 11h6" />
+									<span className="anansi-sidebar-label">Archived</span>
+									<span className="anansi-sidebar-count mono">{count(archived)}</span>
+								</SidebarMenuButton>
+							</SidebarMenuItem>
+							<Item to="/creators" label="Authors" count={count(authors)} active={path === "/creators"}>
+								<NavIcon active={path === "/creators"} path="M9 11.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4ZM3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5M16 6.2a3 3 0 0 1 0 5.6M17.5 19c0-2-.6-3.6-1.7-4.6" />
+							</Item>
+							<Item to="/sources" label="Sources" active={path === "/sources"}>
+								<NavIcon active={path === "/sources"} path="M4 7h16M4 12h16M4 17h9" />
+							</Item>
+							<Item to="/mcp" label="MCP server" active={path === "/mcp"}>
+								<NavIcon active={path === "/mcp"} path="M4 4h16v6H4zM4 14h16v6H4zM7 7h.01M7 17h.01M11 7h6M11 17h6" />
+							</Item>
+							<Item to="/settings" label="Settings" active={path === "/settings"}>
+								<NavIcon active={path === "/settings"} path="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.9 6.9l1.4 1.4M17.7 8.3l1.4-1.4M12 3v2M12 19v2M3 12h2M19 12h2" />
+							</Item>
+						</SidebarMenu>
+					</SidebarGroupContent>
+				</SidebarGroup>
 
-      <div className="mono" style={{ padding: "22px 16px 8px", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fainter)" }}>
-        Sources
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "0 8px" }}>
-        {/*
-          Links, not labels. The filters live in the URL, so a source in the
-          rail is simply a filtered view of the library — which is what anyone
-          clicking a count in a sidebar expects it to be.
-        */}
-        {(
-          [
-            ["x", "Bookmarks", bySource.x ?? 0],
-            ["github", "Stars", bySource.github ?? 0],
-            ["reddit", "Reddit", bySource.reddit ?? 0],
-            ["tiktok", "TikTok", bySource.tiktok ?? 0],
-            ["web", "Web pages", bySource.web ?? 0],
-          ] as const
-        ).map(([source, label, n]) => (
-          <Link
-            key={source}
-            to="/"
-            search={{ source: [source] }}
-            style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 8px", borderRadius: 5, fontSize: 12.5, color: "var(--text-dim)" }}
-          >
-            <span style={{ width: 22, height: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <SourceMark source={source} size={15} />
-            </span>
-            {label}
-            <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faint)" }}>
-              {count(n)}
-            </span>
-          </Link>
-        ))}
-      </div>
+				<SidebarGroup className="anansi-rail-sources-group">
+					<SidebarGroupLabel className="anansi-rail-sources mono">Sources</SidebarGroupLabel>
+					<SidebarGroupContent>
+						<SidebarMenu>
+							{(["x", "github", "reddit", "web"] as const).map((source) => {
+								return (
+									<SidebarMenuItem key={source}>
+										<SidebarMenuButton render={<Link to="/" search={{ source: [source] }} />} tooltip={sourceLabel(source)} aria-label={sourceLabel(source)}>
+											<span className="anansi-source-icon"><SourceMark source={source} size={15} /></span>
+											<span className="anansi-sidebar-label">{sourceLabel(source)}</span>
+											<span className="anansi-sidebar-count mono">{count(bySource[source] ?? 0)}</span>
+										</SidebarMenuButton>
+									</SidebarMenuItem>
+								);
+							})}
+						</SidebarMenu>
+					</SidebarGroupContent>
+				</SidebarGroup>
+			</SidebarContent>
 
-      <div style={{ marginTop: "auto", padding: "12px 16px 0", borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 5 }}>
-        <div className="mono" style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10.5, color: "var(--faint)" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--ok)" }} />
-          local library
-        </div>
-        <div className="mono" style={{ fontSize: 10.5, color: "var(--faintest)" }}>
-          {ready ? `${total.toLocaleString()} items · ${authors} authors` : null}
-        </div>
-      </div>
-    </div>
-  );
+			<SidebarFooter className="anansi-rail-footer">
+				<div className="anansi-rail-extension" title={extensionText} aria-label={extensionText}>
+					<span className="anansi-rail-extension-icon" style={{ color: extensionColor }}><ExtensionIcon /></span>
+					<span className="anansi-rail-extension-dot" style={{ background: extensionColor }} />
+					<span className="mono anansi-sidebar-label" style={{ fontSize: 10.5, color: extensionColor }}>{extensionText}</span>
+				</div>
+			</SidebarFooter>
+		</Sidebar>
+	);
 }

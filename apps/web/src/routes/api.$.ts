@@ -15,6 +15,8 @@ export const Route = createFileRoute("/api/$")({
     handlers: {
       GET: async ({ request }) => handleApi(await serverEnv(), request),
       POST: async ({ request }) => handleApi(await serverEnv(), request),
+      PATCH: async ({ request }) => handleApi(await serverEnv(), request),
+      DELETE: async ({ request }) => handleApi(await serverEnv(), request),
     },
   },
 });

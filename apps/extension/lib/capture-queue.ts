@@ -188,7 +188,7 @@ function errorFor(result: TransportResult): QueueError {
 		return {
 			code: "http",
 			status: result.status,
-			message: `ingest returned HTTP ${result.status}`,
+			message: `ingest returned HTTP ${result.status}${result.detail ? `: ${result.detail}` : ""}`,
 		};
 	}
 	return {

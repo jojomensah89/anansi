@@ -12,6 +12,7 @@ import {
 	profileUrl,
 	readFavouriteMutation,
 	readHandle,
+	readHandleFromProfileHref,
 	readItemList,
 } from "./tiktok.ts";
 
@@ -104,6 +105,25 @@ describe("readHandle", () => {
 		expect(
 			readHandle({ AppContext: { user: { uniqueId: "../../etc/passwd" } } }),
 		).toBeNull();
+	});
+
+	test("falls back to the current signed-in profile navigation link", () => {
+		expect(readHandleFromProfileHref("/@joojo44")).toBe("joojo44");
+		expect(
+			readHandleFromProfileHref("https://www.tiktok.com/@Example.Viewer"),
+		).toBe("Example.Viewer");
+	});
+
+	test("refuses unrelated, nested, and malformed profile links", () => {
+		for (const href of [
+			"https://evil.example/@joojo44",
+			"/@joojo44/video/123",
+			"/@../../etc/passwd",
+			"/login",
+			null,
+		]) {
+			expect(readHandleFromProfileHref(href)).toBeNull();
+		}
 	});
 });
 

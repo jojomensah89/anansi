@@ -20,18 +20,14 @@ describe("source catalogue", () => {
 		expect(result.sources.map((source) => source.source)).toEqual([
 			"x",
 			"reddit",
-			"tiktok",
 			"web",
 			"github",
 		]);
 		expect(result.sources.every((source) => source.items === 0)).toBe(true);
 	});
 
-	test("keeps experimental and supported capabilities explicit", () => {
+test("keeps supported capabilities explicit", () => {
 		const result = sourceCatalogueResponse([], [], extension);
-		expect(
-			result.sources.find((source) => source.source === "tiktok")?.support,
-		).toBe("experimental");
 		expect(
 			result.sources.find((source) => source.source === "github")?.support,
 		).toBe("supported");

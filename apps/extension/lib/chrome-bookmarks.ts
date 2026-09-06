@@ -78,6 +78,11 @@ function trim(value: unknown, max: number): string | undefined {
 }
 
 export type BookmarkAction = "save" | "unsave";
+export interface BookmarkCaptureOptions {
+  installationId?: string;
+  /** Set once at the gesture; the persisted capture retains this ID for retries. */
+  mutationId?: string;
+}
 
 /**
  * One node, as a capture.
@@ -96,6 +101,7 @@ export async function toBookmarkCapture(
   node: BookmarkNode,
   action: BookmarkAction,
   now: number,
+  options: BookmarkCaptureOptions = {},
 ): Promise<ItemEventCapture | null> {
   if (!isMirrorable(node)) return null;
 
@@ -103,7 +109,8 @@ export async function toBookmarkCapture(
   if (!canonicalUrl) return null;
 
   const externalId = await webExternalId(canonicalUrl);
-  const observedAt = action === "save" ? addedAt(node, now) : now;
+  const observedAt = now;
+  const nodeIdentity = options.installationId ? `${options.installationId}:${node.id}` : node.id;
   const title = trim(node.title, 400);
   const host = new URL(canonicalUrl).hostname;
 
@@ -116,7 +123,7 @@ export async function toBookmarkCapture(
     body: title ?? canonicalUrl,
     authorName: host,
     authorHandle: host,
-    savedAt: observedAt,
+    savedAt: addedAt(node, now),
     // Chrome records when you bookmarked it, so this is a real date rather
     // than the time an import happened to run.
     savedAtIsExact: true,
@@ -129,16 +136,15 @@ export async function toBookmarkCapture(
   return {
     schemaVersion: 1,
     payloadType: "item_event",
-    // The node and the moment. Two edits to one bookmark within a second are
-    // one event, which is what a rename typing into an input produces.
-    eventId: `chrome:${action}:${node.id}:${observedAt}`,
+    // A fresh immutable mutation identity, persisted by the capture queue.
+    eventId: `chrome:${action}:${nodeIdentity}:${options.mutationId ?? crypto.randomUUID()}`,
     source: "web",
     action,
     observedAt,
     captureMethod: "chrome_bookmark",
     externalId,
     canonicalUrl,
-    sourceLink: { kind: "chrome_bookmark", externalId: node.id },
+    sourceLink: { kind: "chrome_bookmark", externalId: nodeIdentity },
     ...(action === "save" ? { normalizedItem: item } : {}),
   };
 }
@@ -154,9 +160,10 @@ export async function toBookmarkCapture(
 export async function removalCaptures(
   node: BookmarkNode,
   now: number,
+  options: BookmarkCaptureOptions = {},
 ): Promise<ItemEventCapture[]> {
   const captures = await Promise.all(
-    mirrorableNodes([node]).map((n) => toBookmarkCapture(n, "unsave", now)),
+    mirrorableNodes([node]).map((n) => toBookmarkCapture(n, "unsave", now, options)),
   );
   return captures.filter((c): c is ItemEventCapture => c !== null);
 }
@@ -165,9 +172,10 @@ export async function removalCaptures(
 export async function importCaptures(
   tree: BookmarkNode[],
   now: number,
+  options: BookmarkCaptureOptions = {},
 ): Promise<ItemEventCapture[]> {
   const captures = await Promise.all(
-    mirrorableNodes(tree).map((n) => toBookmarkCapture(n, "save", now)),
+    mirrorableNodes(tree).map((n) => toBookmarkCapture(n, "save", now, options)),
   );
   return captures.filter((c): c is ItemEventCapture => c !== null);
 }

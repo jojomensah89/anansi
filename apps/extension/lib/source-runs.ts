@@ -1,7 +1,7 @@
 import type { SyncStateRecord } from "./idb-outbox.ts";
 import { validatedGitHubStarsPageUrl } from "./platforms/github.ts";
 
-export type CaptureSource = "x" | "reddit" | "tiktok" | "github" | "web";
+export type CaptureSource = "x" | "reddit" | "github" | "web";
 
 export interface SourceRunState extends SyncStateRecord {
 	source: CaptureSource;
@@ -408,10 +408,6 @@ export function isExpectedImportTab(
 				validatedGitHubStarsPageUrl(value, value) !== null
 			);
 		}
-		// TikTok has no favourites route to match: which profile counts depends
-		// on who is signed in, and the tab has to be driven to the Favourites
-		// tab once it is there. So a run always opens and closes its own tab
-		// rather than taking over one you are using.
 		return false;
 	} catch {
 		return false;

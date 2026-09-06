@@ -28,6 +28,32 @@ export function avatarTintFor(seed: string): string {
 	return INITIAL_TINTS[hash % INITIAL_TINTS.length];
 }
 
+const TRUSTED_AVATAR_HOSTS = [
+	"pbs.twimg.com",
+	"abs.twimg.com",
+	"avatars.githubusercontent.com",
+	"github.com",
+	"styles.redditmedia.com",
+	"www.redditstatic.com",
+	"tiktokcdn.com",
+	"tiktokcdn-us.com",
+] as const;
+
+/** Keep avatar loads local or on the provider CDNs that produce them. */
+export function storedAvatarSource(src?: string | null): string | null {
+	if (!src) return null;
+	if (src.startsWith("/api/media/")) return src;
+	try {
+		const url = new URL(src);
+		const host = url.hostname.toLowerCase();
+		if (url.protocol !== "https:") return null;
+		if (TRUSTED_AVATAR_HOSTS.some((domain) => host === domain || host.endsWith(`.${domain}`))) return url.href;
+	} catch {
+		// Invalid persisted metadata gets the deterministic initial below.
+	}
+	return null;
+}
+
 export function Avatar({
 	src,
 	size,
@@ -42,8 +68,9 @@ export function Avatar({
 }) {
 	const radius = square ? 4 : "50%";
 	const label = avatarLabelFor(seed);
+	const storedSrc = storedAvatarSource(src);
 
-	if (!src) {
+	if (!storedSrc) {
 		const style: CSSProperties = {
 			width: size,
 			height: size,
@@ -68,7 +95,7 @@ export function Avatar({
 
 	return (
 		<img
-			src={src}
+			src={storedSrc}
 			alt=""
 			width={size}
 			height={size}

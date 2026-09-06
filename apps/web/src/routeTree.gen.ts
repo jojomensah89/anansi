@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CreatorsRouteImport } from './routes/creators'
 import { Route as McpRouteImport } from './routes/mcp'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
 
@@ -30,6 +31,11 @@ const McpRoute = McpRouteImport.update({
   path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SourcesRoute = SourcesRouteImport.update({
   id: '/sources',
   path: '/sources',
@@ -45,6 +51,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
+  '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRoute
   '/api/$': typeof ApiSplatRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
+  '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRoute
   '/api/$': typeof ApiSplatRoute
 }
@@ -60,21 +68,30 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
+  '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRoute
   '/api/$': typeof ApiSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/creators' | '/mcp' | '/sources' | '/api/$'
+  fullPaths: '/' | '/creators' | '/mcp' | '/settings' | '/sources' | '/api/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/creators' | '/mcp' | '/sources' | '/api/$'
-  id: '__root__' | '/' | '/creators' | '/mcp' | '/sources' | '/api/$'
+  to: '/' | '/creators' | '/mcp' | '/settings' | '/sources' | '/api/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/creators'
+    | '/mcp'
+    | '/settings'
+    | '/sources'
+    | '/api/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CreatorsRoute: typeof CreatorsRoute
   McpRoute: typeof McpRoute
+  SettingsRoute: typeof SettingsRoute
   SourcesRoute: typeof SourcesRoute
   ApiSplatRoute: typeof ApiSplatRoute
 }
@@ -102,6 +119,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sources': {
       id: '/sources'
       path: '/sources'
@@ -123,6 +147,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CreatorsRoute: CreatorsRoute,
   McpRoute: McpRoute,
+  SettingsRoute: SettingsRoute,
   SourcesRoute: SourcesRoute,
   ApiSplatRoute: ApiSplatRoute,
 }

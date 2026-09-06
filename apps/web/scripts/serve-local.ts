@@ -14,12 +14,15 @@
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import type { AnansiDb } from "@anansi/db";
 import { handleApi } from "../src/server/api.ts";
+import { fetchPendingMedia } from "../src/server/media.ts";
 import { handleMcp } from "../src/server/mcp.ts";
 
 const port = Number(process.env.PORT ?? 8788);
 const dbPath = process.env.ANANSI_DB_PATH ?? "data/anansi.db";
 const ingestToken = process.env.INGEST_TOKEN;
 const mcpToken = process.env.MCP_TOKEN;
+const libraryToken = process.env.LIBRARY_TOKEN;
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3001,http://127.0.0.1:3001").split(",").map(v=>v.trim()).filter(Boolean);
 
 /**
  * Migrate on open, rather than hoping someone remembered.
@@ -36,12 +39,10 @@ const local = openLocalDb(dbPath);
 migrateLocalDb(local);
 const db = local as unknown as AnansiDb;
 const mediaDir = process.env.ANANSI_MEDIA_DIR ?? "data/media";
-const media = {
-  dir: mediaDir,
-  put: async (key: string, bytes: ArrayBuffer) => {
-    await Bun.write(`${mediaDir}/${key}`, bytes);
-  },
-};
+const media = { dir: mediaDir };
+const recover = () => fetchPendingMedia(db, media).catch(error => console.error("Media recovery failed:", error));
+void recover();
+setInterval(() => { void recover(); }, 60_000).unref();
 
 /**
  * A stale server on this port answers with whatever code it was started
@@ -60,17 +61,19 @@ try {
       // API and none of this exists; here the Vite dev server is on another
       // port, so the browser treats it as cross-origin.
       const cors = {
-        "access-control-allow-origin": request.headers.get("origin") ?? "*",
+        "access-control-allow-origin": allowedOrigins.includes(request.headers.get("origin") ?? "") ? request.headers.get("origin")! : "",
+        "access-control-allow-credentials": "true",
+        "vary": "Origin",
         "access-control-allow-headers": "content-type, authorization",
-        "access-control-allow-methods": "GET, POST, OPTIONS",
+        "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
       };
-      if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+      if (request.method === "OPTIONS") return new Response(null, { status: cors["access-control-allow-origin"] ? 204 : 403, headers: cors });
 
       const response =
         pathname === "/mcp"
           ? await handleMcp({ db, token: mcpToken }, request)
           : pathname.startsWith("/api/")
-            ? await handleApi({ db, media, ingestToken }, request)
+            ? await handleApi({ db, media, ingestToken, libraryToken, allowedOrigins }, request)
             : new Response("anansi local: /api/* and /mcp", { status: 404 });
 
       for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);
@@ -100,3 +103,5 @@ console.log(`anansi local  http://127.0.0.1:${server.port}`);
 console.log(`  db      ${dbPath}`);
 console.log(`  ingest  ${ingestToken ? "bearer required" : "closed (set INGEST_TOKEN)"}`);
 console.log(`  mcp     ${mcpToken ? "bearer required" : "closed (set MCP_TOKEN)"}`);
+
+console.log(`  library ${libraryToken ? "session or bearer required" : "closed (set LIBRARY_TOKEN)"}`);

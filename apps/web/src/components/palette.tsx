@@ -1,279 +1,123 @@
-import { useEffect, useRef, useState } from "react";
 import type { SearchHit } from "@anansi/db";
-import { api, shortDate } from "../lib/api.ts";
+import { useEffect, useRef, useState } from "react";
+import { api, shortDate, sourceLabel, type ItemQuery } from "../lib/api.ts";
+import { useDialogFocus } from "../lib/use-dialog-focus.ts";
+import { SourceMark } from "./sourcemark.tsx";
 
-/**
- * The search palette.
- *
- * The canvas note on the Search artboard is the design brief: "Search is the
- * product surface, not the grid." So it is an overlay over the library rather
- * than a route you navigate to — searching should never cost you your place.
- *
- * The score column is real bm25: negative, and lower is better. It is shown
- * because when a result looks wrong the score is the first thing that
- * explains why.
- */
-export function Palette({
-  open,
-  onClose,
-  onOpen,
-  total,
-}: {
+export function Palette({ open, onClose, onOpen, onSearch, total, filters }: {
   open: boolean;
   onClose: () => void;
   onOpen: (hit: SearchHit) => void;
+  onSearch: (query: string) => void;
   total: number;
+  filters: ItemQuery;
 }) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [cursor, setCursor] = useState(0);
-  const [elapsed, setElapsed] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (open) {
-      input.current?.focus();
-      input.current?.select();
-    }
-  }, [open]);
+  useDialogFocus(open, dialog, input, onClose);
 
   useEffect(() => {
     if (!open) return;
     const term = query.trim();
     if (!term) {
       setHits([]);
-      setElapsed(null);
+      setError(null);
+      setLoading(false);
       return;
     }
-    // Debounced and abortable: typing a word should not leave eight in-flight
-    // requests racing to render out of order.
     const controller = new AbortController();
-    const started = performance.now();
     const timer = setTimeout(() => {
-      api
-        .search(term, { limit: 8 }, controller.signal)
-        .then((r) => {
-          setHits(r.results);
+      setLoading(true);
+      setError(null);
+      api.search(term, { ...filters, cursor: null, limit: 8 }, controller.signal)
+        .then((result) => {
+          setHits(result.items);
           setCursor(0);
-          setElapsed(Math.round(performance.now() - started));
         })
-        .catch(() => {});
-    }, 120);
+        .catch((reason: Error) => {
+          if (reason.name !== "AbortError") {
+            setHits([]);
+            setError(reason.message);
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    }, 140);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, open]);
+  }, [filters, open, query]);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") return onClose();
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setCursor((c) => Math.min(c + 1, hits.length - 1));
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setCursor((c) => Math.max(c - 1, 0));
-      }
-      if (e.key === "Enter" && hits[cursor]) {
-        e.preventDefault();
-        if (e.metaKey || e.ctrlKey) window.open(hits[cursor]!.url, "_blank", "noopener");
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setCursor((value) => Math.min(value + 1, Math.max(0, hits.length - 1)));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setCursor((value) => Math.max(value - 1, 0));
+      } else if (event.key === "Enter" && hits[cursor]) {
+        event.preventDefault();
+        if (event.metaKey || event.ctrlKey) window.open(hits[cursor]!.url, "_blank", "noopener");
         else onOpen(hits[cursor]!);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, hits, cursor, onClose, onOpen]);
+  }, [cursor, hits, onOpen, open]);
 
   if (!open) return null;
+  const term = query.trim();
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "#06080ac7",
-        zIndex: 50,
-        animation: "rise 120ms ease-out both",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          position: "absolute",
-          left: "50%",
-          top: 92,
-          transform: "translateX(-50%)",
-          width: 760,
-          maxWidth: "calc(100vw - 32px)",
-          background: "#10151a",
-          border: "1px solid var(--edge-strong)",
-          borderRadius: 10,
-          boxShadow: "0 24px 60px -12px #000000b3",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 11,
-            padding: "15px 17px",
-            borderBottom: "1px solid var(--line)",
-          }}
-        >
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.7" strokeLinecap="round">
-            <circle cx="11" cy="11" r="6.5" />
-            <path d="m20 20-4.2-4.2" />
-          </svg>
-          <input
-            ref={input}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Search ${total.toLocaleString()} saves`}
-            style={{
-              flex: 1,
-              background: "transparent",
-              border: "none",
-              outline: "none",
-              fontSize: 16,
-              color: "var(--text)",
-              fontFamily: "var(--sans)",
-            }}
-          />
-          <span className="mono" style={{ fontSize: 10.5, color: "var(--fainter)" }}>
-            esc to close
-          </span>
+    <div onMouseDown={(event) => event.target === event.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "#06080ac7", zIndex: 50, animation: "rise 120ms ease-out both" }}>
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="search-title" tabIndex={-1} style={{ position: "absolute", left: "50%", top: 92, transform: "translateX(-50%)", width: 760, maxWidth: "calc(100vw - 32px)", background: "#10151a", border: "1px solid var(--edge-strong)", borderRadius: 10, boxShadow: "0 24px 60px -12px #000000b3", overflow: "hidden", outline: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "15px 17px", borderBottom: "1px solid var(--line)" }}>
+          <SourceMark source="web" size={17} />
+          <label id="search-title" htmlFor="library-search" className="sr-only">Search library</label>
+          <input ref={input} id="library-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${total.toLocaleString()} saved items`} style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontSize: 16, color: "var(--text)", fontFamily: "var(--sans)" }} />
+          <button type="button" onClick={onClose} aria-label="Close search" style={quietButton}>esc</button>
         </div>
-
-        <div
-          className="mono"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "9px 17px",
-            borderBottom: "1px solid var(--line)",
-            background: "#0e1317",
-            fontSize: 10.5,
-            color: "var(--faint)",
-          }}
-        >
-          <span>fts5 · porter unicode61</span>
-          <span style={{ marginLeft: "auto" }}>
-            {query.trim()
-              ? `${hits.length} result${hits.length === 1 ? "" : "s"}${elapsed !== null ? ` · ${elapsed} ms` : ""}`
-              : "type to search"}
-          </span>
+        <div className="mono" aria-live="polite" style={{ display: "flex", alignItems: "center", padding: "9px 17px", borderBottom: "1px solid var(--line)", background: "#0e1317", fontSize: 10.5, color: "var(--faint)" }}>
+          {term ? (loading ? "Searching…" : error ? "Search failed" : `${hits.length}${hits.length === 8 ? "+" : ""} quick result${hits.length === 1 ? "" : "s"}`) : "Type to search"}
+          <span style={{ marginLeft: "auto" }}>{hasFilters(filters) ? "within current filters" : "across your library"}</span>
         </div>
-
         <div className="scroll" style={{ maxHeight: 420 }}>
-          {hits.map((hit, i) => (
-            <button
-              key={hit.id}
-              type="button"
-              onMouseEnter={() => setCursor(i)}
-              onClick={() => onOpen(hit)}
-              style={{
-                display: "flex",
-                gap: 13,
-                padding: "13px 17px",
-                width: "100%",
-                textAlign: "left",
-                font: "inherit",
-                color: "inherit",
-                cursor: "pointer",
-                background: i === cursor ? "#161c22" : "transparent",
-                borderLeft: `2px solid ${i === cursor ? "var(--accent)" : "transparent"}`,
-                borderTop: i ? "1px solid #161c22" : "none",
-                borderRight: "none",
-                borderBottom: "none",
-              }}
-            >
-              <span
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: hit.source === "github" ? 4 : "50%",
-                  background: "var(--edge-strong)",
-                  flexShrink: 0,
-                  marginTop: 1,
-                }}
-              />
+          {error && <div role="alert" style={{ padding: 18, color: "#f2a7a7", fontSize: 13 }}>{error}<button type="button" onClick={() => setQuery(`${term} `)} style={{ ...quietButton, marginLeft: 10 }}>Retry</button></div>}
+          {!error && hits.map((hit, index) => (
+            <button key={hit.id} type="button" onMouseEnter={() => setCursor(index)} onClick={() => onOpen(hit)} style={{ display: "flex", gap: 13, padding: "13px 17px", width: "100%", textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer", background: index === cursor ? "#161c22" : "transparent", borderLeft: `2px solid ${index === cursor ? "var(--accent)" : "transparent"}`, borderTop: index ? "1px solid #161c22" : "none", borderRight: "none", borderBottom: "none" }}>
+              <span style={{ width: 26, height: 26, display: "grid", placeItems: "center", flexShrink: 0 }}><SourceMark source={hit.source} size={17} /></span>
               <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>
                 <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span className="mono" style={{ fontSize: 11.5 }}>
-                    {hit.author ?? "unknown"}
-                  </span>
-                  <span className="mono" style={{ fontSize: 10, color: "var(--faint)" }}>
-                    {shortDate(hit.postedAt)}
-                  </span>
-                  <span
-                    className="mono"
-                    style={{
-                      fontSize: 9.5,
-                      color: "var(--faint)",
-                      border: "1px solid var(--edge)",
-                      borderRadius: 3,
-                      padding: "1px 4px",
-                    }}
-                  >
-                    {hit.source === "github" ? "gh" : "x"}
-                  </span>
-                  <span className="mono" style={{ marginLeft: "auto", fontSize: 10, color: "var(--faint)" }}>
-                    {hit.score.toFixed(2)}
-                  </span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{hit.title ?? hit.authorName ?? hit.author ?? "Untitled save"}</span>
+                  <span className="mono" style={{ fontSize: 10, color: "var(--faint)" }}>{sourceLabel(hit.source)}{hit.postedAt ? ` · ${shortDate(hit.postedAt)}` : ""}</span>
                 </span>
                 <span style={{ fontSize: 13, lineHeight: 1.55, color: "var(--text-dim)" }}>{hit.excerpt}</span>
               </span>
             </button>
           ))}
-
-          {query.trim() && hits.length === 0 && (
-            <div style={{ padding: "22px 17px", color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>
-              Nothing matches{" "}
-              <span className="mono" style={{ color: "var(--text)" }}>
-                {query.trim()}
-              </span>
-              .
-              {/* The honest failure mode: bm25 has no notion of near. */}
-              <div style={{ fontSize: 12.5, color: "var(--faint)", marginTop: 4 }}>
-                Keyword search needs the exact word — try a correction, or one broader term.
-              </div>
-            </div>
-          )}
+          {!loading && !error && term && hits.length === 0 && <div style={{ padding: "22px 17px", color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>No results for <span className="mono" style={{ color: "var(--text)" }}>{term}</span> in this view.<div style={{ fontSize: 12.5, color: "var(--faint)", marginTop: 4 }}>Try one broader term or clear a filter.</div></div>}
         </div>
-
-        <div
-          className="mono"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 16,
-            padding: "9px 17px",
-            borderTop: "1px solid var(--line)",
-            background: "#0e1317",
-            fontSize: 10,
-            color: "var(--faint)",
-          }}
-        >
-          <Key k="↑↓" label="navigate" />
-          <Key k="↵" label="open" />
-          <Key k="⌘↵" label="open on x.com" />
+        <div className="mono" style={{ display: "flex", alignItems: "center", gap: 14, padding: "9px 17px", borderTop: "1px solid var(--line)", background: "#0e1317", fontSize: 10, color: "var(--faint)" }}>
+          <span>↑↓ navigate</span><span>↵ open</span><span>⌘↵ open source</span>
+          {term && <button type="button" onClick={() => onSearch(term)} style={{ ...quietButton, marginLeft: "auto", color: "var(--accent)" }}>View all results →</button>}
         </div>
       </div>
     </div>
   );
 }
 
-function Key({ k, label }: { k: string; label: string }) {
-  return (
-    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-      <span style={{ border: "1px solid var(--edge-strong)", borderRadius: 3, padding: "1px 4px" }}>{k}</span>
-      {label}
-    </span>
-  );
+function hasFilters(filters: ItemQuery): boolean {
+  return !!(filters.source?.length || filters.author?.length || filters.type?.length || filters.tag?.length || filters.media || filters.archived || filters.favorite || filters.removed);
 }
+
+const quietButton = { background: "transparent", border: "none", color: "var(--faint)", cursor: "pointer", fontFamily: "var(--mono)", fontSize: 10.5 } as const;

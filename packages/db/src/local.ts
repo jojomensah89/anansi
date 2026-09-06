@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as schema from "./schema.ts";
+import { registerAtomicExecutor } from "./atomic.ts";
 
 /**
  * The local driver. Kept in its own module so a Worker bundle never pulls
@@ -18,7 +19,17 @@ export function openLocalDb(path: string) {
   sqlite.exec("PRAGMA foreign_keys = ON");
   // The library is read far more than it is written; WAL suits that.
   sqlite.exec("PRAGMA journal_mode = WAL");
-  return drizzle(sqlite, { schema });
+  const db = drizzle(sqlite, { schema });
+  registerAtomicExecutor(db, async (build) => {
+    db.transaction((transaction) => {
+      for (const statement of build(transaction as unknown as typeof db)) {
+        // Bun SQLite transactions are synchronous. Awaiting a thenable in an
+        // async callback lets Drizzle commit before the callback resumes.
+        statement.run();
+      }
+    });
+  });
+  return db;
 }
 
 export function migrateLocalDb(db: ReturnType<typeof openLocalDb>): void {

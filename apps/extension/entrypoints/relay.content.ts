@@ -21,8 +21,6 @@ export default defineContentScript({
   matches: [
     "https://x.com/*",
     "https://twitter.com/*",
-    "https://www.tiktok.com/*",
-    "https://tiktok.com/*",
     "https://www.reddit.com/*",
     "https://old.reddit.com/*",
     "https://reddit.com/*",

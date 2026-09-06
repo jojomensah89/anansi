@@ -3,13 +3,21 @@ import {
 	describeQueue,
 	describeSource,
 	isSettled,
-	redactError,
 	RUN_TIMEOUT_MS,
+	redactError,
 	type SourceSnapshot,
+	withoutStartingSource,
 } from "./popup-state.ts";
 
 const NOW = 1_756_700_000_000;
 const EMPTY = { queued: 0, uploading: 0, retrying: 0, failed: 0 };
+
+test("a completed start command clears only its optimistic source marker", () => {
+	const starting = new Set(["x", "tiktok"]);
+
+	expect(withoutStartingSource(starting, "tiktok")).toEqual(new Set(["x"]));
+	expect(starting).toEqual(new Set(["x", "tiktok"]));
+});
 
 const snapshot = (patch: Partial<SourceSnapshot> = {}): SourceSnapshot => ({
 	source: "x",
@@ -23,22 +31,38 @@ describe("describeSource", () => {
 	test("maps GitHub's durable states to its shared controls", () => {
 		expect(
 			describeSource(
-				snapshot({ source: "github", phase: "running", startedAt: NOW - 1_000 }),
+				snapshot({
+					source: "github",
+					phase: "running",
+					startedAt: NOW - 1_000,
+				}),
 				NOW,
 			),
-		).toMatchObject({ state: "running", action: "pause", actionLabel: "Pause" });
+		).toMatchObject({
+			state: "running",
+			action: "pause",
+			actionLabel: "Pause",
+		});
 		expect(
 			describeSource(
 				snapshot({ source: "github", paused: true, held: 25 }),
 				NOW,
 			),
-		).toMatchObject({ state: "paused", action: "import", actionLabel: "Resume" });
+		).toMatchObject({
+			state: "paused",
+			action: "import",
+			actionLabel: "Resume",
+		});
 		expect(
 			describeSource(
 				snapshot({ source: "github", lastErrorCode: "not_signed_in" }),
 				NOW,
 			),
-		).toMatchObject({ state: "sign_in_required", action: "sign-in" });
+		).toMatchObject({
+			state: "sign_in_required",
+			action: "import",
+			actionLabel: "Try again",
+		});
 		expect(
 			describeSource(
 				snapshot({ source: "github", held: 25, lastRun: NOW - 60_000 }),
@@ -75,6 +99,19 @@ describe("describeSource", () => {
 		expect(view.action).toBe("import");
 	});
 
+	test("a long import stays running while durable progress is recent", () => {
+		expect(
+			describeSource(
+				snapshot({
+					phase: "running",
+					startedAt: NOW - 180_000,
+					updatedAt: NOW - 1_000,
+				}),
+				NOW,
+			),
+		).toMatchObject({ state: "running", action: "pause" });
+	});
+
 	test("a run recorded before a restart cannot still claim to be running", () => {
 		// The exact shape of the bug this replaces: a worker died mid-run and
 		// the stored phase outlived it by days.
@@ -86,17 +123,18 @@ describe("describeSource", () => {
 		expect(view.state).toBe("stalled");
 	});
 
-	test("being signed out asks for a sign-in", () => {
+	test("a stale signed-out result can recheck the current session", () => {
 		const view = describeSource(
 			snapshot({ lastErrorCode: "not_signed_in", held: 1_200 }),
 			NOW,
 		);
 
 		expect(view.state).toBe("sign_in_required");
-		expect(view.action).toBe("sign-in");
+		expect(view.action).toBe("import");
+		expect(view.actionLabel).toBe("Try again");
 	});
 
-	test("failures are reported, and offer a retry", () => {
+	test("delivery failures stay visible without replacing Import", () => {
 		const view = describeSource(
 			snapshot({ queue: { ...EMPTY, failed: 3 }, held: 900 }),
 			NOW,
@@ -104,7 +142,8 @@ describe("describeSource", () => {
 
 		expect(view.state).toBe("failed");
 		expect(view.text).toBe("3 captures could not be sent");
-		expect(view.action).toBe("retry");
+		expect(view.action).toBe("import");
+		expect(view.actionLabel).toBe("Import");
 	});
 
 	test("retrying and queued are told apart", () => {
@@ -115,8 +154,16 @@ describe("describeSource", () => {
 			describeSource(snapshot({ queue: { ...EMPTY, queued: 2 } }), NOW).state,
 		).toBe("queued");
 		expect(
-			describeSource(snapshot({ queue: { ...EMPTY, uploading: 1 } }), NOW).state,
+			describeSource(snapshot({ queue: { ...EMPTY, uploading: 1 } }), NOW)
+				.state,
 		).toBe("queued");
+		for (const queue of [
+			{ ...EMPTY, retrying: 2 },
+			{ ...EMPTY, queued: 2 },
+			{ ...EMPTY, uploading: 1 },
+		]) {
+			expect(describeSource(snapshot({ queue }), NOW).action).toBe("import");
+		}
 	});
 
 	test("pausing says nothing was lost, because nothing was", () => {
@@ -139,6 +186,21 @@ describe("describeSource", () => {
 
 	test("an empty source is ready rather than synced", () => {
 		expect(describeSource(snapshot({ held: 0 }), NOW).state).toBe("ready");
+	});
+
+	test("a failed history request stays visible even when old saves exist", () => {
+		for (const code of [
+			"rate_limited",
+			"page_shape_changed",
+			"platform_request_failed",
+		]) {
+			expect(
+				describeSource(
+					snapshot({ source: "reddit", held: 900, lastErrorCode: code }),
+					NOW,
+				),
+			).toMatchObject({ state: "failed", action: "import" });
+		}
 	});
 });
 
@@ -241,7 +303,9 @@ describe("redactError", () => {
 	});
 
 	test("keeps a URL path but drops its query", () => {
-		const out = redactError("failed GET /api/info.json?id=t3_secret&raw_json=1");
+		const out = redactError(
+			"failed GET /api/info.json?id=t3_secret&raw_json=1",
+		);
 
 		expect(out).toContain("/api/info.json");
 		expect(out).not.toContain("t3_secret");

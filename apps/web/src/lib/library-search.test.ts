@@ -10,10 +10,10 @@ import { validateLibrarySearch } from "./library-search.ts";
  */
 describe("validateLibrarySearch", () => {
   test("a comma list becomes a list", () => {
-    expect(validateLibrarySearch({ source: "x,tiktok" }).source).toEqual([
-      "x",
-      "tiktok",
-    ]);
+		expect(validateLibrarySearch({ source: "x,instagram" }).source).toEqual([
+		"x",
+		"instagram",
+		]);
   });
 
   test("one value is still a list, so the query layer sees one shape", () => {
@@ -42,10 +42,10 @@ describe("validateLibrarySearch", () => {
   });
 
   test("whitespace around values is trimmed", () => {
-    expect(validateLibrarySearch({ source: " x , tiktok " }).source).toEqual([
-      "x",
-      "tiktok",
-    ]);
+		expect(validateLibrarySearch({ source: " x , instagram " }).source).toEqual([
+		"x",
+		"instagram",
+		]);
   });
 
   test("duplicates collapse, so a hand-edited URL cannot bloat the query", () => {
@@ -89,6 +89,15 @@ describe("validateLibrarySearch", () => {
     expect(out.author).toBeUndefined();
     expect(out.type).toBeUndefined();
     expect(out.tag).toEqual(["real"]);
+  });
+
+  test("search and open item are bounded URL state", () => {
+    expect(validateLibrarySearch({ q: "  saved design  ", item: "abc" })).toMatchObject({
+      q: "saved design",
+      item: "abc",
+    });
+    expect(validateLibrarySearch({ q: " ", item: 42 }).q).toBeUndefined();
+    expect(validateLibrarySearch({ q: "x".repeat(800) }).q).toHaveLength(500);
   });
 
   test("at-source takes only the two values that mean something", () => {

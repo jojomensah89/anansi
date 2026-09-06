@@ -31,3 +31,8 @@ Please do not submit reports asking for session-cookie exfiltration, token harve
 ## Secrets hygiene
 
 Never put `INGEST_TOKEN`, `MCP_TOKEN`, or `LIBRARY_TOKEN` in `VITE_*` vars, committed files, screenshots, or issue logs. Rotate any secret that was ever pasted publicly.
+
+The self-hosted extension is a private build: `ANANSI_EXTENSION_INGEST_TOKEN`
+embeds the owner's ingest credential so the popup needs no setup form. Anyone
+with that configured artifact can extract the credential. Never publish it to
+an extension store or share it; rebuild after rotating `INGEST_TOKEN`.

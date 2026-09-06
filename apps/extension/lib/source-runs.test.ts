@@ -155,12 +155,6 @@ describe("import-route selection", () => {
 		).toBe(false);
 	});
 
-	test("opens a dedicated TikTok tab until its verified Favorites route ships", () => {
-		expect(isExpectedImportTab("tiktok", "https://www.tiktok.com/")).toBe(
-			false,
-		);
-	});
-
 	test("selects only GitHub's signed-in stars route", () => {
 		expect(isExpectedImportTab("github", "https://github.com/stars")).toBe(
 			true,
