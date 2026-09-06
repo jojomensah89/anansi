@@ -13,6 +13,8 @@ Anansi captures the things you save online — bookmarks, saved posts, GitHub st
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Free--tier-orange?logo=cloudflare)](https://github.com/jojomensah89/anansi)
 [![Local SQLite dev](https://img.shields.io/badge/Local--dev-SQLite-green)](./README.md)
 [![Repo](https://img.shields.io/badge/GitHub-jojomensah89%2Fanansi-black?logo=github)](https://github.com/jojomensah89/anansi)
+[![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jojomensahh)
+<a href="https://x.com/jojomensah89"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs" /><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" height="20" align="middle" /></picture></a>
 <!-- PUBLIC LAUNCH: uncomment after repo goes public -->
 <!-- [![Stars](https://img.shields.io/github/stars/jojomensah89/anansi?style=social)](https://github.com/jojomensah89/anansi) -->
 <!-- [![Issues](https://img.shields.io/github/issues/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/issues) -->
@@ -253,4 +255,4 @@ MIT © 2026 Jojo Mensah — see [LICENSE](./LICENSE).
 
 ---
 
-Built by [Jojo Mensah](https://x.com/jojomensah89) <a href="https://x.com/jojomensah89"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs" /><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" /></picture></a> · Follow along for demos and changelogs · [☕ Buy me a coffee](https://buymeacoffee.com/jojomensahh)
+Built by [Jojo Mensah](https://x.com/jojomensah89) · Follow along for demos and changelogs · [☕ Buy me a coffee](https://buymeacoffee.com/jojomensahh)
