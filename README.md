@@ -245,4 +245,4 @@ MIT © 2026 Jojo Mensah — see [LICENSE](./LICENSE).
 
 ---
 
-Built by [Jojo Mensah](https://x.com/jojomensah89) · Follow along for demos and changelogs · [☕ Buy me a coffee](https://buymeacoffee.com/jojomensahh)
+Built by [Jojo Mensah](https://x.com/jojomensah89) <a href="https://x.com/jojomensah89"><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" /></a> · Follow along for demos and changelogs · [☕ Buy me a coffee](https://buymeacoffee.com/jojomensahh)
