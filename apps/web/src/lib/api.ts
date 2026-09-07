@@ -90,6 +90,12 @@ export interface Page {
   nextCursor: string | null;
 }
 
+export interface SemanticSearchStatus {
+  enabled: boolean;
+  applied: boolean;
+  degradedReason?: "provider-unavailable" | "provider-failed" | "quota" | "dimension-mismatch" | "pagination-boundary";
+}
+
 export interface SessionState {
   configured: boolean;
   authenticated: boolean;
@@ -217,7 +223,7 @@ export const api = {
   search: (query: string, opts: ItemQuery = {}, signal?: AbortSignal) => {
     const q = itemParams(opts);
     q.set("q", query);
-    return get<{ query: string; items: SearchHit[]; nextCursor: string | null }>(`/api/search?${q}`, signal);
+    return get<{ query: string; items: SearchHit[]; nextCursor: string | null; semantic: SemanticSearchStatus }>(`/api/search?${q}`, signal);
   },
 
   item: (id: string, signal?: AbortSignal) => get<ItemDetail>(`/api/items/${id}`, signal),

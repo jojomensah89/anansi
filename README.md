@@ -87,6 +87,25 @@ Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** �
 
 GitHub first import: sign in to GitHub in the same browser profile → popup → **Import** beside GitHub. It walks your stars pages in the worker (no tabs open), persists the pagination cursor, and resumes after interruptions. Unstarring hides from current-star view without deleting history; re-starring restores it.
 
+### Developer-only semantic smoke
+
+The hosted path uses the existing Cloudflare Workers AI and Vectorize bindings;
+users only enable Semantic search in Settings. A local model is not required
+for installation, `bun run dev:local`, or deployment. To validate semantic
+candidate union offline with a synthetic corpus, opt in explicitly:
+
+```bash
+bun run semantic:local
+```
+
+This downloads and caches `Xenova/bge-small-en-v1.5` (384 dimensions) under
+the operating system temporary directory, then runs the real local provider,
+in-memory index, D1 hydration, and hybrid search path. Set
+`ANANSI_TRANSFORMERS_CACHE` to choose another developer-only cache directory;
+remove that directory when you want to reclaim the model files. The remote
+Workers AI/Vectorize check is separate and documented in
+`docs/superpowers/plans/2026-09-07-alchemy-semantic-smoke-runbook.md`.
+
 ### B. Cloudflare — your account, ~$0 (preview, not yet verified)
 
 > ⚠️ The hosted path is the intended shape — one Worker, one D1, one R2, deployed with `bun run deploy` — but no clean-account deploy has succeeded yet. Treat this section as the plan, not instructions. First verified deploy will turn it into real steps.
@@ -138,6 +157,10 @@ Streamable HTTP MCP server at `http://127.0.0.1:3001/mcp` locally (or `https://<
 | `get_item` | One item with text, links, media, thread context |
 | `recent_saves` | Newest saved items |
 | `find_by_author` | Items from one author |
+
+MCP and CLI search remain keyword/BM25 paths until they are separately wired
+to the hybrid orchestration and acceptance-tested; the local semantic smoke
+does not prove those interfaces.
 
 Claude Code:
 
@@ -236,7 +259,7 @@ Covers queue recovery, retries, parser fixtures, authenticated ingest, GitHub im
 
 ## 🗺️ Roadmap
 
-- [ ] 🔍 Semantic search via Cloudflare Vectorize — hybrid BM25 + vectors. Free tier covers a personal library (~10k items × 384-dim ≈ 3.8M of 5M free stored dims/month); to be measured on first deploy
+- [ ] 🔍 Cloudflare semantic-search acceptance — hosted bindings are provisioned and the hybrid BM25 + vector path is implemented; clean-account/provider evidence remains pending
 - [ ] 🤖 AI tagging via Workers AI — suggestions stored with `origin: 'ai'` so manual tags stay authoritative (10k neurons/day free; backfill paced over days)
 - [ ] 🗂️ Collections v2 — curated hand-picked lists alongside today's saved filter views
 - [ ] First clean-account deploy: install → migrate → first capture → search → export → restore against Cloudflare

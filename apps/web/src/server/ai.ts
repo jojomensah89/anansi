@@ -6,12 +6,36 @@ export interface VectorizeBinding {
   deleteByIds?(ids: string[]): Promise<unknown>;
 }
 
+/** Provider/index seams keep search testable without a Cloudflare account. */
+export interface EmbeddingProvider {
+  readonly model: string;
+  readonly dimensions: number;
+  embed(text: string): Promise<number[]>;
+}
+
+export interface VectorMatch { id: string; score: number }
+
+export interface VectorIndex {
+  readonly dimensions: number;
+  upsert(vectors: Array<{ id: string; values: number[] }>): Promise<void>;
+  query(values: number[], options?: { topK?: number }): Promise<VectorMatch[]>;
+  deleteByIds?(ids: string[]): Promise<void>;
+}
+
 export class AiProviderError extends Error {
-  readonly code: "quota" | "unavailable" | "malformed";
+  readonly code: "quota" | "unavailable" | "malformed" | "dimension";
   constructor(code: AiProviderError["code"], message: string) { super(message); this.name = "AiProviderError"; this.code = code; }
 }
 
 const MAX_TEXT = 12_000;
+
+export function validateVector(values: unknown, dimensions: number, label = "embedding"): number[] {
+  if (!Number.isInteger(dimensions) || dimensions < 1) throw new AiProviderError("dimension", "embedding dimensions must be a positive integer");
+  if (!Array.isArray(values) || values.length !== dimensions || values.some((v) => typeof v !== "number" || !Number.isFinite(v))) {
+    throw new AiProviderError("dimension", `${label} must contain exactly ${dimensions} finite values`);
+  }
+  return values as number[];
+}
 
 export async function embed(ai: AiBinding, model: string, text: string): Promise<number[]> {
   const output = await ai.run(model, { text: text.slice(0, MAX_TEXT) }).catch((error) => { throw classifyAiError(error); });
@@ -19,6 +43,32 @@ export async function embed(ai: AiBinding, model: string, text: string): Promise
   const vector = Array.isArray(values) && Array.isArray(values[0]) ? values[0] : values;
   if (!Array.isArray(vector) || vector.some((v) => typeof v !== "number" || !Number.isFinite(v))) throw new AiProviderError("malformed", "Workers AI returned an invalid embedding");
   return vector as number[];
+}
+
+export function createEmbeddingProvider(ai: AiBinding, model: string, dimensions: number): EmbeddingProvider {
+  return {
+    model,
+    dimensions,
+    embed: async (text) => validateVector(await embed(ai, model, text), dimensions),
+  };
+}
+
+export function createVectorIndex(binding: VectorizeBinding, dimensions: number): VectorIndex {
+  return {
+    dimensions,
+    upsert: async (vectors) => {
+      vectors.forEach((vector) => validateVector(vector.values, dimensions, "vector"));
+      await binding.upsert(vectors);
+    },
+    query: async (values, options) => {
+      validateVector(values, dimensions, "query vector");
+      const response = await binding.query(values, { ...options, returnMetadata: false });
+      return (response.matches ?? []).flatMap((match) => typeof match.score === "number" && Number.isFinite(match.score)
+        ? [{ id: match.id, score: match.score }]
+        : []);
+    },
+    deleteByIds: binding.deleteByIds ? async (ids) => { await binding.deleteByIds?.(ids); } : undefined,
+  };
 }
 
 export async function generateTags(ai: AiBinding, model: string, text: string, max = 5): Promise<string[]> {

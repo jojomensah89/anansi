@@ -2,7 +2,7 @@ import startEntry from "@tanstack/react-start/server-entry";
 import { openD1 } from "@anansi/db/d1";
 import { fetchPendingMedia } from "./server/media.ts";
 import { claimAiJobs, completeAiJob, failAiJob, getAiSettings, reconcileAiJobs, searchableText, itemEmbeddings, itemTagOverrides, items, tags, itemTags } from "@anansi/db";
-import { embed, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
+import { createEmbeddingProvider, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
 
 interface WorkerBindings {
   DB: D1Database;
@@ -25,6 +25,7 @@ export async function runAiSchedule(env: WorkerBindings): Promise<void> {
   // budget; subsequent runs continue the durable reconciliation.
   await reconcileAiJobs(db, 12);
   const settings = await getAiSettings(db);
+  const embeddingProvider = createEmbeddingProvider(env.AI, settings.embeddingModel, settings.embeddingDimensions);
   for (const kind of ["embedding", "tagging"] as const) {
     const jobs = await claimAiJobs(db, kind, 2);
     for (const job of jobs) {
@@ -33,7 +34,7 @@ export async function runAiSchedule(env: WorkerBindings): Promise<void> {
         if (!item) { await completeAiJob(db, job.id, job.token); continue; }
         const text = searchableText(item);
         if (kind === "embedding") {
-          const values = await embed(env.AI, settings.embeddingModel, text);
+          const values = await embeddingProvider.embed(text);
           if (env.VECTORIZE) await env.VECTORIZE.upsert([{ id: item.id, values }]);
           await db.insert(itemEmbeddings).values({ itemId: item.id, vectorId: item.id, model: settings.embeddingModel, dimensions: values.length, contentHash: job.contentHash, status: "complete", createdAt: Math.floor(Date.now()/1000), updatedAt: Math.floor(Date.now()/1000) }).onConflictDoUpdate({ target: itemEmbeddings.itemId, set: { vectorId: item.id, model: settings.embeddingModel, dimensions: values.length, contentHash: job.contentHash, status: "complete", updatedAt: Math.floor(Date.now()/1000), lastError: null } });
         } else {

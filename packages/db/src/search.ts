@@ -214,6 +214,68 @@ export async function searchItems(db: AnansiDb, opts: SearchOptions): Promise<Se
   return (await searchItemsPage(db, { ...opts, limit: opts.limit ?? 10 })).items;
 }
 
+/**
+ * Hydrate IDs returned by a semantic index through the same D1 predicates as
+ * keyword search. Vector metadata is never an authorization or visibility
+ * decision; this query is the authority for the returned card.
+ */
+export async function hydrateSearchItems(
+  db: AnansiDb,
+  ids: string[],
+  opts: Omit<SearchOptions, "query" | "cursor" | "mark">,
+): Promise<SearchHit[]> {
+  const uniqueIds = [...new Set(ids)].filter(Boolean).slice(0, 100);
+  if (uniqueIds.length === 0) return [];
+  type Row = Omit<SearchHit, "favorite" | "hasNote" | "tags"> & {
+    favorite: number; mediaJson: string; metricsJson: string; tagsJson: string; hasNote: number;
+  };
+  const rows = await db.all<Row>(sql`
+    select i.id, i.url, i.author_handle as author, i.author_name as authorName,
+      i.author_avatar as authorAvatar, i.title, i.posted_at as postedAt,
+      i.saved_at as savedAt, i.saved_at_exact as savedAtExact, i.source,
+      i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
+      i.favorite, i.metrics as metricsJson,
+      json_extract(i.raw, '$.language') as language,
+      json_extract(i.raw, '$.visibility') as visibility,
+      (select count(*) from media m where m.item_id=i.id) as mediaCount,
+      (select json_group_array(json_object('key',m.stored_key,'kind',m.kind,'url',m.origin_url))
+         from media m where m.item_id=i.id and m.stored_key is not null) as mediaJson,
+      (select json_group_array(json_object('label',t.label,'color',t.color))
+         from item_tags it join tags t on t.id=it.tag_id where it.item_id=i.id) as tagsJson,
+      case when length(coalesce(i.note, '')) > 0 then 1 else 0 end as hasNote,
+      substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
+      0 as score
+    from items i
+    where i.id in (${sql.join(uniqueIds.map((id) => sql`${id}`), sql`, `)})
+      and ${visibleSourceClause(sql`i.source`)}
+      ${anyOf(sql`i.source`, opts.source)}
+      ${anyOf(sql`i.author_handle`, opts.author)}
+      ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+      ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
+      ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
+      and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
+  `);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return uniqueIds.flatMap((id) => {
+    const rawRow = byId.get(id);
+    if (!rawRow) return [];
+    const parse = <T,>(text: string | undefined, fallback: T): T => {
+      try { return (JSON.parse(text ?? "") as T) ?? fallback; } catch { return fallback; }
+    };
+    return [{
+      id: rawRow.id, url: rawRow.url, author: rawRow.author, authorName: rawRow.authorName,
+      authorAvatar: rawRow.authorAvatar, language: rawRow.language, visibility: rawRow.visibility,
+      title: rawRow.title, postedAt: rawRow.postedAt, savedAt: rawRow.savedAt,
+      savedAtExact: rawRow.savedAtExact, source: rawRow.source, platformSaved: rawRow.platformSaved,
+      removedFromSourceAt: rawRow.removedFromSourceAt, favorite: rawRow.favorite === 1,
+      mediaCount: rawRow.mediaCount, excerpt: rawRow.excerpt, score: rawRow.score,
+      hasNote: rawRow.hasNote === 1, tags: parseTagSummary(rawRow.tagsJson),
+      media: parse<CardMedia[]>(rawRow.mediaJson, []),
+      metrics: parse<Record<string, number>>(rawRow.metricsJson, {}),
+    } satisfies SearchHit];
+  });
+}
+
 /** "What did I save this week?" */
 export async function recentSaves(db: AnansiDb, source?: string, limit = 20) {
   return db.all<SearchHit>(sql`

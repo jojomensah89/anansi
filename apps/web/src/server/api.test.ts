@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { upsertItems, type AnansiDb } from "@anansi/db";
+import { searchItemsPage, setAiSettings, upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
+import { LocalVectorIndex } from "./local-vector-index.ts";
 
 /**
  * The HTTP surface, tested against a fully migrated in-memory library with no
@@ -124,6 +125,73 @@ describe("handleApi", () => {
 		);
 		expect(res.status).toBe(200);
 		expect((await readJson(res)).results).toEqual([]);
+	});
+
+	test("semantic-only candidates are hydrated and filtered by D1", async () => {
+		await upsertItems(db, [
+			{
+				source: "x",
+				externalId: "semantic-only",
+				url: "https://x.com/anansi/status/semantic-only",
+				kind: "post",
+				authorHandle: "semantic-author",
+				body: "A bookmark about neighbouring vector indexes",
+				savedAt: 1_788_390_100,
+				savedAtIsExact: true,
+				metrics: {}, media: [], links: [], raw: {},
+			},
+		]);
+		const semanticRow = (await searchItemsPage(db, { query: "neighbouring vector indexes", limit: 1 })).items[0];
+		if (!semanticRow) throw new Error("semantic fixture was not indexed");
+		const semanticVector = [1, ...Array.from({ length: 383 }, () => 0)];
+		const index = new LocalVectorIndex(384);
+		await index.upsert([
+			{ id: semanticRow.id, values: semanticVector },
+			{ id: "hidden-or-deleted", values: semanticVector },
+		]);
+		await setAiSettings(db, { semanticSearchEnabled: true });
+		const semanticEnv: ApiEnv = {
+			...env,
+			ai: { run: async () => ({ data: [semanticVector] }) },
+			vectorize: {
+				upsert: async (vectors) => { await index.upsert(vectors); },
+				query: async (values, options) => ({ matches: await index.query(values, options) }),
+				deleteByIds: async (ids) => { await index.deleteByIds(ids); },
+			},
+		};
+		try {
+			const body = await readJson(handleApi(semanticEnv, new Request("https://anansi.test/api/search?q=unmatched+phrase", {
+				headers: { authorization: "Bearer library-test-token" },
+			})));
+			expect(body.semantic).toEqual({ enabled: true, applied: true });
+			expect(body.nextCursor).toBeNull();
+			expect(body.results.map((item: { id: string }) => item.id)).toContain(semanticRow.id);
+			expect(body.results.map((item: { id: string }) => item.id)).not.toContain("hidden-or-deleted");
+			const filtered = await readJson(handleApi(semanticEnv, new Request("https://anansi.test/api/search?q=unmatched+phrase&author=someone-else", {
+				headers: { authorization: "Bearer library-test-token" },
+			})));
+			expect(filtered.results.map((item: { id: string }) => item.id)).not.toContain(semanticRow.id);
+		} finally {
+			await setAiSettings(db, { semanticSearchEnabled: false });
+		}
+	});
+
+	test("failed semantic providers fall back to BM25 with a safe diagnostic", async () => {
+		await setAiSettings(db, { semanticSearchEnabled: true });
+		const failingEnv: ApiEnv = {
+			...env,
+			ai: { run: async () => { throw new Error("simulated provider outage"); } },
+			vectorize: { upsert: async () => {}, query: async () => ({ matches: [] }) },
+		};
+		try {
+			const body = await readJson(handleApi(failingEnv, new Request("https://anansi.test/api/search?q=ai+sdk+artifacts", {
+				headers: { authorization: "Bearer library-test-token" },
+			})));
+			expect(body.results.length).toBeGreaterThan(0);
+			expect(body.semantic).toEqual({ enabled: true, applied: false, degradedReason: "provider-unavailable" });
+		} finally {
+			await setAiSettings(db, { semanticSearchEnabled: false });
+		}
 	});
 
 	test("GET /api/items/:id returns the full item, never raw", async () => {

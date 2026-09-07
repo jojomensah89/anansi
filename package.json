@@ -38,6 +38,7 @@
     "deploy": "turbo run deploy -F @anansi/infra --",
     "destroy": "turbo run destroy -F @anansi/infra --",
     "dev": "turbo run dev",
+    "semantic:local": "bun run scripts/semantic-local-smoke.ts",
     "check-types": "turbo run check-types",
     "check": "biome check --write ."
   },
@@ -49,6 +50,7 @@
   "devDependencies": {
     "@anansi/config": "workspace:*",
     "@cloudflare/workers-types": "^5.20260728.1",
+    "@huggingface/transformers": "4.2.0",
     "@types/bun": "1.3.1",
     "@types/node": "catalog:",
     "bun-types": "1.3.1",

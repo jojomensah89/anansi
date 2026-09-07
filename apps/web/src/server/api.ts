@@ -18,12 +18,13 @@ import {
 	InvalidListCursorError, InvalidSearchCursorError,
   getAiSettings, setAiSettings, aiProgress,
 } from "@anansi/db";
-import type { AnansiDb } from "@anansi/db";
+import type { AnansiDb, SearchOptions } from "@anansi/db";
 import { authorizeLibrary, sessionRoute, sameSecret, type LibraryAuthEnv } from "./library-auth.ts";
 import { parseExtensionHeartbeat } from "@anansi/sources";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import type { AiBinding, VectorizeBinding } from "./ai.ts";
-import { embed, reciprocalRankFusion } from "./ai.ts";
+import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
+import { hybridSearch } from "./semantic-search.ts";
 import { ingestCapture } from "./ingest.ts";
 import {
 	isToggleableSource,
@@ -161,34 +162,25 @@ const searchRoute: Route = {
 		const query = q.get("q") ?? "";
 		if (!query.trim()) return json({ error: "q is required" }, 400);
         try {
-          const page = await searchItemsPage(env.db, {
+          const searchOptions: SearchOptions = {
             query, source: q.getAll("source"), author: q.getAll("author"), tag: q.getAll("tag"),
             media: q.get("media") ?? undefined, contentType: q.getAll("type"),
             archived: q.get("archived") === "1", favorite: q.get("favorite") === "1" ? true : undefined, removed: (["exclude", "only"] as const).find(v => v === q.get("removed")),
             order: q.get("order") === "posted" ? "posted" : "saved", cursor: q.get("cursor") ?? undefined,
             limit: num(q.get("limit"), 50),
-          });
-          let items = page.items;
-          // Vectorize is a ranking aid only: D1's filtered BM25 rows remain
-          // authoritative, so an unavailable binding simply preserves the
-          // normal keyword result and never breaks MCP or library search.
-          if (env.ai && env.vectorize) {
-            try {
-              const aiSettings = await getAiSettings(env.db);
-              if (aiSettings.semanticSearchEnabled) {
-                const vector = await embed(env.ai, aiSettings.embeddingModel, query);
-                const nearest = await env.vectorize.query(vector, { topK: Math.min((num(q.get("limit"), 50) ?? 50) * 2, 100), returnMetadata: false });
-                const lexical = items.map((item, index) => ({ id: item.id, score: 1 / (60 + index + 1) }));
-                const semantic = (nearest.matches ?? []).map((match) => ({ id: match.id, score: match.score }));
-                const order = reciprocalRankFusion([lexical, semantic]);
-                const rank = new Map(order.map((entry, index) => [entry.id, index]));
-                items = [...items].sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id));
-              }
-            } catch {
-              // Degraded semantic search is intentionally silent to callers.
-            }
-          }
-          return json({ query, ...page, items, results: items });
+          };
+          const page = await searchItemsPage(env.db, searchOptions);
+          const aiSettings = await getAiSettings(env.db);
+          const hybrid = await hybridSearch(
+            env.db,
+            query,
+            searchOptions,
+            page,
+            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: aiSettings.embeddingDimensions },
+            env.ai ? createEmbeddingProvider(env.ai, aiSettings.embeddingModel, aiSettings.embeddingDimensions) : undefined,
+            env.vectorize ? createVectorIndex(env.vectorize, aiSettings.embeddingDimensions) : undefined,
+          );
+          return json({ query, items: hybrid.items, results: hybrid.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
         } catch (error) {
           if (error instanceof InvalidListCursorError || error instanceof InvalidSearchCursorError) return json({ error: error.message }, 400);
           throw error;
