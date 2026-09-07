@@ -22,7 +22,7 @@ import type { AnansiDb, SearchOptions } from "@anansi/db";
 import { authorizeLibrary, sessionRoute, sameSecret, type LibraryAuthEnv } from "./library-auth.ts";
 import { parseExtensionHeartbeat } from "@anansi/sources";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
-import type { AiBinding, VectorizeBinding } from "./ai.ts";
+import type { AiBinding, TagGenerationProvider, VectorizeBinding } from "./ai.ts";
 import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
 import { hybridSearch, type SemanticRuntime } from "./semantic-search.ts";
 import { ingestCapture } from "./ingest.ts";
@@ -76,6 +76,9 @@ export interface ApiEnv extends LibraryAuthEnv {
 	semantic?: SemanticRuntime;
 	/** Local-only nudge; ingestion itself never waits for semantic indexing. */
 	semanticKick?: () => void;
+	/** Local-only tag-generation provider and nudge. */
+	tagger?: TagGenerationProvider;
+	taggingKick?: () => void;
 	/** Shared secret for /api/ingest. Absent means ingest is closed. */
 	ingestToken?: string;
 }
@@ -330,7 +333,16 @@ const statsRoute: Route = {
 const aiSettingsRoute: Route = {
   method: "GET",
   path: "/api/ai",
-  handle: async ({ env }) => json({ settings: await getAiSettings(env.db), progress: await aiProgress(env.db), available: Boolean(env.semantic || (env.ai && env.vectorize)), runtime: env.semantic ? "ollama" : env.ai && env.vectorize ? "cloudflare" : "none" }),
+  handle: async ({ env }) => json({
+    settings: await getAiSettings(env.db),
+    progress: await aiProgress(env.db),
+    available: Boolean(env.semantic || env.tagger || env.ai),
+    capabilities: {
+      semanticSearch: Boolean(env.semantic || (env.ai && env.vectorize)),
+      autoTagging: Boolean(env.tagger || env.ai),
+    },
+    runtime: env.semantic || env.tagger ? "ollama" : env.ai ? "cloudflare" : "none",
+  }),
 };
 
 const aiSettingsUpdateRoute: Route = {
@@ -339,11 +351,12 @@ const aiSettingsUpdateRoute: Route = {
   handle: async ({ env, request }) => {
     const body = await request.json().catch(() => null) as { semanticSearchEnabled?: unknown; autoTaggingEnabled?: unknown } | null;
     if (!body || (body.semanticSearchEnabled !== undefined && typeof body.semanticSearchEnabled !== "boolean") || (body.autoTaggingEnabled !== undefined && typeof body.autoTaggingEnabled !== "boolean")) return json({ error: "invalid AI settings" }, 400);
-    if (env.semantic && body.autoTaggingEnabled === true) return json({ error: "automatic tags require hosted Cloudflare AI" }, 400);
+    if (env.semantic && body.autoTaggingEnabled === true && !env.tagger) return json({ error: "automatic tags require a local Ollama tag model" }, 400);
     const settings = await setAiSettings(env.db, { semanticSearchEnabled: body.semanticSearchEnabled as boolean | undefined, autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined });
     // A local toggle should start reconciliation immediately; the periodic
     // worker remains the recovery path if this nudge is interrupted.
     if (env.semanticKick && body.semanticSearchEnabled !== undefined) env.semanticKick();
+    if (env.taggingKick && body.autoTaggingEnabled !== undefined) env.taggingKick();
     return json({ settings, progress: await aiProgress(env.db) });
   },
 };
@@ -478,6 +491,7 @@ const ingestRoute: Route = {
 			if (env.waitUntil) env.waitUntil(work); else await work;
 		}
 		if (env.semanticKick) env.semanticKick();
+		if (env.taggingKick) env.taggingKick();
 
 		return json(result.body, result.status);
 	},

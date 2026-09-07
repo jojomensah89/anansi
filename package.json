@@ -40,6 +40,7 @@
     "dev": "turbo run dev",
     "semantic:local": "bun run scripts/semantic-local-smoke.ts",
     "semantic:ollama": "bun run scripts/semantic-ollama-smoke.ts",
+    "ai:tagging:ollama": "bun run scripts/ai-tagging-ollama-smoke.ts",
     "check-types": "turbo run check-types",
     "check": "biome check --write ."
   },

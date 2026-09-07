@@ -18,8 +18,10 @@ import { handleApi } from "../src/server/api.ts";
 import { fetchPendingMedia } from "../src/server/media.ts";
 import { handleMcp } from "../src/server/mcp.ts";
 import { createOllamaEmbeddingProvider } from "../src/server/ollama-embedding.ts";
+import { createOllamaTaggingProvider, DEFAULT_OLLAMA_TAG_MODEL } from "../src/server/ollama-tagging.ts";
 import { openLocalSemanticCache } from "../src/server/local-semantic-cache.ts";
 import { createLocalSemanticWorker } from "../src/server/local-semantic-worker.ts";
+import { createLocalTaggingWorker } from "../src/server/local-tagging-worker.ts";
 
 const port = Number(process.env.PORT ?? 8788);
 const dbPath = process.env.ANANSI_DB_PATH ?? "data/anansi.db";
@@ -45,6 +47,7 @@ const db = local as unknown as AnansiDb;
 const mediaDir = process.env.ANANSI_MEDIA_DIR ?? "data/media";
 const media = { dir: mediaDir };
 const ollamaModel = process.env.OLLAMA_EMBEDDING_MODEL ?? "embeddinggemma";
+const ollamaTagModel = process.env.OLLAMA_TAG_MODEL ?? DEFAULT_OLLAMA_TAG_MODEL;
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
 try {
   const ollamaHost = new URL(ollamaBaseUrl).hostname.toLowerCase();
@@ -56,13 +59,17 @@ try {
 }
 const semanticCachePath = process.env.ANANSI_SEMANTIC_DB_PATH ?? join(dirname(dbPath), "semantic", "ollama.sqlite");
 const ollamaProvider = createOllamaEmbeddingProvider({ model: ollamaModel, baseUrl: ollamaBaseUrl });
+const ollamaTagger = createOllamaTaggingProvider({ model: ollamaTagModel, baseUrl: ollamaBaseUrl });
 const semanticCache = openLocalSemanticCache(semanticCachePath, ollamaModel);
 const semanticWorker = createLocalSemanticWorker(db, semanticCache, ollamaProvider);
+const taggingWorker = createLocalTaggingWorker(db, ollamaTagger);
 const recover = () => fetchPendingMedia(db, media).catch(error => console.error("Media recovery failed:", error));
 void recover();
 setInterval(() => { void recover(); }, 60_000).unref();
 void semanticWorker.runOnce().catch((error) => console.error("Local semantic worker failed:", error));
 setInterval(() => { void semanticWorker.runOnce().catch((error) => console.error("Local semantic worker failed:", error)); }, 30_000).unref();
+void taggingWorker.runOnce().catch((error) => console.error("Local tagging worker failed:", error));
+setInterval(() => { void taggingWorker.runOnce().catch((error) => console.error("Local tagging worker failed:", error)); }, 30_000).unref();
 
 /**
  * A stale server on this port answers with whatever code it was started
@@ -93,7 +100,7 @@ try {
         pathname === "/mcp"
           ? await handleMcp({ db, token: mcpToken }, request)
           : pathname.startsWith("/api/")
-            ? await handleApi({ db, media, ingestToken, libraryToken, allowedOrigins, semantic: { provider: ollamaProvider, index: semanticCache, local: true, status: () => semanticWorker.status() }, semanticKick: () => { void semanticWorker.runOnce().catch((error) => console.error("Local semantic worker failed:", error)); } }, request)
+            ? await handleApi({ db, media, ingestToken, libraryToken, allowedOrigins, semantic: { provider: ollamaProvider, index: semanticCache, local: true, status: () => semanticWorker.status() }, semanticKick: () => { void semanticWorker.runOnce().catch((error) => console.error("Local semantic worker failed:", error)); }, tagger: ollamaTagger, taggingKick: () => { void taggingWorker.runOnce().catch((error) => console.error("Local tagging worker failed:", error)); } }, request)
             : new Response("anansi local: /api/* and /mcp", { status: 404 });
 
       for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);
@@ -126,4 +133,5 @@ console.log(`  mcp     ${mcpToken ? "bearer required" : "closed (set MCP_TOKEN)"
 
 console.log(`  library ${libraryToken ? "session or bearer required" : "closed (set LIBRARY_TOKEN)"}`);
 console.log(`  ollama  ${ollamaModel} via ${ollamaProvider.endpoint}`);
+console.log(`  tagging ${ollamaTagModel} via ${ollamaTagger.endpoint}`);
 console.log(`  semantic cache ${semanticCachePath}`);

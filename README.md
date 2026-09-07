@@ -132,8 +132,9 @@ for EmbeddingGemma). A clone-to-working semantic setup is:
    ```
 
    Open `http://127.0.0.1:3001`, go to **Settings**, and enable **AI semantic
-   search**. Automatic tags are intentionally disabled in local mode because
-   they remain a hosted Cloudflare feature.
+   search** or **Automatic tags**. Semantic search uses `embeddinggemma`; tags
+   use the configured `OLLAMA_TAG_MODEL` (default
+   `qwen3:4b-instruct-2507-q4_K_M`).
 
 6. Build and load the extension so you can import real bookmarks:
 
@@ -149,7 +150,7 @@ for EmbeddingGemma). A clone-to-working semantic setup is:
    `data/semantic/ollama.sqlite`. New bookmarks are saved and keyword-searchable
    immediately; semantic indexing catches up in the background. If Ollama is
    stopped or the model is missing, the UI says so and continues with BM25
-   keyword results.
+   keyword results. Tagging also runs in the background and never blocks a save.
 
    The extension is optional if the clone already contains library data or you
    only want to run the synthetic smoke test; it is required to capture new
@@ -191,6 +192,8 @@ Common fixes:
   retry the search. BM25 remains available while Ollama is down.
 - **Model not found** — run `ollama pull embeddinggemma`, or make
   `OLLAMA_EMBEDDING_MODEL` match a model shown by `ollama list`.
+- **Automatic tags** — run `ollama pull qwen3:4b-instruct-2507-q4_K_M`, or make
+  `OLLAMA_TAG_MODEL` match a text-generation model shown by `ollama list`.
 - **Index warming** — leave the local server running; jobs are processed in the
   background. A model change or sidecar removal intentionally starts a fresh
   generation.

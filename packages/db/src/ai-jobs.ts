@@ -1,5 +1,5 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
-import { aiEnrichmentJobs, aiSettings, itemEmbeddings, items } from "./schema.ts";
+import { aiEnrichmentJobs, aiSettings, itemEmbeddings, itemTagOverrides, itemTags, items, tags } from "./schema.ts";
 import type { AnansiDb } from "./types.ts";
 
 export type AiJobKind = "embedding" | "tagging";
@@ -127,6 +127,21 @@ export async function requeueEmbeddingJobs(db: AnansiDb, itemIds: string[], embe
 export async function aiProgress(db: AnansiDb, kind?: AiJobKind) {
   const [row] = await db.select({ pending: sql<number>`sum(case when status in ('pending','retrying','running') then 1 else 0 end)`, failed: sql<number>`sum(case when status='failed' then 1 else 0 end)`, complete: sql<number>`sum(case when status='complete' then 1 else 0 end)` }).from(aiEnrichmentJobs).where(kind ? eq(aiEnrichmentJobs.kind, kind) : undefined);
   return { pending: Number(row?.pending ?? 0), failed: Number(row?.failed ?? 0), complete: Number(row?.complete ?? 0) };
+}
+
+/** Apply a bounded AI label set without overriding manual intent. */
+export async function applyAiTags(db: AnansiDb, itemId: string, labels: string[], model: string, now = Math.floor(Date.now() / 1000)) {
+  for (const raw of [...new Set(labels)]) {
+    const label = raw.trim().toLowerCase();
+    if (!label) continue;
+    const [existing] = await db.select().from(tags).where(eq(tags.label, label)).limit(1);
+    const tagId = existing?.id ?? `ai-${label}`;
+    if (existing?.origin === "manual") continue;
+    const [suppressed] = await db.select().from(itemTagOverrides).where(and(eq(itemTagOverrides.itemId, itemId), eq(itemTagOverrides.tagId, tagId), eq(itemTagOverrides.override, "suppressed"))).limit(1);
+    if (suppressed) continue;
+    await db.insert(tags).values({ id: tagId, label, origin: "ai" }).onConflictDoNothing();
+    await db.insert(itemTags).values({ itemId, tagId, provenance: "ai", model, appliedAt: now }).onConflictDoNothing();
+  }
 }
 
 export { aiEnrichmentJobs, aiSettings, itemEmbeddings };

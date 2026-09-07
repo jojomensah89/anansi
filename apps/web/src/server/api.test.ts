@@ -214,7 +214,7 @@ describe("handleApi", () => {
 		}
 	});
 
-	test("local runtime keeps automatic tags hosted-only and nudges semantic work", async () => {
+	test("local runtime exposes automatic tags when a tagger is configured", async () => {
 		let kicks = 0;
 		const localEnv: ApiEnv = {
 			...env,
@@ -223,15 +223,37 @@ describe("handleApi", () => {
 				provider: { model: "local", dimensions: 384, embed: async () => [1, ...Array.from({ length: 383 }, () => 0)] },
 				index: new LocalVectorIndex(384),
 			},
+			tagger: { model: "tag-model", generateTags: async () => ["local"] },
+			taggingKick: () => { kicks += 10; },
 			semanticKick: () => { kicks += 1; },
 		};
 		const headers = { authorization: "Bearer library-test-token", "content-type": "application/json" };
 		const tags = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ autoTaggingEnabled: true }) }));
-		expect(tags.status).toBe(400);
-		expect(kicks).toBe(0);
+		expect(tags.status).toBe(200);
+		expect(kicks).toBe(10);
 		const semantic = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ semanticSearchEnabled: true }) }));
 		expect(semantic.status).toBe(200);
-		expect(kicks).toBe(1);
+		expect(kicks).toBe(11);
+		const status = await readJson(handleApi(localEnv, new Request("https://anansi.test/api/ai", { headers })));
+		expect(status.capabilities).toEqual({ semanticSearch: true, autoTagging: true });
+		await setAiSettings(db, { semanticSearchEnabled: false, autoTaggingEnabled: false });
+	});
+
+	test("local automatic tags require a configured tagger", async () => {
+		const localEnv: ApiEnv = {
+			...env,
+			semantic: {
+				local: true,
+				provider: { model: "local", dimensions: 384, embed: async () => [1, ...Array.from({ length: 383 }, () => 0)] },
+				index: new LocalVectorIndex(384),
+			},
+		};
+		const response = await handleApi(localEnv, new Request("https://anansi.test/api/ai", {
+			method: "PATCH",
+			headers: { authorization: "Bearer library-test-token", "content-type": "application/json" },
+			body: JSON.stringify({ autoTaggingEnabled: true }),
+		}));
+		expect(response.status).toBe(400);
 		await setAiSettings(db, { semanticSearchEnabled: false, autoTaggingEnabled: false });
 	});
 

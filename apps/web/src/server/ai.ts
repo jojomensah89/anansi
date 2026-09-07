@@ -13,6 +13,12 @@ export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
 }
 
+/** Text-generation seam used by hosted and local automatic-tag workers. */
+export interface TagGenerationProvider {
+  readonly model: string;
+  generateTags(text: string, max?: number): Promise<string[]>;
+}
+
 export interface VectorMatch { id: string; score: number }
 
 export interface VectorIndex {
@@ -71,17 +77,38 @@ export function createVectorIndex(binding: VectorizeBinding, dimensions: number)
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Normalize untrusted model output before it can become a database label.
+ * Cloudflare returns a JSON array while Ollama uses an object with `tags`.
+ */
+export function normalizeTags(value: unknown, max = 5): string[] {
+  const parsed = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.tags)
+      ? value.tags
+      : undefined;
+  if (!parsed || parsed.length > max) throw new AiProviderError("malformed", "AI tags must be an array");
+  const labels = parsed.flatMap((v) => {
+    if (typeof v !== "string") return [];
+    const label = v.normalize("NFKC").replace(/[\u0000-\u001f\u007f]/g, "").trim().replace(/\s+/g, " ").slice(0, 48).toLowerCase();
+    return label ? [label] : [];
+  });
+  const unique = [...new Set(labels)];
+  if (unique.length !== parsed.length || unique.length > max) throw new AiProviderError("malformed", "AI returned invalid or excessive tags");
+  return unique;
+}
+
 export async function generateTags(ai: AiBinding, model: string, text: string, max = 5): Promise<string[]> {
   const output = await ai.run(model, { prompt: `Return only a JSON array of up to ${max} concise topic labels for this item.\n\n${text.slice(0, MAX_TEXT)}` }).catch((error) => { throw classifyAiError(error); });
   const raw = typeof output === "string" ? output : (output as { response?: unknown })?.response;
   if (typeof raw !== "string") throw new AiProviderError("malformed", "Workers AI returned no tag text");
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { throw new AiProviderError("malformed", "Workers AI returned malformed tag JSON"); }
-  if (!Array.isArray(parsed)) throw new AiProviderError("malformed", "Workers AI tags must be an array");
-  const labels = parsed.filter((v): v is string => typeof v === "string").map((v) => v.normalize("NFKC").replace(/[\u0000-\u001f\u007f]/g, "").trim().replace(/\s+/g, " ").slice(0, 48).toLowerCase()).filter(Boolean);
-  const unique = [...new Set(labels)];
-  if (unique.length !== parsed.length || unique.length > max) throw new AiProviderError("malformed", "Workers AI returned invalid or excessive tags");
-  return unique;
+  return normalizeTags(parsed, max);
 }
 
 export function classifyAiError(error: unknown): AiProviderError {

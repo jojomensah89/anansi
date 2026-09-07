@@ -1,7 +1,7 @@
 import startEntry from "@tanstack/react-start/server-entry";
 import { openD1 } from "@anansi/db/d1";
 import { fetchPendingMedia } from "./server/media.ts";
-import { claimAiJobs, completeAiJob, failAiJob, getAiSettings, reconcileAiJobs, searchableText, semanticText, itemEmbeddings, itemTagOverrides, items, tags, itemTags } from "@anansi/db";
+import { applyAiTags, claimAiJobs, completeAiJob, failAiJob, getAiSettings, reconcileAiJobs, searchableText, semanticText, itemEmbeddings, items } from "@anansi/db";
 import { createEmbeddingProvider, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
 
 interface WorkerBindings {
@@ -39,15 +39,7 @@ export async function runAiSchedule(env: WorkerBindings): Promise<void> {
           await db.insert(itemEmbeddings).values({ itemId: item.id, vectorId: item.id, model: settings.embeddingModel, dimensions: values.length, contentHash: job.contentHash, status: "complete", createdAt: Math.floor(Date.now()/1000), updatedAt: Math.floor(Date.now()/1000) }).onConflictDoUpdate({ target: itemEmbeddings.itemId, set: { vectorId: item.id, model: settings.embeddingModel, dimensions: values.length, contentHash: job.contentHash, status: "complete", updatedAt: Math.floor(Date.now()/1000), lastError: null } });
         } else {
           const labels = await generateTags(env.AI, settings.tagModel, text);
-          for (const label of labels) {
-            const existingTag = (await db.select().from(tags)).find((tag) => tag.label === label);
-            const id = existingTag?.id ?? `ai-${label}`;
-            if (existingTag?.origin === "manual") continue;
-            const suppressed = (await db.select().from(itemTagOverrides)).some((override) => override.itemId === item.id && override.tagId === id && override.override === "suppressed");
-            if (suppressed) continue;
-            if (!existingTag) await db.insert(tags).values({ id, label, origin: "ai" }).onConflictDoNothing();
-            await db.insert(itemTags).values({ itemId: item.id, tagId: id, provenance: "ai", model: settings.tagModel, appliedAt: Math.floor(Date.now()/1000) }).onConflictDoNothing();
-          }
+          await applyAiTags(db, item.id, labels, settings.tagModel);
         }
         await completeAiJob(db, job.id, job.token);
       } catch (error) {
