@@ -1,6 +1,8 @@
 export * as schema from "./schema.ts";
 export { captureEvents, extensionClients, items, itemSourceLinks, media, tags, itemTags, itemTagOverrides } from "./schema.ts";
 export type { AnansiDb, DbItem, NewDbItem } from "./types.ts";
+export { TOPIC_DEFINITIONS, TOPIC_TAGS, TOPIC_TAXONOMY_VERSION, canonicalTopicId, canonicalizeTopicIds, topicDefinition } from "./topics.ts";
+export type { TagKind, TopicId } from "./topics.ts";
 export { upsertItems, countItems, creators, setArchived, tagItems, listTags, disabledSources, setSourceEnabled } from "./queries.ts";
 export type { CaptureOrigin, UpsertOptions } from "./queries.ts";
 export { searchItems, searchItemsPage, hydrateSearchItems, recentSaves, findByAuthor, getItem, listItems, libraryStats, sourceHealth, toFtsQuery } from "./search.ts";
@@ -16,5 +18,5 @@ export type { ExtensionHealth } from "./extension-health.ts";
 export { setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary, restoreLibrary } from "./organization.ts";
 export type { Collection, CollectionFilters, LibraryExport } from "./organization.ts";
 export { claimMediaJobs, completeMediaJob, failMediaJob } from "./media-jobs.ts";
-export { aiEnrichmentJobs, aiSettings, itemEmbeddings, aiProgress, applyAiTags, claimAiJobs, completeAiJob, contentHash, failAiJob, getAiSettings, reconcileAiJobs, requeueEmbeddingJobs, searchableText, semanticText, setAiSettings } from "./ai-jobs.ts";
+export { aiEnrichmentJobs, aiSettings, itemEmbeddings, aiProgress, applyAiTags, claimAiJobs, completeAiJob, contentHash, failAiJob, getAiSettings, reconcileAiJobs, reclassifyAiTopics, requeueEmbeddingJobs, searchableText, semanticText, setAiSettings } from "./ai-jobs.ts";
 export type { AiJob, AiJobKind } from "./ai-jobs.ts";

@@ -9,12 +9,24 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 function Settings() {
   const [data, setData] = useState<AiSettingsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reclassifying, setReclassifying] = useState(false);
   useEffect(() => { api.ai().then(setData).catch((e) => setError(e instanceof Error ? e.message : "Unable to load settings")); }, []);
   const slow = useSlowLoad(data === null && !error);
   const toggle = (key: "semanticSearchEnabled" | "autoTaggingEnabled", value: boolean) => {
     if (!data) return;
     setData({ ...data, settings: { ...data.settings, [key]: value ? 1 : 0 } });
     api.updateAi({ [key]: value }).catch((e) => { setError(e instanceof Error ? e.message : "Unable to save settings"); });
+  };
+  const reclassify = async () => {
+    setReclassifying(true);
+    try {
+      const next = await api.reclassifyAiTags();
+      setData((previous) => previous ? { ...previous, taxonomyVersion: next.taxonomyVersion, progress: next.progress } : previous);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to reclassify topics");
+    } finally {
+      setReclassifying(false);
+    }
   };
   return <div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
     <Rail total={0} authors={0} bySource={{}} />
@@ -32,6 +44,10 @@ function Settings() {
             <Toggle icon={<SparkIcon />} label="Enable automatic tags" badge="Beta" description={data.capabilities?.autoTagging === false ? "No local or hosted tag model is configured." : "Apply concise topic tags to new saves."} checked={data.settings.autoTaggingEnabled === 1} disabled={data.capabilities?.autoTagging === false} onChange={(v) => toggle("autoTaggingEnabled", v)} />
           </div>
           <p className="mono anansi-settings-progress">{data.progress.pending} pending · {data.progress.complete} complete · {data.progress.failed} failed</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>Canonical topics {data.taxonomyVersion}</span>
+            <button type="button" className="mono" disabled={reclassifying || data.capabilities?.autoTagging === false} onClick={() => void reclassify()} style={{ border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 8px", background: "transparent", color: "var(--muted)", fontSize: 10.5, cursor: reclassifying ? "wait" : "pointer" }}>{reclassifying ? "Reclassifying…" : "Reclassify AI topics"}</button>
+          </div>
         </section>}
     </main>
   </div>;

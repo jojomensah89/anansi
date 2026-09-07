@@ -21,7 +21,7 @@ try {
 	const results = [];
 	for (const sample of samples) {
 		const tags = await provider.generateTags(sample.text);
-		if (tags.length === 0 || tags.length > 5) throw new Error(`${sample.name}: expected 1-5 tags`);
+		if (tags.length === 0 || tags.length > 3 || tags.some((tag) => !["web-dev", "ai-ml", "marketing", "design", "startups", "product", "career", "devops", "security", "finance", "health"].includes(tag))) throw new Error(`${sample.name}: expected 1-3 canonical topic IDs`);
 		results.push({ name: sample.name, tags });
 	}
 	console.log(JSON.stringify({ model: provider.model, endpoint: provider.endpoint, results }, null, 2));

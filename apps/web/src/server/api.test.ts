@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { searchItemsPage, setAiSettings, upsertItems, type AnansiDb } from "@anansi/db";
+import { applyAiTags, itemTags, searchItemsPage, setAiSettings, upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
 import { LocalVectorIndex } from "./local-vector-index.ts";
@@ -125,6 +125,21 @@ describe("handleApi", () => {
 		);
 		expect(res.status).toBe(200);
 		expect((await readJson(res)).results).toEqual([]);
+	});
+
+	test("GET /api/tags exposes canonical topic kinds", async () => {
+		const body = await readJson(get("/api/tags"));
+		expect(body.tags.some((tag: { label: string; kind: string }) => tag.label === "Web Dev" && tag.kind === "topic")).toBe(true);
+	});
+
+	test("POST /api/ai/reclassify clears AI assignments and reopens tagging jobs", async () => {
+		const item = (await searchItemsPage(db, { query: "seed", limit: 1 })).items[0];
+		if (!item) throw new Error("expected seeded item");
+		await applyAiTags(db, item.id, ["web-dev"], "test-model");
+		const response = await handleApi(env, new Request("https://anansi.test/api/ai/reclassify", { method: "POST" }));
+		expect(response.status).toBe(200);
+		expect((await db.select().from(itemTags)).some((assignment) => assignment.itemId === item.id && assignment.provenance === "ai")).toBe(false);
+		expect((await readJson(response)).taxonomyVersion).toBe("v1");
 	});
 
 	test("semantic-only candidates are hydrated and filtered by D1", async () => {

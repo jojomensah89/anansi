@@ -59,6 +59,7 @@ function Item({ to, label, count, active, children }: { to: string; label: strin
 
 export function Rail({ total, authors, archived = 0, bySource, ready: readyProp }: RailProps) {
 	const [extension, setExtension] = useState<ExtensionHealth | null>(null);
+	const [tags, setTags] = useState<{ label: string; color: string; count: number; kind: "topic" | "custom" }[]>([]);
 	const path = useRouterState({ select: (s) => s.location.pathname });
 	const archivedView = useRouterState({ select: (s) => s.location.pathname === "/" && (s.location.search as Record<string, unknown>).archived === true });
 	const ready = readyProp ?? (total > 0 || archived > 0);
@@ -67,8 +68,10 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 	useEffect(() => {
 		const controller = new AbortController();
 		api.sources(controller.signal).then((result) => setExtension(result.extension)).catch(() => setExtension(null));
+		api.tags(controller.signal).then((result) => setTags(result.tags)).catch(() => setTags([]));
 		return () => controller.abort();
 	}, []);
+	const topics = tags.filter((tag) => tag.kind === "topic" && tag.count > 0).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 	const extensionText = extension ? extensionLabel(extension) : "Extension status unavailable";
 	const extensionColor = extension?.connection === "connected" ? "var(--ok)" : extension ? "var(--accent-text)" : "var(--faint)";
 
@@ -130,6 +133,21 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 						</SidebarMenu>
 					</SidebarGroupContent>
 				</SidebarGroup>
+
+				{topics.length > 0 && <SidebarGroup className="anansi-rail-topics-group">
+					<SidebarGroupLabel className="anansi-rail-topics mono">Topics</SidebarGroupLabel>
+					<SidebarGroupContent>
+						<SidebarMenu>
+							{topics.map((topic) => <SidebarMenuItem key={topic.label}>
+								<SidebarMenuButton render={<Link to="/" search={{ tag: [topic.label] }} />} tooltip={topic.label} aria-label={topic.label}>
+									<span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: topic.color || "#6b7280" }} />
+									<span className="anansi-sidebar-label">{topic.label}</span>
+									<span className="anansi-sidebar-count mono">{topic.count}</span>
+								</SidebarMenuButton>
+							</SidebarMenuItem>)}
+						</SidebarMenu>
+					</SidebarGroupContent>
+				</SidebarGroup>}
 			</SidebarContent>
 
 			<SidebarFooter className="anansi-rail-footer">

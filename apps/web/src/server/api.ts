@@ -16,7 +16,7 @@ import {
 	searchItemsPage,
 	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
 	InvalidListCursorError, InvalidSearchCursorError,
-  getAiSettings, setAiSettings, aiProgress,
+  getAiSettings, setAiSettings, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
 import { authorizeLibrary, sessionRoute, sameSecret, type LibraryAuthEnv } from "./library-auth.ts";
@@ -335,6 +335,7 @@ const aiSettingsRoute: Route = {
   path: "/api/ai",
   handle: async ({ env }) => json({
     settings: await getAiSettings(env.db),
+    taxonomyVersion: TOPIC_TAXONOMY_VERSION,
     progress: await aiProgress(env.db),
     available: Boolean(env.semantic || env.tagger || env.ai),
     capabilities: {
@@ -343,6 +344,16 @@ const aiSettingsRoute: Route = {
     },
     runtime: env.semantic || env.tagger ? "ollama" : env.ai ? "cloudflare" : "none",
   }),
+};
+
+const aiReclassifyRoute: Route = {
+  method: "POST",
+  path: "/api/ai/reclassify",
+  handle: async ({ env }) => {
+    await reclassifyAiTopics(env.db);
+    env.taggingKick?.();
+    return json({ taxonomyVersion: TOPIC_TAXONOMY_VERSION, progress: await aiProgress(env.db) });
+  },
 };
 
 const aiSettingsUpdateRoute: Route = {
@@ -357,7 +368,7 @@ const aiSettingsUpdateRoute: Route = {
     // worker remains the recovery path if this nudge is interrupted.
     if (env.semanticKick && body.semanticSearchEnabled !== undefined) env.semanticKick();
     if (env.taggingKick && body.autoTaggingEnabled !== undefined) env.taggingKick();
-    return json({ settings, progress: await aiProgress(env.db) });
+    return json({ settings, taxonomyVersion: TOPIC_TAXONOMY_VERSION, progress: await aiProgress(env.db) });
   },
 };
 
@@ -552,7 +563,7 @@ const ROUTES: Route[] = [
 	toggleSourceRoute,
 	creatorsRoute,
 	statsRoute, extensionStatsRoute,
-	aiSettingsRoute, aiSettingsUpdateRoute,
+	aiSettingsRoute, aiSettingsUpdateRoute, aiReclassifyRoute,
 	extensionConfigRoute,
 	extensionHeartbeatRoute,
 	ingestRoute,

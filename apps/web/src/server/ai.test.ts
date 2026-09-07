@@ -6,8 +6,8 @@ describe("Workers AI adapters", () => {
   test("normalizes strict tag JSON and rejects malformed output", async () => {
     const ai = { run: async () => ({ response: '["Design", "design", "\u0000bad"]' }) };
     await expect(generateTags(ai, "model", "text")).rejects.toBeInstanceOf(AiProviderError);
-    const good = { run: async () => ({ response: '["Design", "Research"]' }) };
-    await expect(generateTags(good, "model", "text")).resolves.toEqual(["design", "research"]);
+    const good = { run: async () => ({ response: '["Design", "AI / ML"]' }) };
+    await expect(generateTags(good, "model", "text")).resolves.toEqual(["design", "ai-ml"]);
   });
 
   test("accepts Workers AI embedding response shapes", async () => {

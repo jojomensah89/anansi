@@ -4,6 +4,7 @@ import type { AnansiDb } from "./types.ts";
 import { atomicWrite } from "./atomic.ts";
 import type { ListOptions } from "./search.ts";
 import { isHiddenSource } from "./visibility.ts";
+import { canonicalTopicId, topicDefinition } from "./topics.ts";
 
 export type CollectionFilters = Omit<ListOptions, "cursor" | "limit"> & { query?: string };
 export interface Collection { id: string; name: string; filters: CollectionFilters; createdAt: number; updatedAt: number }
@@ -20,7 +21,8 @@ export async function setFavorite(db: AnansiDb, ids: string[], favorite: boolean
 }
 
 export async function removeItemTag(db: AnansiDb, id: string, label: string): Promise<void> {
-  const [tag] = await db.select().from(tags).where(eq(tags.label, label.trim().toLowerCase()));
+  const topic = topicDefinition(canonicalTopicId(label) ?? "");
+  const [tag] = await db.select().from(tags).where(eq(tags.label, topic?.label ?? label.trim().toLowerCase()));
   if (tag) {
     await db.delete(itemTags).where(and(eq(itemTags.itemId, id), eq(itemTags.tagId, tag.id)));
     await db.insert(itemTagOverrides).values({ itemId: id, tagId: tag.id, override: "suppressed", createdAt: Math.floor(Date.now() / 1000) }).onConflictDoUpdate({ target: [itemTagOverrides.itemId, itemTagOverrides.tagId], set: { override: "suppressed", createdAt: Math.floor(Date.now() / 1000) } });

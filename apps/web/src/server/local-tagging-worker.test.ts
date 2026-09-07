@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { aiEnrichmentJobs, applyAiTags, itemTags, items, removeItemTag, tags, type AnansiDb, setAiSettings, tagItems, upsertItems } from "@anansi/db";
+import { aiEnrichmentJobs, applyAiTags, itemTags, items, removeItemTag, reclassifyAiTopics, tags, type AnansiDb, setAiSettings, tagItems, upsertItems } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { AiProviderError } from "./ai.ts";
 import { createLocalTaggingWorker } from "./local-tagging-worker.ts";
@@ -35,15 +35,15 @@ describe("local tagging worker", () => {
 		await setAiSettings(db, { autoTaggingEnabled: true });
 		const worker = createLocalTaggingWorker(db, {
 			model: "qwen-test",
-			generateTags: async () => ["SQLite", "MCP-server"],
+			generateTags: async () => ["web-dev", "ai-ml"],
 		});
 		await worker.runOnce();
 		const allAssignments = await db.select().from(itemTags);
 		const allTags = await db.select().from(tags);
 		const assigned = allAssignments.filter((assignment) => assignment.itemId === itemId).map((assignment) => ({ label: allTags.find((tag) => tag.id === assignment.tagId)?.label, provenance: assignment.provenance, model: assignment.model })).sort((a, b) => String(a.label).localeCompare(String(b.label)));
 		expect(assigned).toEqual([
-			{ label: "mcp-server", provenance: "ai", model: "qwen-test" },
-			{ label: "sqlite", provenance: "ai", model: "qwen-test" },
+			{ label: "AI / ML", provenance: "ai", model: "qwen-test" },
+			{ label: "Web Dev", provenance: "ai", model: "qwen-test" },
 		]);
 		expect((await worker.status()).complete).toBe(1);
 	});
@@ -54,7 +54,7 @@ describe("local tagging worker", () => {
 		await setAiSettings(db, { semanticSearchEnabled: true, autoTaggingEnabled: true });
 		const worker = createLocalTaggingWorker(db, {
 			model: "qwen-test",
-			generateTags: async () => ["sqlite"],
+			generateTags: async () => ["web-dev"],
 		});
 		await worker.runOnce();
 		expect((await db.select().from(aiEnrichmentJobs)).map((job) => job.kind)).toEqual(["tagging"]);
@@ -63,18 +63,29 @@ describe("local tagging worker", () => {
 	test("does not override manual tags or suppressed AI assignments", async () => {
 		const { db } = setup();
 		const itemId = await addItem(db, "manual-item");
-		await tagItems(db, [itemId], "sqlite");
+		await tagItems(db, [itemId], "Web Dev");
 		await setAiSettings(db, { autoTaggingEnabled: true });
-		await applyAiTags(db, itemId, ["sqlite", "mcp"], "qwen-test");
-		const sqliteTag = (await db.select().from(tags)).find((tag) => tag.label === "sqlite");
-		const manual = (await db.select().from(itemTags)).filter((assignment) => assignment.itemId === itemId && assignment.tagId === sqliteTag?.id).map((assignment) => ({ provenance: assignment.provenance, label: sqliteTag?.label }));
-		expect(manual).toEqual([{ provenance: "manual", label: "sqlite" }]);
+		await applyAiTags(db, itemId, ["web-dev", "ai-ml"], "qwen-test");
+		const webDevTag = (await db.select().from(tags)).find((tag) => tag.label === "Web Dev");
+		const manual = (await db.select().from(itemTags)).filter((assignment) => assignment.itemId === itemId && assignment.tagId === webDevTag?.id).map((assignment) => ({ provenance: assignment.provenance, label: webDevTag?.label }));
+		expect(manual).toEqual([{ provenance: "manual", label: "Web Dev" }]);
 
-		const mcp = (await db.select().from(tags)).find((tag) => tag.label === "mcp");
-		if (!mcp) throw new Error("AI tag was not created");
-		await removeItemTag(db, itemId, "mcp");
-		await applyAiTags(db, itemId, ["mcp"], "qwen-test");
-		expect((await db.select().from(itemTags)).filter((assignment) => assignment.itemId === itemId && assignment.tagId === mcp.id)).toEqual([]);
+		const aiMl = (await db.select().from(tags)).find((tag) => tag.label === "AI / ML");
+		if (!aiMl) throw new Error("AI topic was not created");
+		await removeItemTag(db, itemId, "AI / ML");
+		await applyAiTags(db, itemId, ["ai-ml"], "qwen-test");
+		expect((await db.select().from(itemTags)).filter((assignment) => assignment.itemId === itemId && assignment.tagId === aiMl.id)).toEqual([]);
+	});
+
+	test("reclassification prunes orphaned legacy AI labels but keeps manual labels", async () => {
+		const { db } = setup();
+		const itemId = await addItem(db, "reclassify-item");
+		await db.insert(tags).values({ id: "legacy-ai", label: "old noisy label", color: "#6b7280", origin: "ai", kind: "custom" });
+		await db.insert(tags).values({ id: "manual-custom", label: "my label", color: "#6b7280", origin: "manual", kind: "custom" });
+		await db.insert(itemTags).values({ itemId, tagId: "manual-custom", provenance: "manual" });
+		await reclassifyAiTopics(db);
+		expect((await db.select().from(tags)).some((tag) => tag.id === "legacy-ai")).toBe(false);
+		expect((await db.select().from(tags)).some((tag) => tag.id === "manual-custom")).toBe(true);
 	});
 
 	test("keeps a failed job retryable and does not break the worker", async () => {

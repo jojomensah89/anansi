@@ -1,3 +1,5 @@
+import { TOPIC_DEFINITIONS, canonicalizeTopicIds } from "@anansi/db";
+
 /** Small injectable seams around Workers AI and Vectorize. */
 export interface AiBinding { run(model: string, input: unknown): Promise<unknown> }
 export interface VectorizeBinding {
@@ -102,13 +104,14 @@ export function normalizeTags(value: unknown, max = 5): string[] {
   return unique;
 }
 
-export async function generateTags(ai: AiBinding, model: string, text: string, max = 5): Promise<string[]> {
-  const output = await ai.run(model, { prompt: `Return only a JSON array of up to ${max} concise topic labels for this item.\n\n${text.slice(0, MAX_TEXT)}` }).catch((error) => { throw classifyAiError(error); });
+export async function generateTags(ai: AiBinding, model: string, text: string, max = 3): Promise<string[]> {
+  const allowed = TOPIC_DEFINITIONS.map(({ id, label }) => `${id} (${label})`).join(", ");
+  const output = await ai.run(model, { prompt: `Return only a JSON array of up to ${max} topic IDs from this allowlist: ${allowed}. Do not invent labels or translate them.\n\n${text.slice(0, MAX_TEXT)}` }).catch((error) => { throw classifyAiError(error); });
   const raw = typeof output === "string" ? output : (output as { response?: unknown })?.response;
   if (typeof raw !== "string") throw new AiProviderError("malformed", "Workers AI returned no tag text");
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { throw new AiProviderError("malformed", "Workers AI returned malformed tag JSON"); }
-  return normalizeTags(parsed, max);
+  return canonicalizeTopicIds(normalizeTags(parsed, max), max);
 }
 
 export function classifyAiError(error: unknown): AiProviderError {

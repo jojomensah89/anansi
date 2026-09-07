@@ -99,6 +99,13 @@
       "when": 1788720000000,
       "tag": "0013_ai_enrichment",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1788788333616,
+      "tag": "0014_canonical_topics",
+      "breakpoints": true
     }
   ]
 }

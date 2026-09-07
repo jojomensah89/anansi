@@ -8,6 +8,7 @@ export interface TagOption {
 	label: string;
 	color: string;
 	count: number;
+	kind: "topic" | "custom";
 }
 
 type TagPopoverMode = "add" | "overflow";
@@ -95,12 +96,16 @@ export function TagPopover({
 		const byLabel = new Map(tags.map((tag) => [normalize(tag.label), tag]));
 		for (const label of current) {
 			const key = normalize(label);
-			if (!byLabel.has(key)) byLabel.set(key, { label: key, color: "#6b7280", count: 0 });
+			if (!byLabel.has(key)) byLabel.set(key, { label: key, color: "#6b7280", count: 0, kind: "custom" });
 		}
-		return [...byLabel.values()];
+		return [...byLabel.values()].sort((a, b) => Number(b.kind === "topic") - Number(a.kind === "topic") || b.count - a.count || a.label.localeCompare(b.label));
 	}, [current, tags]);
 	const needle = normalize(query);
 	const visible = options.filter((tag) => !needle || normalize(tag.label).includes(needle));
+	const groups = [
+		{ label: "Topics", items: visible.filter((tag) => tag.kind === "topic") },
+		{ label: "Custom tags", items: visible.filter((tag) => tag.kind === "custom") },
+	];
 	const existing = options.some((tag) => normalize(tag.label) === needle);
 
 	const toggleTag = async (label: string, next: boolean) => {
@@ -149,7 +154,9 @@ export function TagPopover({
 				style={{ width: "100%", boxSizing: "border-box", height: 30, padding: "0 8px", border: "1px solid var(--edge)", borderRadius: 5, background: "var(--card)", color: "var(--text)", font: "inherit", fontSize: 11.5, outline: "none" }}
 			/>
 			<div style={{ maxHeight: 230, overflowY: "auto", marginTop: 7, display: "flex", flexDirection: "column", gap: 2 }}>
-				{visible.map((tag) => {
+				{groups.map((group) => group.items.length > 0 && <div key={group.label}>
+					<div className="mono" style={{ padding: "7px 7px 3px", color: "var(--fainter)", fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em" }}>{group.label}</div>
+					{group.items.map((tag) => {
 					const checked = selected.has(normalize(tag.label));
 					return (
 						<label key={tag.label} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minHeight: 30, padding: "0 7px", borderRadius: 4, background: checked ? "#ffffff0d" : "transparent", color: checked ? "var(--text-dim)" : "var(--muted)", cursor: busy ? "wait" : "pointer", fontSize: 11.5 }} onClick={(event) => event.stopPropagation()}>
@@ -159,7 +166,8 @@ export function TagPopover({
 							<span className="mono" style={{ fontSize: 9.5, color: "var(--fainter)" }}>{tag.count || ""}</span>
 						</label>
 					);
-				})}
+					})}
+				</div>)}
 				{needle && !existing && <button type="button" disabled={busy !== null} onClick={() => void toggleTag(needle, true)} style={{ display: "flex", alignItems: "center", gap: 7, minHeight: 30, padding: "0 7px", marginTop: 3, border: "1px solid var(--line)", borderRadius: 4, background: "transparent", color: "var(--text-dim)", cursor: "pointer", textAlign: "left", font: "inherit", fontSize: 11.5 }}>＋ Create “{needle}”</button>}
 				{!needle && visible.length === 0 && <span style={{ padding: "7px", color: "var(--faint)", fontSize: 11 }}>No tags yet</span>}
 			</div>

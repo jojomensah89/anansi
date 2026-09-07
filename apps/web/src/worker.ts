@@ -38,7 +38,7 @@ export async function runAiSchedule(env: WorkerBindings): Promise<void> {
           if (env.VECTORIZE) await env.VECTORIZE.upsert([{ id: item.id, values }]);
           await db.insert(itemEmbeddings).values({ itemId: item.id, vectorId: item.id, model: settings.embeddingModel, dimensions: values.length, contentHash: job.contentHash, status: "complete", createdAt: Math.floor(Date.now()/1000), updatedAt: Math.floor(Date.now()/1000) }).onConflictDoUpdate({ target: itemEmbeddings.itemId, set: { vectorId: item.id, model: settings.embeddingModel, dimensions: values.length, contentHash: job.contentHash, status: "complete", updatedAt: Math.floor(Date.now()/1000), lastError: null } });
         } else {
-          const labels = await generateTags(env.AI, settings.tagModel, text);
+          const labels = await generateTags(env.AI, settings.tagModel, text, 3);
           await applyAiTags(db, item.id, labels, settings.tagModel);
         }
         await completeAiJob(db, job.id, job.token);

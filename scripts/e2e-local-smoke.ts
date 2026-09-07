@@ -212,7 +212,8 @@ try {
 
   const lexical = await api<{ items: Array<{ id: string; tags: Array<{ label: string }> }>; semantic: { applied: boolean } }>("/api/search?q=keyword%20search&limit=5", libraryToken);
   const lexicalHit = lexical.items.find((item) => item.id === ingest.itemId);
-  if (!lexicalHit || lexicalHit.tags.length === 0) throw new Error("FTS5 result did not include persisted AI tags");
+  const canonical = new Set(["Web Dev", "AI / ML", "Marketing", "Design", "Startups", "Product", "Career", "DevOps", "Security", "Finance", "Health"]);
+  if (!lexicalHit || lexicalHit.tags.length === 0 || lexicalHit.tags.some((tag) => !canonical.has(tag.label))) throw new Error("FTS5 result did not include only canonical AI topics");
   const semantic = await api<{ items: Array<{ id: string }>; semantic: { applied: boolean } }>("/api/search?q=conceptual%20discovery%20from%20saved%20links&limit=5", libraryToken);
   if (!semantic.semantic.applied || !semantic.items.some((item) => item.id === ingest.itemId)) throw new Error("semantic search did not return the synthetic bookmark");
 

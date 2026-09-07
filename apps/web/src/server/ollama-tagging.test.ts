@@ -9,10 +9,10 @@ describe("Ollama tagging provider", () => {
 			model: "qwen-test",
 			fetch: async (_input, init) => {
 				request = JSON.parse(String(init?.body)) as Record<string, unknown>;
-				return Response.json({ model: "qwen-test", message: { content: '{"tags":["SQLite", "MCP Server"]}' } });
+				return Response.json({ model: "qwen-test", message: { content: '{"tags":["web-dev", "AI / ML"]}' } });
 			},
 		});
-		expect(await provider.generateTags("SQLite and MCP")).toEqual(["sqlite", "mcp server"]);
+		expect(await provider.generateTags("SQLite and MCP")).toEqual(["web-dev", "ai-ml"]);
 		expect(request).toMatchObject({ model: "qwen-test", stream: false, think: false, options: { temperature: 0 } });
 		expect(request?.format).toMatchObject({ type: "object", required: ["tags"] });
 	});

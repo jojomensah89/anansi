@@ -114,6 +114,7 @@ export interface AiSettingsResponse {
   available: boolean;
   capabilities?: { semanticSearch: boolean; autoTagging: boolean };
   runtime?: "ollama" | "cloudflare" | "none";
+  taxonomyVersion: string;
 }
 
 export interface Collection {
@@ -188,7 +189,8 @@ export interface SourcesResponse {
 
 export const api = {
 	ai: (signal?: AbortSignal) => get<AiSettingsResponse>("/api/ai", signal),
-	updateAi: (body: { semanticSearchEnabled?: boolean; autoTaggingEnabled?: boolean }) => send<AiSettingsResponse>("/api/ai", "PATCH", body),
+  updateAi: (body: { semanticSearchEnabled?: boolean; autoTaggingEnabled?: boolean }) => send<AiSettingsResponse>("/api/ai", "PATCH", body),
+  reclassifyAiTags: () => post<{ taxonomyVersion: string; progress: AiSettingsResponse["progress"] }>("/api/ai/reclassify", {}),
   stats: (signal?: AbortSignal) =>
     get<{
       items: number;
@@ -215,7 +217,7 @@ export const api = {
   },
 
   tags: (signal?: AbortSignal) =>
-    get<{ tags: { label: string; color: string; count: number }[] }>("/api/tags", signal),
+    get<{ tags: { label: string; color: string; count: number; kind: "topic" | "custom" }[] }>("/api/tags", signal),
 
   archive: (ids: string[], archived = true) => post("/api/items/archive", { ids, archived }),
   tag: (ids: string[], label: string) => post("/api/items/tag", { ids, label }),

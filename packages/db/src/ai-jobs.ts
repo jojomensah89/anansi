@@ -1,6 +1,7 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { aiEnrichmentJobs, aiSettings, itemEmbeddings, itemTagOverrides, itemTags, items, tags } from "./schema.ts";
 import type { AnansiDb } from "./types.ts";
+import { canonicalizeTopicIds, topicDefinition } from "./topics.ts";
 
 export type AiJobKind = "embedding" | "tagging";
 export type AiJob = typeof aiEnrichmentJobs.$inferSelect & { token: string };
@@ -130,19 +131,32 @@ export async function aiProgress(db: AnansiDb, kind?: AiJobKind) {
   return { pending: Number(row?.pending ?? 0), failed: Number(row?.failed ?? 0), complete: Number(row?.complete ?? 0) };
 }
 
-/** Apply a bounded AI label set without overriding manual intent. */
+/** Clears AI topic assignments and reopens tagging jobs for a fresh taxonomy pass. */
+export async function reclassifyAiTopics(db: AnansiDb): Promise<number> {
+	const removed = await db.delete(itemTags).where(eq(itemTags.provenance, "ai")).run();
+	await db.run(sql`DELETE FROM tags WHERE origin = 'ai' AND kind = 'custom' AND NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.tag_id = tags.id)`);
+	await db.update(aiEnrichmentJobs).set({ status: "pending", attempts: 0, nextRunAt: 0, leaseUntil: 0, claimToken: null, lastError: null, updatedAt: Math.floor(Date.now() / 1000) }).where(eq(aiEnrichmentJobs.kind, "tagging"));
+	return Number((removed as { changes?: number }).changes ?? 0);
+}
+
+/** Apply canonical AI topics without overriding manual intent or suppression. */
 export async function applyAiTags(db: AnansiDb, itemId: string, labels: string[], model: string, now = Math.floor(Date.now() / 1000)) {
-  for (const raw of [...new Set(labels)]) {
-    const label = raw.trim().toLowerCase();
-    if (!label) continue;
-    const [existing] = await db.select().from(tags).where(eq(tags.label, label)).limit(1);
-    const tagId = existing?.id ?? `ai-${label}`;
-    if (existing?.origin === "manual") continue;
-    const [suppressed] = await db.select().from(itemTagOverrides).where(and(eq(itemTagOverrides.itemId, itemId), eq(itemTagOverrides.tagId, tagId), eq(itemTagOverrides.override, "suppressed"))).limit(1);
-    if (suppressed) continue;
-    await db.insert(tags).values({ id: tagId, label, origin: "ai" }).onConflictDoNothing();
-    await db.insert(itemTags).values({ itemId, tagId, provenance: "ai", model, appliedAt: now }).onConflictDoNothing();
-  }
+	const topicIds = canonicalizeTopicIds(labels, 3);
+	await db.delete(itemTags).where(and(eq(itemTags.itemId, itemId), eq(itemTags.provenance, "ai")));
+	for (const topicId of topicIds) {
+		const topic = topicDefinition(topicId);
+		if (!topic) continue;
+		const tagId = `topic:${topic.id}`;
+		const [existing] = await db.select().from(tags).where(eq(tags.id, tagId)).limit(1);
+		if (!existing) {
+			await db.insert(tags).values({ id: tagId, label: topic.label, color: topic.color, origin: "ai", kind: "topic" }).onConflictDoNothing();
+		} else if (existing.kind !== "topic") {
+			await db.update(tags).set({ kind: "topic", color: topic.color }).where(eq(tags.id, tagId));
+		}
+		const [suppressed] = await db.select().from(itemTagOverrides).where(and(eq(itemTagOverrides.itemId, itemId), eq(itemTagOverrides.tagId, tagId), eq(itemTagOverrides.override, "suppressed"))).limit(1);
+		if (suppressed) continue;
+		await db.insert(itemTags).values({ itemId, tagId, provenance: "ai", model, appliedAt: now }).onConflictDoNothing();
+	}
 }
 
 export { aiEnrichmentJobs, aiSettings, itemEmbeddings };

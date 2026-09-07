@@ -3,6 +3,7 @@ import { highlights, itemTagOverrides, itemTags, items, media, sourceSettings, t
 import type { AnansiDb, NewDbItem } from "./types.ts";
 import { atomicWrite, type AtomicStatement } from "./atomic.ts";
 import { visibleSourceClause } from "./visibility.ts";
+import { canonicalTopicId, topicDefinition } from "./topics.ts";
 
 export type CaptureOrigin =
   | "platform_event"
@@ -302,29 +303,30 @@ export async function setArchived(
  * ever written to them. This is what fills them.
  */
 export async function tagItems(db: AnansiDb, ids: string[], label: string): Promise<number> {
-  const clean = label.trim().toLowerCase();
-  if (ids.length === 0 || !clean) return 0;
+	const topic = topicDefinition(canonicalTopicId(label) ?? "");
+	const clean = topic?.label ?? label.trim().toLowerCase();
+	if (ids.length === 0 || !clean) return 0;
 
-  const existing = await db.select({ id: tags.id, color: tags.color }).from(tags).where(eq(tags.label, clean)).limit(1);
-  const tagId = existing[0]?.id ?? crypto.randomUUID();
-  if (!existing[0]) {
-    await db.insert(tags).values({ id: tagId, label: clean, color: randomTagColor(), origin: "manual" }).onConflictDoNothing();
-  }
+	const existing = await db.select({ id: tags.id, color: tags.color, kind: tags.kind }).from(tags).where(eq(tags.label, clean)).limit(1);
+	const tagId = existing[0]?.id ?? (topic ? `topic:${topic.id}` : crypto.randomUUID());
+	if (!existing[0]) {
+		await db.insert(tags).values({ id: tagId, label: clean, color: topic?.color ?? randomTagColor(), origin: "manual", kind: topic ? "topic" : "custom" }).onConflictDoNothing();
+	}
 
-  for (let i = 0; i < ids.length; i += 200) {
-    await db.delete(itemTagOverrides).where(and(inArray(itemTagOverrides.itemId, ids.slice(i, i + 200)), eq(itemTagOverrides.tagId, tagId)));
-    await db
-      .insert(itemTags)
-      .values(ids.slice(i, i + 200).map((itemId) => ({ itemId, tagId })))
-      .onConflictDoNothing();
-  }
-  return ids.length;
+	for (let i = 0; i < ids.length; i += 200) {
+		await db.delete(itemTagOverrides).where(and(inArray(itemTagOverrides.itemId, ids.slice(i, i + 200)), eq(itemTagOverrides.tagId, tagId)));
+		await db
+			.insert(itemTags)
+			.values(ids.slice(i, i + 200).map((itemId) => ({ itemId, tagId, provenance: "manual", model: null, appliedAt: null })))
+			.onConflictDoUpdate({ target: [itemTags.itemId, itemTags.tagId], set: { provenance: "manual", model: null, appliedAt: null } });
+	}
+	return ids.length;
 }
 
 /** Tags that exist, with how many items carry each. */
 export async function listTags(db: AnansiDb) {
-  return db.all<{ label: string; color: string; count: number }>(sql`
-    select t.label as label, t.color as color, count(it.item_id) as count
+	return db.all<{ label: string; color: string; count: number; kind: "topic" | "custom" }>(sql`
+    select t.label as label, t.color as color, t.kind as kind, count(it.item_id) as count
     from tags t left join item_tags it on it.tag_id = t.id
       and exists (select 1 from items visible_item where visible_item.id = it.item_id and ${visibleSourceClause(sql`visible_item.source`)})
     group by t.id order by count desc, t.label asc

@@ -154,6 +154,8 @@ export const tags = sqliteTable("tags", {
   color: text("color").notNull().default("#6b7280"),
   /** 'ai' | 'manual' */
   origin: text("origin").notNull(),
+  /** 'topic' for the canonical AI taxonomy, otherwise 'custom'. */
+  kind: text("kind").notNull().default("custom"),
 });
 
 export const itemTags = sqliteTable(
