@@ -46,6 +46,14 @@ const mediaDir = process.env.ANANSI_MEDIA_DIR ?? "data/media";
 const media = { dir: mediaDir };
 const ollamaModel = process.env.OLLAMA_EMBEDDING_MODEL ?? "embeddinggemma";
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
+try {
+  const ollamaHost = new URL(ollamaBaseUrl).hostname.toLowerCase();
+  if (!(ollamaHost === "127.0.0.1" || ollamaHost === "localhost" || ollamaHost === "[::1]" || ollamaHost === "::1")) {
+    console.warn("  warning: OLLAMA_BASE_URL is not loopback; bookmark text will leave this machine");
+  }
+} catch {
+  // The provider emits the actionable configuration error below.
+}
 const semanticCachePath = process.env.ANANSI_SEMANTIC_DB_PATH ?? join(dirname(dbPath), "semantic", "ollama.sqlite");
 const ollamaProvider = createOllamaEmbeddingProvider({ model: ollamaModel, baseUrl: ollamaBaseUrl });
 const semanticCache = openLocalSemanticCache(semanticCachePath, ollamaModel);
