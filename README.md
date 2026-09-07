@@ -220,9 +220,25 @@ bunx alchemy login --configure   # run from packages/infra
 
 Server secrets (same `.env` keys as local):
 
+Generate three independent secrets. On Windows PowerShell:
+
+```powershell
+$library = (openssl rand -hex 32).Trim()
+$ingest = (openssl rand -hex 32).Trim()
+$mcp = (openssl rand -hex 32).Trim()
+"LIBRARY_TOKEN=$library"
+"INGEST_TOKEN=$ingest"
+"MCP_TOKEN=$mcp"
+```
+
+On macOS/Linux, run `openssl rand -hex 32` three times. Paste the three
+outputs into `.env`:
+
 ```bash
 cp .env.example .env
-# Set LIBRARY_TOKEN, INGEST_TOKEN, MCP_TOKEN — independent random secrets.
+# LIBRARY_TOKEN=<first output>
+# INGEST_TOKEN=<second output>
+# MCP_TOKEN=<third output>
 # Never put them in VITE_* vars or commit them.
 bun run deploy   # turbo → @anansi/infra → alchemy deploy
 ```
