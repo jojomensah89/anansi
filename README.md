@@ -124,6 +124,14 @@ offline contract testing only. The remote Workers AI/Vectorize check is
 separate and documented in
 `docs/superpowers/plans/2026-09-07-alchemy-semantic-smoke-runbook.md`.
 
+To force a rebuild, stop the local server and remove only the sidecar (the
+canonical library database is separate), then start Anansi again:
+
+```powershell
+Remove-Item -LiteralPath .\data\semantic\ollama.sqlite
+bun run dev:local
+```
+
 ### B. Cloudflare — your account, ~$0 (preview, not yet verified)
 
 > ⚠️ The hosted path is the intended shape — one Worker, one D1, one R2, deployed with `bun run deploy` — but no clean-account deploy has succeeded yet. Treat this section as the plan, not instructions. First verified deploy will turn it into real steps.
