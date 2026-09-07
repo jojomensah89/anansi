@@ -47,7 +47,10 @@ export async function reconcileAiJobs(db: AnansiDb, limit = 100, embeddingModel?
   const settings = await getAiSettings(db);
   if (!settings.semanticSearchEnabled && !settings.autoTaggingEnabled) return 0;
   const wantedKinds = new Set(onlyKinds ?? ["embedding", "tagging"]);
-  const rows = await db.select().from(items).orderBy(items.savedAt).limit(500);
+	// Scan the complete library when reconciling. The insertion cap below keeps
+	// each pass bounded, but limiting this read to the first 500 rows strands
+	// newer items forever once those rows already have jobs.
+	const rows = await db.select().from(items).orderBy(items.savedAt);
   const existing = new Set((await db.select({ id: aiEnrichmentJobs.id }).from(aiEnrichmentJobs)).map((job) => job.id));
   let inserted = 0;
   const now = Math.floor(Date.now() / 1000);
