@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyAiTags, itemTags, items, removeItemTag, tags, type AnansiDb, setAiSettings, tagItems, upsertItems } from "@anansi/db";
+import { aiEnrichmentJobs, applyAiTags, itemTags, items, removeItemTag, tags, type AnansiDb, setAiSettings, tagItems, upsertItems } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { AiProviderError } from "./ai.ts";
 import { createLocalTaggingWorker } from "./local-tagging-worker.ts";
@@ -46,6 +46,18 @@ describe("local tagging worker", () => {
 			{ label: "sqlite", provenance: "ai", model: "qwen-test" },
 		]);
 		expect((await worker.status()).complete).toBe(1);
+	});
+
+	test("reconciles tagging jobs without creating duplicate embedding jobs", async () => {
+		const { db } = setup();
+		await addItem(db, "tagging-only-item");
+		await setAiSettings(db, { semanticSearchEnabled: true, autoTaggingEnabled: true });
+		const worker = createLocalTaggingWorker(db, {
+			model: "qwen-test",
+			generateTags: async () => ["sqlite"],
+		});
+		await worker.runOnce();
+		expect((await db.select().from(aiEnrichmentJobs)).map((job) => job.kind)).toEqual(["tagging"]);
 	});
 
 	test("does not override manual tags or suppressed AI assignments", async () => {

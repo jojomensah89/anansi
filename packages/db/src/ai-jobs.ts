@@ -42,17 +42,18 @@ export async function setAiSettings(db: AnansiDb, patch: { semanticSearchEnabled
 }
 
 /** Reconciles changed items without calling a remote provider. */
-export async function reconcileAiJobs(db: AnansiDb, limit = 100, embeddingModel?: string): Promise<number> {
+export async function reconcileAiJobs(db: AnansiDb, limit = 100, embeddingModel?: string, onlyKinds?: AiJobKind[]): Promise<number> {
   const settings = await getAiSettings(db);
   if (!settings.semanticSearchEnabled && !settings.autoTaggingEnabled) return 0;
+  const wantedKinds = new Set(onlyKinds ?? ["embedding", "tagging"]);
   const rows = await db.select().from(items).orderBy(items.savedAt).limit(500);
   const existing = new Set((await db.select({ id: aiEnrichmentJobs.id }).from(aiEnrichmentJobs)).map((job) => job.id));
   let inserted = 0;
   const now = Math.floor(Date.now() / 1000);
   for (const item of rows) {
     const kinds: AiJobKind[] = [];
-    if (settings.semanticSearchEnabled) kinds.push("embedding");
-    if (settings.autoTaggingEnabled) kinds.push("tagging");
+    if (settings.semanticSearchEnabled && wantedKinds.has("embedding")) kinds.push("embedding");
+    if (settings.autoTaggingEnabled && wantedKinds.has("tagging")) kinds.push("tagging");
     for (const kind of kinds) {
       const hash = await contentHash(kind === "embedding" ? semanticText(item) : searchableText(item));
       // Embedding vectors live in a model-specific vector space. Include the

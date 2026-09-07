@@ -87,7 +87,7 @@ Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** �
 
 GitHub first import: sign in to GitHub in the same browser profile → popup → **Import** beside GitHub. It walks your stars pages in the worker (no tabs open), persists the pagination cursor, and resumes after interruptions. Unstarring hides from current-star view without deleting history; re-starring restores it.
 
-### Developer-only local semantic search
+### Developer-only local AI search and tagging
 
 The hosted path uses the existing Cloudflare Workers AI and Vectorize bindings;
 hosted users only enable Semantic search in Settings. A local model is not
@@ -156,18 +156,30 @@ for EmbeddingGemma). A clone-to-working semantic setup is:
    only want to run the synthetic smoke test; it is required to capture new
    browser bookmarks.
 
+Local keyword search remains available without Ollama. It uses SQLite FTS5 with
+BM25 ranking: terms are quoted and implicitly ANDed, English stemming is
+enabled, a trailing `*` performs prefix matching, quoted text is a phrase, and
+misspellings are not fuzzy-matched. Semantic search adds an optional vector
+candidate set and keeps the keyword page when the local index is warming or
+unavailable.
+
 Before using private bookmarks, validate the complete local path with synthetic
 data:
 
 ```powershell
 bun run semantic:ollama
+bun run ai:tagging:ollama
+bun run e2e:local
 ```
 
 The check should report an observed dimension (768 for the default model) and
 `"expectedSemanticOnlyMatch": true`. This proves the local provider, sidecar,
 hybrid ranking, and filtering path; it does not prove a hosted Cloudflare
-deployment or MCP/CLI semantic search. The command never uses private captures
-or Cloudflare credentials.
+deployment or MCP/CLI semantic search. `bun run e2e:local` is the stronger
+opt-in local acceptance: it uses a temporary SQLite database to exercise
+authenticated ingest/idempotency, Ollama tagging and embeddings, FTS5, the
+semantic API, extension configuration, and HTTP plus stdio MCP. These commands
+never use private captures or Cloudflare credentials.
 
 Change `OLLAMA_EMBEDDING_MODEL` in `.env` to try `nomic-embed-text` (smaller,
 English-focused) or `nomic-embed-text-v2-moe` (larger, multilingual) instead;
@@ -269,9 +281,9 @@ Streamable HTTP MCP server at `http://127.0.0.1:3001/mcp` locally (or `https://<
 | `recent_saves` | Newest saved items |
 | `find_by_author` | Items from one author |
 
-MCP and CLI search remain keyword/BM25 paths until they are separately wired
-to the hybrid orchestration and acceptance-tested; the local semantic smoke
-does not prove those interfaces.
+The optional `source` filter accepts visible `x`, `reddit`, `github`, and `web`
+items. TikTok rows remain hidden while that source is paused. MCP search is
+keyword/BM25 today; it does not claim the web UI's optional semantic ranking.
 
 Claude Code:
 
@@ -319,6 +331,7 @@ packages/sources/  Shared capture contracts and source parsers
 packages/ui/       Shared UI components and styles
 packages/infra/    Cloudflare infrastructure and deployment resources
 packages/env/      Typed runtime environment bindings
+scripts/            Explicit local smoke and development entrypoints
 ```
 
 ```text
@@ -370,8 +383,7 @@ Covers queue recovery, retries, parser fixtures, authenticated ingest, GitHub im
 
 ## 🗺️ Roadmap
 
-- [ ] 🔍 Cloudflare semantic-search acceptance — hosted bindings are provisioned and the hybrid BM25 + vector path is implemented; clean-account/provider evidence remains pending
-- [ ] 🤖 AI tagging via Workers AI — suggestions stored with `origin: 'ai'` so manual tags stay authoritative (10k neurons/day free; backfill paced over days)
+- [ ] 🔍 Cloudflare AI-enrichment acceptance — local Ollama tagging/semantic search and the HTTP/stdio MCP paths are exercised; clean-account/provider evidence remains pending
 - [ ] 🗂️ Collections v2 — curated hand-picked lists alongside today's saved filter views
 - [ ] First clean-account deploy: install → migrate → first capture → search → export → restore against Cloudflare
 - [ ] Measured free-tier usage + media-host allowlist published here

@@ -50,7 +50,7 @@ export function createLocalSemanticWorker(
 				return;
 			}
 			cache.replaceGeneration(provider.model);
-			await reconcileAiJobs(db, Math.max(batchSize, 1) * 4, provider.model);
+			await reconcileAiJobs(db, Math.max(batchSize, 1) * 4, provider.model, ["embedding"]);
 			// A sidecar can be removed or rebuilt independently of the canonical
 			// database. Reopen completed jobs whose current projection is absent (or
 			// stale), and drop stale vectors before they can affect search.

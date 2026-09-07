@@ -17,6 +17,7 @@ import { MCP_TOOL_CATALOG } from "./catalog.ts";
 
 /** Excerpts, never full bodies: ten full posts would blow a context window. */
 const EXCERPT_LIMIT = 300;
+const MCP_SOURCES = z.enum(["x", "reddit", "github", "web"]);
 
 function trim(text: string): string {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -77,7 +78,8 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
     {
       title: "Search saved posts",
       description:
-        "Keyword search across everything the user has saved from X and GitHub. " +
+        "Keyword search across every visible saved item from X, Reddit, GitHub, " +
+        "and web pages. " +
         "Returns excerpts with a source URL, ranked by BM25 (negative; lower is " +
         "better). Use this first, then get_item to pull one result into context. " +
         "Matching is keyword-based with English stemming and no fuzziness, so a " +
@@ -85,7 +87,7 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
         "back empty, try a likely correction or a broader single term.",
       inputSchema: {
         query: z.string().describe("Words to search for. A trailing * does prefix matching."),
-        source: z.enum(["x", "github"]).optional(),
+        source: MCP_SOURCES.optional(),
         author: z.string().optional().describe("Restrict to one handle."),
         since: z.string().optional().describe("ISO date; only posts newer than this."),
         limit: z.number().int().min(1).max(50).default(10),
@@ -129,7 +131,7 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
         "were saved — saved_at_is_exact says which. The ordering is correct " +
         "regardless; the timestamps are not yet.",
       inputSchema: {
-        source: z.enum(["x", "github"]).optional(),
+        source: MCP_SOURCES.optional(),
         limit: z.number().int().min(1).max(50).default(20),
       },
     },

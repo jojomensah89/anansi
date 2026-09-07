@@ -6,7 +6,7 @@ export const MCP_TOOL_CATALOG = [
   {
     name: "search_memory",
     title: "Search saved posts",
-    summary: "Search the saved library and return ranked excerpts with source URLs.",
+    summary: "Search visible saved items and return ranked excerpts with source URLs.",
   },
   {
     name: "get_item",
@@ -16,7 +16,7 @@ export const MCP_TOOL_CATALOG = [
   {
     name: "recent_saves",
     title: "Recently saved",
-    summary: "List the newest saved items in their bookmark order.",
+    summary: "List the newest visible saved items in their bookmark order.",
   },
   {
     name: "find_by_author",

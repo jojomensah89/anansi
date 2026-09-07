@@ -33,7 +33,7 @@ export function createLocalTaggingWorker(
 		try {
 			const settings = await getAiSettings(db);
 			if (!settings.autoTaggingEnabled) return;
-			await reconcileAiJobs(db, Math.max(batchSize, 1) * 4);
+			await reconcileAiJobs(db, Math.max(batchSize, 1) * 4, undefined, ["tagging"]);
 			const canonicalItems = await db.select().from(items);
 			const jobs = await claimAiJobs(db, "tagging", Math.min(Math.max(batchSize, 1), 20));
 			for (const job of jobs) {
