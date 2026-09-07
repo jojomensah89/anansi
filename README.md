@@ -94,31 +94,72 @@ hosted users only enable Semantic search in Settings. A local model is not
 required for installation, `bun run dev:local`, or deployment.
 
 For the local web UI, install [Ollama](https://ollama.com/download) (0.11.10+
-for EmbeddingGemma), then pull the documented embedding model once:
+for EmbeddingGemma). A clone-to-working semantic setup is:
 
-```bash
-ollama pull embeddinggemma
-```
+1. Confirm the tools are available:
 
-Start Anansi normally with `bun run dev:local`, enable **AI semantic search**
-from Settings, and search the library. Anansi calls Ollama on
-`http://127.0.0.1:11434` from the local server and stores vectors in the ignored
-SQLite sidecar at `data/semantic/ollama.sqlite`. New bookmarks are saved and
-keyword-searchable immediately; semantic indexing catches up in the background.
-If Ollama is stopped or the model is missing, the UI says so and continues with
-BM25 keyword results.
+   ```powershell
+   bun --version       # 1.3+
+   ollama --version    # 0.11.10+ for EmbeddingGemma
+   ollama list
+   ```
 
-To validate the real local provider, sidecar, and hybrid search path against a
-synthetic corpus, opt in explicitly:
+2. Install Anansi's dependencies and create the local environment if you have
+   not already done so:
 
-```bash
+   ```powershell
+   bun install
+   Copy-Item .env.example .env
+   ```
+
+   Keep the existing local authentication values in `.env`; Ollama settings
+   are server-side values and must not be renamed to `VITE_*` variables.
+
+3. Pull the embedding model once:
+
+   ```powershell
+   ollama pull embeddinggemma
+   ```
+
+4. Make sure the Ollama daemon is running. The Ollama desktop app normally
+   does this; if it is not running, start it with `ollama serve` in another
+   terminal.
+
+5. Start Anansi:
+
+   ```powershell
+   bun run dev:local
+   ```
+
+   Open `http://127.0.0.1:3001`, go to **Settings**, and enable **AI semantic
+   search**. Automatic tags are intentionally disabled in local mode because
+   they remain a hosted Cloudflare feature.
+
+6. Build/load the extension from the main Quickstart steps, import a few
+   bookmarks, and search using a concept rather than an exact keyword. Anansi
+   calls Ollama on `http://127.0.0.1:11434` from the local server and stores
+   vectors in the ignored SQLite sidecar at `data/semantic/ollama.sqlite`. New
+   bookmarks are saved and keyword-searchable immediately; semantic indexing
+   catches up in the background. If Ollama is stopped or the model is missing,
+   the UI says so and continues with BM25 keyword results.
+
+Before using private bookmarks, validate the complete local path with synthetic
+data:
+
+```powershell
 bun run semantic:ollama
 ```
 
-The command never uses private captures or Cloudflare credentials. Change
-`OLLAMA_EMBEDDING_MODEL` in `.env` to try `nomic-embed-text` (smaller,
+The check should report an observed dimension (768 for the default model) and
+`"expectedSemanticOnlyMatch": true`. This proves the local provider, sidecar,
+hybrid ranking, and filtering path; it does not prove a hosted Cloudflare
+deployment or MCP/CLI semantic search. The command never uses private captures
+or Cloudflare credentials.
+
+Change `OLLAMA_EMBEDDING_MODEL` in `.env` to try `nomic-embed-text` (smaller,
 English-focused) or `nomic-embed-text-v2-moe` (larger, multilingual) instead;
-changing models creates a fresh local index generation. The
+run `ollama pull <model>` before restarting, and changing models creates a
+fresh local index generation. The
 existing `bun run semantic:local` Transformers.js smoke remains available for
 offline contract testing only. The remote Workers AI/Vectorize check is
 separate and documented in
@@ -131,6 +172,19 @@ canonical library database is separate), then start Anansi again:
 Remove-Item -LiteralPath .\data\semantic\ollama.sqlite
 bun run dev:local
 ```
+
+Common fixes:
+
+- **“Ollama is unavailable”** — run `ollama list`, start `ollama serve`, and
+  retry the search. BM25 remains available while Ollama is down.
+- **Model not found** — run `ollama pull embeddinggemma`, or make
+  `OLLAMA_EMBEDDING_MODEL` match a model shown by `ollama list`.
+- **Index warming** — leave the local server running; jobs are processed in the
+  background. A model change or sidecar removal intentionally starts a fresh
+  generation.
+- **Remote Ollama URL** — this is an explicit developer override; Anansi prints
+  a warning because bookmark text will leave the machine. The default is
+  loopback.
 
 ### B. Cloudflare — your account, ~$0 (preview, not yet verified)
 
