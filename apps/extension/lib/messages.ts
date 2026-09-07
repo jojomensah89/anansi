@@ -73,6 +73,7 @@ export type PageEventMessage = PageTrafficBase &
 		| {
 				anansi: "page-event";
 				action: "page";
+				runId?: string;
 				raw: unknown;
 				page: number;
 				items: number;
@@ -96,12 +97,20 @@ export type PageEventMessage = PageTrafficBase &
 				/** The object itself, when the page could look it up. */
 				raw?: unknown;
 		  }
-		| { anansi: "page-event"; action: "done"; pages: number; items: number }
+		| {
+				anansi: "page-event";
+				action: "done";
+				runId?: string;
+				pages: number;
+				items: number;
+				state?: "complete" | "limited" | "cancelled";
+			}
 		| { anansi: "page-event"; action: "scanned" }
 		| { anansi: "page-event"; action: "identified"; handle: string }
 		| {
 				anansi: "page-event";
 				action: "error";
+				runId?: string;
 				errorCode:
 					| "platform_request_failed"
 					| "not_signed_in"
@@ -140,6 +149,7 @@ export type PopupCommandMessage = MessageBase &
 export type PageCommandMessage = PageTrafficBase & {
 	anansi: "page-command";
 	action: "configure" | "backfill" | "identify" | "scan";
+	runId?: string;
 	config: Record<string, unknown>;
 };
 
@@ -391,6 +401,10 @@ function isNonce(value: unknown): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(value);
 }
 
+function isRunId(value: unknown): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9:_-]{1,200}$/.test(value);
+}
+
 function isNonNegativeInteger(value: unknown): value is number {
 	return Number.isSafeInteger(value) && Number(value) >= 0;
 }
@@ -437,7 +451,8 @@ function validatePageEventShape(
 			);
 		case "page":
 			return (
-				hasOnlyKeys(value, [...base, "raw", "page", "items", "cursor"]) &&
+				hasOnlyKeys(value, [...base, "runId", "raw", "page", "items", "cursor"]) &&
+				(source !== "x" || isRunId(value.runId)) &&
 				Object.hasOwn(value, "raw") &&
 				isPositiveInteger(value.page) &&
 				isNonNegativeInteger(value.items) &&
@@ -459,13 +474,19 @@ function validatePageEventShape(
 			return hasOnlyKeys(value, [...base, "handle"]) && isHandle(value.handle);
 		case "done":
 			return (
-				hasOnlyKeys(value, [...base, "pages", "items"]) &&
+				hasOnlyKeys(value, [...base, "runId", "pages", "items", "state"]) &&
+				(source !== "x" || isRunId(value.runId)) &&
 				isNonNegativeInteger(value.pages) &&
-				isNonNegativeInteger(value.items)
+				isNonNegativeInteger(value.items) &&
+				(value.state === undefined ||
+					value.state === "complete" ||
+					value.state === "limited" ||
+					value.state === "cancelled")
 			);
 		case "error":
 			return (
-				hasOnlyKeys(value, [...base, "errorCode"]) &&
+				hasOnlyKeys(value, [...base, "runId", "errorCode"]) &&
+				(source !== "x" || isRunId(value.runId)) &&
 				typeof value.errorCode === "string" &&
 				ERROR_CODES.has(value.errorCode)
 			);
@@ -510,6 +531,7 @@ function validatePageCommandShape(
 			"source",
 			"nonce",
 			"action",
+			"runId",
 			"config",
 		]) ||
 		!isRecord(value.config) ||
@@ -517,7 +539,14 @@ function validatePageCommandShape(
 	) {
 		return false;
 	}
-	return value.config.source === undefined || value.config.source === source;
+	const runIdValid =
+		source === "x" && value.action === "backfill"
+			? isRunId(value.runId)
+			: value.runId === undefined || isRunId(value.runId);
+	return (
+		runIdValid &&
+		(value.config.source === undefined || value.config.source === source)
+	);
 }
 
 function validatePopupCommandShape(

@@ -30,14 +30,24 @@ import {
 } from "../lib/messages.ts";
 import { capturablePage, type PageDetails, readPage, toWebCapture, UNSUPPORTED_MESSAGES } from "../lib/page-capture.ts";
 import { tweetUrl } from "../lib/platforms/x.ts";
-import { SYNC_ALARM, scheduleDailyCatchUp } from "../lib/schedule.ts";
+import {
+  SYNC_ALARM,
+  scheduleDailyCatchUp,
+  scheduleOutboxRetry,
+} from "../lib/schedule.ts";
 import { runSessionImport, SessionImportError, type SessionSource } from "../lib/session-import.ts";
+import {
+  createSourceImportLifecycle,
+  SourceImportLifecycleError,
+  type SourceImportEffect,
+  type SourceImportLifecycle,
+  type SourceImportPage,
+} from "../lib/source-import-lifecycle.ts";
 import {
   type CaptureSource,
   captureDeliveryMode,
   createSourceRuns,
   isExpectedImportTab,
-  SOURCE_RUN_LEASE_MS,
   type SourceRuns,
 } from "../lib/source-runs.ts";
 
@@ -108,7 +118,8 @@ let cachedToken: string | null = null;
 let persistent: { outbox: IndexedDbOutbox; runs: SourceRuns } | null = null;
 let durableQueue: CaptureQueue | null = null;
 let healthHeartbeat: HeartbeatClient | null = null;
-const sessionImports = new Map<SessionSource, { controller: AbortController; task: Promise<void> }>();
+const sessionImports = new Map<SessionSource, { controller: AbortController; task: Promise<void>; runId: string }>();
+let importLifecycle: SourceImportLifecycle | null = null;
 
 function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
   if (persistent) return persistent;
@@ -159,6 +170,17 @@ async function readStatus(source: string): Promise<SourceStatus> {
       message: null,
     }
   );
+}
+
+/** Status writes from an import must not outlive the run that produced them. */
+async function patchStatusForRun(
+  source: CaptureSource,
+  runId: string,
+  patch: Partial<SourceStatus>,
+): Promise<boolean> {
+  return persistentState().runs.runIfCurrent(source, runId, async () => {
+    await patchStatus(source, patch);
+  });
 }
 
 /**
@@ -294,9 +316,9 @@ async function wakeDurableQueue(includeFailed = false, source?: CaptureSource): 
 }
 
 /** Legacy direct upload, kept only while a source's captureV2 flag is off. */
-async function legacyUpload(source: string, raw: unknown): Promise<void> {
+async function legacyUpload(source: string, raw: unknown): Promise<boolean> {
   const [s, config] = await Promise.all([settings(), loadConfig()]);
-  if (!s || !config) return;
+  if (!s || !config) return false;
 
   try {
     const res = await fetch(config.ingest, {
@@ -313,6 +335,7 @@ async function legacyUpload(source: string, raw: unknown): Promise<void> {
         uploaded: current.uploaded + 1,
         message: null,
       });
+      return true;
     } else {
       // 422 is the server's zero-parse alarm. It means the payload shape
       // changed, and it must be visible rather than swallowed.
@@ -321,6 +344,7 @@ async function legacyUpload(source: string, raw: unknown): Promise<void> {
         failed: current.failed + 1,
         message: `ingest ${res.status}${detail ? `: ${detail}` : ""}`,
       });
+      return false;
     }
   } catch (err) {
     const current = await readStatus(source);
@@ -328,6 +352,7 @@ async function legacyUpload(source: string, raw: unknown): Promise<void> {
       failed: current.failed + 1,
       message: (err as Error).message,
     });
+    return false;
   }
 }
 
@@ -385,6 +410,83 @@ async function deliverRaw(
   }
 }
 
+/** Queue adapter used by the lifecycle; resolving is the durable page receipt. */
+async function enqueueImportedPage(page: SourceImportPage): Promise<void> {
+  const config = await loadConfig();
+  const delivery = captureDeliveryMode(
+    config?.ingestProtocolVersion,
+    config?.features?.captureV2,
+    page.source,
+  );
+  if (delivery === "legacy") {
+    if (!(await legacyUpload(page.source, page.raw))) {
+      throw new Error("legacy ingest rejected the capture");
+    }
+    return;
+  }
+  const capture: RawPageCapture = {
+    schemaVersion: 1,
+    payloadType: "raw_page",
+    eventId: page.eventId,
+    source: page.source,
+    action: "snapshot",
+    observedAt: Math.floor(Date.now() / 1000),
+    captureMethod: page.captureMethod,
+    runId: page.runId,
+    page: page.page,
+    ...(page.cursor ? { cursor: page.cursor } : {}),
+    raw: page.raw,
+  };
+  await queue().enqueue(capture);
+  await wakeDurableQueue().catch(() => {});
+}
+
+function sourceImportLifecycle(): SourceImportLifecycle {
+  if (importLifecycle) return importLifecycle;
+  const { runs } = persistentState();
+  importLifecycle = createSourceImportLifecycle({
+    runs,
+    enqueuePage: enqueueImportedPage,
+    flushPendingSaves,
+    isEnabled: async (source) => {
+      const config = await loadConfig(true);
+      return Boolean(config?.enabled && config.sources.some((entry) => entry.source === source));
+    },
+  });
+  return importLifecycle;
+}
+
+async function applyImportEffects(effects: SourceImportEffect[]): Promise<void> {
+  const runs = persistentState().runs;
+  for (const effect of effects) {
+    if (effect.kind === "schedule-recovery") {
+      await runs.runIfCurrent(effect.source, effect.runId, async (run) => {
+        if (run.phase !== "running") return;
+        browser.alarms.create(sourceRunRecoveryAlarm(effect.source), {
+          when: effect.at,
+        });
+      });
+    } else if (effect.kind === "clear-recovery") {
+      await runs.runIfCurrent(effect.source, effect.runId, async () => {
+        await clearSourceRunRecovery(effect.source);
+      });
+    } else if (effect.kind === "close-owned-tab") {
+      // takeOwnedTabForRun is itself fenced and consumes the ownership before
+      // the browser call. A stale close can therefore only release the tab
+      // recorded for its own run (or its persisted orphan), never a replacement.
+      await closeOwnedTab(effect.source, effect.runId, effect.expectedTabId);
+    } else if (effect.kind === "process-pending-refresh") {
+      // claimRefresh rechecks each source under the shared serialized tail;
+      // there is no separate check whose result could go stale here.
+      await processPendingRefreshes();
+    } else {
+      await runs.runIfCurrent(effect.source, effect.runId, async () => {
+        await patchStatus(effect.source, effect.patch as Partial<SourceStatus>);
+      });
+    }
+  }
+}
+
 /**
  * Deliver one precise save or unsave.
  *
@@ -397,7 +499,7 @@ async function deliverItemEvent(
   action: "save" | "unsave",
   externalId: string,
   canonicalUrl?: string,
-): Promise<void> {
+): Promise<boolean> {
   const mode = async (force: boolean) => {
     const config = await loadConfig(force);
     return captureDeliveryMode(config?.ingestProtocolVersion, config?.features?.captureV2, source);
@@ -427,7 +529,7 @@ async function deliverItemEvent(
           ? "unsave not recorded — this source is not enabled for precise capture on the server"
           : "save state not recorded — this source is not enabled for precise capture on the server",
     });
-    return;
+    return false;
   }
 
   const observedAt = Math.floor(Date.now() / 1000);
@@ -445,7 +547,8 @@ async function deliverItemEvent(
     canonicalUrl: canonicalUrl ?? (source === "github" ? `https://github.com/${externalId}` : tweetUrl(externalId)),
   };
   await queue().enqueue(capture);
-  await wakeDurableQueue();
+  await wakeDurableQueue().catch(() => {});
+  return true;
 }
 
 /**
@@ -481,14 +584,38 @@ async function handleBookmarkMutation(
   }
   await runs.recordPendingSave(source, externalId);
   await runs.requestRefresh(source);
-  browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
+  scheduleOutboxRetry(browser.alarms, OUTBOX_ALARM, Date.now());
 }
 
 /** Send the held saves now that the pages carrying their content are queued. */
+const pendingSaveFlushes = new Set<CaptureSource>();
+
 async function flushPendingSaves(source: CaptureSource): Promise<void> {
-  const pending = await persistentState().runs.takePendingSaves(source);
-  for (const externalId of pending) {
-    await deliverItemEvent(source, "save", externalId);
+  if (pendingSaveFlushes.has(source)) return;
+  pendingSaveFlushes.add(source);
+  try {
+    const runs = persistentState().runs;
+    const pending = await runs.takePendingSaves(source);
+    for (const externalId of pending) {
+      try {
+        if (await deliverItemEvent(source, "save", externalId)) {
+          await runs.ackPendingSave(source, externalId);
+        }
+      } catch (error) {
+        // The id stays durable until its event is queued. Ask for another
+        // small refresh so a transient queue/config failure gets retried.
+        scheduleOutboxRetry(browser.alarms, OUTBOX_ALARM, Date.now());
+        await runs.requestRefresh(source).catch(() => {});
+        await patchStatus(source, {
+          message:
+            error instanceof Error
+              ? `save state pending: ${error.message}`
+              : "save state pending; delivery will retry",
+        });
+      }
+    }
+  } finally {
+    pendingSaveFlushes.delete(source);
   }
 }
 
@@ -764,39 +891,43 @@ async function openTab(source: string, preferredUrl?: string): Promise<{ id: num
   return { id, ours: true };
 }
 
-async function closeOwnedTab(source: CaptureSource, expectedTabId?: number): Promise<void> {
-  const tabId = await persistentState().runs.takeOwnedTab(source, expectedTabId);
-  if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
+async function closeOwnedTab(
+  source: CaptureSource,
+  runId: string,
+  expectedTabId?: number,
+): Promise<void> {
+  await persistentState().runs.closeOwnedTabForRun(
+    source,
+    runId,
+    expectedTabId,
+    async (tabId) => {
+      await browser.tabs.remove(tabId).catch(() => {});
+    },
+  );
 }
 
 function sourceRunRecoveryAlarm(source: CaptureSource): string {
   return `${SOURCE_RUN_RECOVERY_ALARM_PREFIX}${source}`;
 }
 
-function scheduleSourceRunRecovery(source: CaptureSource, leaseAt: number): void {
-  browser.alarms.create(sourceRunRecoveryAlarm(source), {
-    when: Math.max(Date.now() + 100, leaseAt + SOURCE_RUN_LEASE_MS + 100),
-  });
-}
-
 function clearSourceRunRecovery(source: CaptureSource): Promise<boolean> {
   return browser.alarms.clear(sourceRunRecoveryAlarm(source));
 }
 
-async function finishRun(source: CaptureSource): Promise<void> {
-  await clearSourceRunRecovery(source);
-  await persistentState().runs.finish(source);
-  await closeOwnedTab(source);
-}
-
-async function expireOwnedRun(source: CaptureSource, expectedTabId: number): Promise<void> {
-  const runs = persistentState().runs;
-  const tabId = await runs.takeOwnedTab(source, expectedTabId);
-  if (tabId === null) return;
-  await clearSourceRunRecovery(source);
-  await runs.finish(source);
-  await browser.tabs.remove(tabId).catch(() => {});
-  await patchStatus(source, {
+async function expireOwnedRun(
+  source: CaptureSource,
+  expectedTabId: number,
+  runId: string,
+): Promise<void> {
+  const failed = await sourceImportLifecycle().fail({
+    source,
+    runId,
+    tabId: expectedTabId,
+    code: "capture_timeout",
+  });
+  if (failed.kind === "ignored-stale") return;
+  await applyImportEffects(failed.effects);
+  await patchStatusForRun(source, runId, {
     startedAt: null,
     message: "capture timed out; retry when the platform is ready",
   });
@@ -809,33 +940,37 @@ async function expireOwnedRun(source: CaptureSource, expectedTabId: number): Pro
 async function startCapture(source: string, quiet = false, live = false): Promise<void> {
   if (!isCaptureSource(source)) return;
   if ((source === "github" || source === "reddit") && sessionImports.has(source)) return;
-  const runs = persistentState().runs;
-  const begun = await runs.begin(source, live ? "live" : "full");
-  if (!begun.started) {
-    scheduleSourceRunRecovery(source, begun.run.updatedAt);
-    if (!quiet) await patchStatus(source, { message: "a capture is already running" });
+  const begun = await sourceImportLifecycle().start(source, live ? "live" : "full");
+  await applyImportEffects(
+    quiet && (begun.kind === "already-running" || begun.kind === "disabled")
+      ? begun.effects.filter((effect) => effect.kind !== "status")
+      : begun.effects,
+  );
+  if (begun.kind !== "started") {
+    if (begun.kind === "disabled") return;
+    if (quiet) return;
     return;
   }
-  scheduleSourceRunRecovery(source, begun.run.updatedAt);
+  const runId = begun.run.runId;
 
   const config = await loadConfig(true);
   if (!config?.enabled) {
-    if (!quiet) await patchStatus(source, { message: "server has capture disabled" });
-    await finishRun(source);
+    if (!quiet) await patchStatusForRun(source, runId, { message: "server has capture disabled" });
+    await applyImportEffects((await sourceImportLifecycle().stop(source, runId)).effects);
     return;
   }
 
   const entry = config.sources.find((s) => s.source === source);
   if (!entry) {
-    if (!quiet) await patchStatus(source, { message: "switched off in Sources" });
-    await finishRun(source);
+    if (!quiet) await patchStatusForRun(source, runId, { message: "switched off in Sources" });
+    await applyImportEffects((await sourceImportLifecycle().stop(source, runId)).effects);
     return;
   }
 
   if (source === "github" || source === "reddit") {
     const controller = new AbortController();
-    const task = importWithoutTab(source, begun.run.runId, entry, live, controller.signal);
-    sessionImports.set(source, { controller, task });
+    const task = importWithoutTab(source, runId, entry, live, controller.signal);
+    sessionImports.set(source, { controller, task, runId });
     try {
       await task;
     } finally {
@@ -854,15 +989,43 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   }
 
   if (!target) {
-    await finishRun(source);
-    await patchStatus(source, {
+    await applyImportEffects((await sourceImportLifecycle().fail({
+      source,
+      runId,
+      code: "platform_request_failed",
+    })).effects);
+    await patchStatusForRun(source, runId, {
       startedAt: null,
       message: `could not open ${entry.host}`,
     });
     return;
   }
   const tab = { id: target.id };
-  if (target.ours) await runs.setOwnedTab(source, tab.id);
+  // Record ownership immediately after creating our tab. If the run expires
+  // while bind/configure is waiting on the page, a replacement can orphan and
+  // close this exact tab instead of leaving it behind.
+  if (
+    target.ours &&
+    !(await persistentState().runs.setOwnedTabForRun(source, runId, tab.id))
+  ) {
+    await persistentState().runs.disposeUnclaimedTab(
+      source,
+      runId,
+      tab.id,
+      async () => {
+        await browser.tabs.remove(tab.id).catch(() => {});
+      },
+    );
+    return;
+  }
+  const bound = await sourceImportLifecycle().bindTab(
+    source,
+    runId,
+    tab.id,
+    false,
+  );
+  await applyImportEffects(bound.effects);
+  if (bound.kind === "ignored-stale") return;
 
   if (entry.mode === "observe") {
     const configure = () =>
@@ -870,13 +1033,19 @@ async function startCapture(source: string, quiet = false, live = false): Promis
         anansi: "page-command",
         messageVersion: MESSAGE_PROTOCOL_VERSION,
         source,
+        runId,
         action: "configure",
         config: entry,
       });
 
     if (!(await configure())) {
-      await finishRun(source);
-      await patchStatus(source, {
+      await applyImportEffects((await sourceImportLifecycle().fail({
+        source,
+        runId,
+        tabId: tab.id,
+        code: "platform_request_failed",
+      })).effects);
+      await patchStatusForRun(source, runId, {
         startedAt: null,
         message: `could not reach the ${entry.host} tab`,
       });
@@ -885,7 +1054,7 @@ async function startCapture(source: string, quiet = false, live = false): Promis
 
     // Nothing to request, so the capture is a scroll: the app fetches its own
     // item lists as the page grows, and those are what get kept.
-    await patchStatus(source, {
+    await patchStatusForRun(source, runId, {
       startedAt: begun.run.startedAt,
       pages: 0,
       uploaded: 0,
@@ -900,15 +1069,20 @@ async function startCapture(source: string, quiet = false, live = false): Promis
       config: entry,
     });
     if (!scanning) {
-      await finishRun(source);
-      await patchStatus(source, {
+      await applyImportEffects((await sourceImportLifecycle().fail({
+        source,
+        runId,
+        tabId: tab.id,
+        code: "platform_request_failed",
+      })).effects);
+      await patchStatusForRun(source, runId, {
         startedAt: null,
         message: `could not start the ${entry.host} scan`,
       });
       return;
     }
     if (target.ours) {
-      setTimeout(() => void expireOwnedRun(source, tab.id), 90_000);
+      setTimeout(() => void expireOwnedRun(source, tab.id, runId), 90_000);
     }
     return;
   }
@@ -930,8 +1104,8 @@ async function startCapture(source: string, quiet = false, live = false): Promis
         ...entry,
         ...(begun.run.cursor ? { resumeCursor: begun.run.cursor } : {}),
       };
-  await patchStatus(source, {
-    startedAt: begun.run.startedAt,
+    await patchStatusForRun(source, runId, {
+      startedAt: begun.run.startedAt,
     pages: 0,
     items: 0,
     uploaded: 0,
@@ -943,6 +1117,7 @@ async function startCapture(source: string, quiet = false, live = false): Promis
       anansi: "page-command",
       messageVersion: MESSAGE_PROTOCOL_VERSION,
       source,
+      runId,
       action: "configure",
       config: job,
     })) &&
@@ -950,13 +1125,19 @@ async function startCapture(source: string, quiet = false, live = false): Promis
       anansi: "page-command",
       messageVersion: MESSAGE_PROTOCOL_VERSION,
       source,
+      runId,
       action: "backfill",
       config: job,
     }));
 
   if (!reached) {
-    await finishRun(source);
-    await patchStatus(source, {
+    await applyImportEffects((await sourceImportLifecycle().fail({
+      source,
+      runId,
+      tabId: tab.id,
+      code: "platform_request_failed",
+    })).effects);
+    await patchStatusForRun(source, runId, {
       startedAt: null,
       message: `could not reach the ${entry.host} tab; reload it and try again`,
     });
@@ -965,7 +1146,7 @@ async function startCapture(source: string, quiet = false, live = false): Promis
 
   // Close a tab we opened once the run reports in, or after a ceiling.
   if (target.ours) {
-    setTimeout(() => void expireOwnedRun(source, tab.id), 180_000);
+    setTimeout(() => void expireOwnedRun(source, tab.id, runId), 180_000);
   }
 }
 
@@ -983,7 +1164,7 @@ async function importWithoutTab(
   };
   try {
     const run = await runs.current(source);
-    await patchStatus(source, {
+    await patchStatusForRun(source, runId, {
       startedAt: run.startedAt,
       pages: 0,
       items: 0,
@@ -1002,76 +1183,77 @@ async function importWithoutTab(
         const config = await loadConfig(true);
         if (!(await ownsRun())) return false;
         if (!config?.enabled || !config.sources.some((candidate) => candidate.source === source)) {
-          await runs.stop(source);
-          await clearSourceRunRecovery(source);
-          await patchStatus(source, {
-            startedAt: null,
-            message: "switched off in Sources",
-          });
+          const disabled = await sourceImportLifecycle().stop(source, runId);
+          await applyImportEffects(disabled.effects);
           return false;
         }
         return true;
       },
       onPage: async (page, number) => {
-        await deliverRaw(
+        const accepted = await sourceImportLifecycle().page({
           source,
-          page.raw,
-          number,
-          live ? undefined : page.cursor,
-          live ? "platform_event" : "platform_import",
-        );
+          runId,
+          page: number,
+          items: page.items,
+          cursor: live ? undefined : page.cursor,
+          raw: page.raw,
+          captureMethod: live ? "platform_event" : "platform_import",
+        });
+        await applyImportEffects(accepted.effects);
+        if (accepted.kind === "queue-failed") {
+          const code =
+            accepted.errorCode === "queue_full" ||
+            accepted.errorCode === "record_too_large"
+              ? accepted.errorCode
+              : "queue_failed";
+          throw new SourceImportLifecycleError(
+            code,
+            "capture queue rejected the page",
+          );
+        }
+        if (accepted.kind === "ignored-stale" || accepted.kind === "disabled") {
+          throw new SourceImportLifecycleError("stale_run", "source run is no longer current");
+        }
+        if (accepted.kind !== "accepted-page") {
+          throw new Error("source import page was not accepted");
+        }
         const current = await readStatus(source);
-        await patchStatus(source, {
+        await patchStatusForRun(source, runId, {
           pages: number,
           items: current.items + page.items,
         });
-        scheduleSourceRunRecovery(source, (await runs.current(source)).updatedAt);
       },
     });
-    if (result.state === "cancelled" || !(await ownsRun())) return;
-    if (result.state === "limited") {
-      await runs.stop(source);
-      await clearSourceRunRecovery(source);
-      await patchStatus(source, {
-        startedAt: null,
-        message: "import paused at its safety limit; press Resume to continue",
-      });
-      return;
-    }
-    if (!(await runs.current(source)).pendingRefresh) await flushPendingSaves(source);
-    if (!live) await runs.completeInitialImport(source);
-    await finishRun(source);
-    await patchStatus(source, {
-      startedAt: null,
-      lastRun: Date.now(),
+    const completed = await sourceImportLifecycle().complete({
+      source,
+      runId,
+      state: result.state,
       pages: result.pages,
       items: result.items,
-      message: null,
+      initialImport: !live,
     });
+    await applyImportEffects(completed.effects);
   } catch (error) {
+    if (
+      error instanceof SourceImportLifecycleError &&
+      (error.code === "queue_full" ||
+        error.code === "record_too_large" ||
+        error.code === "queue_failed")
+    )
+      return;
+    if (error instanceof SourceImportLifecycleError && error.code === "stale_run") return;
     if (!(await ownsRun())) return;
     const code = error instanceof SessionImportError ? error.code : "platform_request_failed";
-    await runs.noteError(source, code);
-    if (code === "rate_limited") {
-      const retryAfterMs =
-        error instanceof SessionImportError ? (error.retryAfterMs ?? SOURCE_RUN_LEASE_MS) : SOURCE_RUN_LEASE_MS;
-      // Keep the durable run and cursor alive. The alarm is set after both the
-      // provider's delay and our MV3 recovery lease, so a sleeping worker can
-      // resume without a popup staying open.
-      browser.alarms.create(sourceRunRecoveryAlarm(source), {
-        when: Date.now() + Math.max(SOURCE_RUN_LEASE_MS + 100, retryAfterMs),
-      });
-      await patchStatus(source, {
-        startedAt: null,
-        message: "the platform temporarily limited the import; Anansi will retry automatically",
-      });
-      return;
-    }
-    await finishRun(source);
-    await patchStatus(source, {
-      startedAt: null,
-      message: SAFE_PLATFORM_ERRORS[code],
+    const failed = await sourceImportLifecycle().fail({
+      source,
+      runId,
+      code,
+      retryAfterMs: error instanceof SessionImportError ? error.retryAfterMs : undefined,
     });
+    await applyImportEffects(failed.effects);
+    if (failed.kind === "failed") {
+      await patchStatusForRun(source, runId, { message: SAFE_PLATFORM_ERRORS[code] });
+    }
   }
 }
 
@@ -1316,16 +1498,21 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
         importing?.controller.abort();
         await importing?.task;
       }
-      await clearSourceRunRecovery(msg.source);
-      const tabId = await persistentState().runs.stop(msg.source);
-      if (tabId !== null) await browser.tabs.remove(tabId).catch(() => {});
-      await patchStatus(msg.source, { startedAt: null, message: "stopped" });
+      const current = await persistentState().runs.current(msg.source);
+      if (current.runId) {
+        const stopped = await sourceImportLifecycle().stop(msg.source, current.runId);
+        await applyImportEffects(stopped.effects);
+      }
       return { ok: true };
     }
   }
 }
 
-async function handlePageEvent(msg: PageEventMessage, source: PlatformSource): Promise<BackgroundResult> {
+async function handlePageEvent(
+  msg: PageEventMessage,
+  source: PlatformSource,
+  tabId?: number,
+): Promise<BackgroundResult> {
   // Import results for these sources are owned by the worker. Old content
   // scripts in already-open tabs must not advance or finish its run.
   if ((source === "github" || source === "reddit") && ["page", "done", "error", "scanned"].includes(msg.action)) {
@@ -1338,12 +1525,34 @@ async function handlePageEvent(msg: PageEventMessage, source: PlatformSource): P
     case "ready":
       return { ok: true };
     case "page":
-      await deliverRaw(source, msg.raw, msg.page, msg.cursor ?? null);
-      await patchStatus(source, { pages: msg.page, items: msg.items });
+      {
+        const accepted =
+          msg.runId
+            ? await sourceImportLifecycle().page({
+                source,
+                runId: msg.runId,
+                tabId,
+                page: msg.page,
+                items: msg.items,
+                cursor: msg.cursor ?? null,
+                raw: msg.raw,
+                captureMethod: "platform_import",
+              })
+            : { kind: "ignored-stale" as const, source, effects: [] };
+        await applyImportEffects(accepted.effects);
+        if (accepted.kind === "queue-failed") {
+          return { ok: false, error: accepted.errorCode ?? "capture queue rejected the page" };
+        }
+        if (accepted.kind === "ignored-stale" || accepted.kind === "disabled") return { ok: true };
+      }
+      await patchStatusForRun(source, msg.runId ?? "", {
+        pages: msg.page,
+        items: msg.items,
+      });
       return { ok: true };
     case "saved":
       await persistentState().runs.requestRefresh(source);
-      browser.alarms.create(OUTBOX_ALARM, { when: Date.now() + 2_500 });
+      scheduleOutboxRetry(browser.alarms, OUTBOX_ALARM, Date.now());
       return { ok: true };
     case "bookmark":
       await handleBookmarkMutation(source, msg.bookmarkAction, msg.externalId, msg.canonicalUrl, msg.raw);
@@ -1358,40 +1567,61 @@ async function handlePageEvent(msg: PageEventMessage, source: PlatformSource): P
       return { ok: true };
     }
     case "done":
-      // Before finishing: the pages this run queued are what give the held
-      // saves their content, and the queue is serial per source.
-      await flushPendingSaves(source);
-      await finishRun(source);
-      await patchStatus(source, {
-        startedAt: null,
-        lastRun: Date.now(),
-        pages: msg.pages,
-        items: msg.items,
-        message: msg.items === 0 ? "run returned zero items" : null,
-      });
-      await processPendingRefreshes();
+      {
+        if (!msg.runId) return { ok: true };
+        const completed = await sourceImportLifecycle().complete({
+          source,
+          runId: msg.runId,
+          tabId,
+          state: msg.state,
+          pages: msg.pages,
+          items: msg.items,
+          initialImport: true,
+        });
+        await applyImportEffects(completed.effects);
+        if (completed.kind === "completed" && msg.items === 0) {
+          await patchStatusForRun(source, msg.runId, { message: "run returned zero items" });
+        }
+      }
       return { ok: true };
     case "identified":
       await persistentState().runs.setHandle(source, msg.handle);
       return { ok: true };
     case "scanned": {
-      const current = await readStatus(source);
-      await finishRun(source);
-      await patchStatus(source, {
-        startedAt: null,
-        lastRun: Date.now(),
-        message: current.items > 0 ? null : "nothing loaded on that page",
-      });
-      await processPendingRefreshes();
+      const run = await persistentState().runs.current(source);
+      if (run.runId) {
+        const currentStatus = await readStatus(source);
+        const completed = await sourceImportLifecycle().complete({
+          source,
+          runId: run.runId,
+          tabId,
+          initialImport: false,
+        });
+        await applyImportEffects(completed.effects);
+        if (completed.kind === "completed" && currentStatus.items === 0) {
+          await patchStatusForRun(source, run.runId, { message: "nothing loaded on that page" });
+        }
+      }
       return { ok: true };
     }
     case "error":
-      await persistentState().runs.noteError(source, msg.errorCode);
-      await finishRun(source);
-      await patchStatus(source, {
-        startedAt: null,
-        message: SAFE_PLATFORM_ERRORS[msg.errorCode],
-      });
+      {
+        if (msg.runId) {
+          const failed = await sourceImportLifecycle().fail({
+            source,
+            runId: msg.runId,
+            tabId,
+            code: msg.errorCode,
+          });
+          await applyImportEffects(failed.effects);
+          if (failed.kind === "failed") {
+            await patchStatusForRun(source, msg.runId, {
+              startedAt: null,
+              message: SAFE_PLATFORM_ERRORS[msg.errorCode],
+            });
+          }
+        }
+      }
       await processPendingRefreshes();
       return { ok: true };
   }
@@ -1406,7 +1636,7 @@ async function handleRuntimeMessage(message: unknown, sender: RuntimeMessageSend
       return await handlePopupCommand(parsed.message);
     }
     if (parsed.message.anansi === "page-event" && parsed.source) {
-      return await handlePageEvent(parsed.message, parsed.source);
+      return await handlePageEvent(parsed.message, parsed.source, sender.tab?.id);
     }
     return { ok: false, error: "message family is not allowed on this path" };
   } catch {

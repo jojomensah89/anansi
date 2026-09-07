@@ -48,14 +48,22 @@ type Outbound =
   | { action: "bookmark"; bookmarkAction: "save" | "unsave"; externalId: string }
   | {
       action: "page";
+      runId?: string;
       raw: unknown;
       page: number;
       items: number;
       cursor?: string;
     }
-  | { action: "done"; pages: number; items: number }
+  | {
+      action: "done";
+      runId?: string;
+      pages: number;
+      items: number;
+      state?: "complete" | "limited" | "cancelled";
+    }
   | {
       action: "error";
+      runId?: string;
       errorCode: "platform_request_failed" | "query_unavailable";
     };
 
@@ -73,11 +81,18 @@ export default defineContentScript({
 
   main() {
     let nonce: string | null = null;
+    let activeRunId: string | null = null;
     const send = (msg: Outbound) => {
       if (!nonce) return;
+      const correlated =
+        msg.action === "page" || msg.action === "done" || msg.action === "error";
+      const outbound =
+        correlated && activeRunId
+          ? { ...msg, runId: msg.runId ?? activeRunId }
+          : msg;
       window.postMessage(
         {
-          ...msg,
+          ...outbound,
           anansi: "page-event",
           messageVersion: MESSAGE_PROTOCOL_VERSION,
           source: "x",
@@ -254,11 +269,11 @@ export default defineContentScript({
       );
     };
 
-    const backfill = async (cfg: SourceConfig) => {
+    const backfill = async (cfg: SourceConfig, runId: string) => {
       timelineOperation = cfg.operation;
       const template = await waitForTemplate();
       if (!template && !resolveQueryId(cfg.operation)) {
-        send({ action: "error", errorCode: "query_unavailable" });
+        send({ action: "error", runId, errorCode: "query_unavailable" });
         return;
       }
 
@@ -267,13 +282,14 @@ export default defineContentScript({
       let cursor: string | null = cfg.resumeCursor ?? null;
       let page = 0;
       let total = 0;
+      let limited = false;
 
       for (;;) {
         // Prefer whatever X most recently used; it may improve mid-run.
         const url = (observed ? buildTimelineUrl(observed, cursor) : null) ??
           reconstruct(cfg, cursor);
         if (!url) {
-          send({ action: "error", errorCode: "query_unavailable" });
+          send({ action: "error", runId, errorCode: "query_unavailable" });
           return;
         }
 
@@ -293,7 +309,7 @@ export default defineContentScript({
           continue;
         }
         if (!res.ok) {
-          send({ action: "error", errorCode: "platform_request_failed" });
+          send({ action: "error", runId, errorCode: "platform_request_failed" });
           return;
         }
 
@@ -306,6 +322,7 @@ export default defineContentScript({
         // install be repaired without anyone reinstalling anything.
         send({
           action: "page",
+          runId,
           raw,
           page,
           items: read.items,
@@ -319,11 +336,21 @@ export default defineContentScript({
           cursor: read.cursor,
           previousCursor: cursor,
         });
-        if (decision.stop) break;
+        if (decision.stop) {
+          limited = decision.reason === "page_limit";
+          break;
+        }
         cursor = read.cursor;
       }
 
-      send({ action: "done", pages: page, items: total });
+      send({
+        action: "done",
+        runId,
+        pages: page,
+        items: total,
+        // A page limit is a resumable boundary, not a genuine end.
+        state: limited ? "limited" : "complete",
+      });
     };
 
     // ---- commands from the relay ------------------------------------------
@@ -334,6 +361,7 @@ export default defineContentScript({
         anansi?: string;
         action?: string;
         config?: SourceConfig;
+        runId?: string;
         messageVersion?: number;
         nonce?: string;
       } | undefined;
@@ -345,12 +373,18 @@ export default defineContentScript({
       if (msg.anansi !== "page-command") return;
       if (msg.action === "configure") {
         nonce = msg.nonce;
+        activeRunId = typeof msg.runId === "string" ? msg.runId : null;
         watched = msg.config.watchOperations ?? [];
         timelineOperation = msg.config.operation;
         send({ action: "ready", queryId: resolveQueryId(msg.config.operation) ?? null });
       }
-      if (msg.action === "backfill" && msg.nonce === nonce) {
-        void backfill(msg.config);
+      if (
+        msg.action === "backfill" &&
+        msg.nonce === nonce &&
+        typeof msg.runId === "string" &&
+        msg.runId === activeRunId
+      ) {
+        void backfill(msg.config, msg.runId);
       }
     });
   },

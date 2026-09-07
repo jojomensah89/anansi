@@ -49,6 +49,7 @@ export default defineContentScript({
         anansi?: unknown;
         action?: unknown;
         source?: unknown;
+        runId?: unknown;
         config?: unknown;
       };
       const candidate = {
@@ -57,6 +58,7 @@ export default defineContentScript({
         source: incoming?.source as PlatformSource,
         nonce,
         action: incoming?.action,
+        ...(typeof incoming?.runId === "string" ? { runId: incoming.runId } : {}),
         config: incoming?.config,
       };
       const parsed = parseExtensionMessage(candidate, {

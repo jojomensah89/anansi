@@ -81,6 +81,30 @@ describe("parseExtensionMessage", () => {
 		});
 	});
 
+	test("requires a durable run id for X import pages and completion", () => {
+		const page = {
+			...pageEvent("x", "page"),
+			page: 1,
+			items: 1,
+			raw: { data: [] },
+		};
+		expect(
+			parseExtensionMessage(page, pageContext("https://x.com/i/bookmarks")),
+		).toMatchObject({ ok: false, error: { code: "invalid_message" } });
+		expect(
+			parseExtensionMessage(
+				{ ...page, runId: "x-run-1" },
+				pageContext("https://x.com/i/bookmarks"),
+			),
+		).toMatchObject({ ok: true, source: "x" });
+		expect(
+			parseExtensionMessage(
+				{ ...pageEvent("x", "done"), pages: 1, items: 1 },
+				pageContext("https://x.com/i/bookmarks"),
+			),
+		).toMatchObject({ ok: false, error: { code: "invalid_message" } });
+	});
+
 	test.each([
 		{ ...pageEvent("x", "saved"), anansi: "mystery" },
 		{ ...pageEvent("x", "saved"), source: "instagram" },
@@ -155,6 +179,29 @@ describe("parseExtensionMessage", () => {
 				),
 			).toMatchObject({ ok: true, source: "github" });
 		}
+	});
+
+	test("requires a run id on X backfill commands", () => {
+		const context: MessageContext = {
+			path: "relay-to-page",
+			pageUrl: "https://x.com/i/bookmarks",
+			expectedNonce: NONCE,
+		};
+		const command = {
+			anansi: "page-command",
+			messageVersion: MESSAGE_PROTOCOL_VERSION,
+			source: "x",
+			nonce: NONCE,
+			action: "backfill",
+			config: { source: "x", operation: "Bookmarks" },
+		};
+		expect(parseExtensionMessage(command, context)).toMatchObject({
+			ok: false,
+			error: { code: "invalid_message" },
+		});
+		expect(
+			parseExtensionMessage({ ...command, runId: "x-run-1" }, context),
+		).toMatchObject({ ok: true, source: "x" });
 	});
 
 	test("rejects an incorrect page correlation nonce", () => {

@@ -70,6 +70,48 @@ describe("source runs", () => {
 		);
 	});
 
+	test("replacement runs do not inherit the previous owned tab", async () => {
+		const { runs, setNow } = setup();
+		const first = await runs.begin("x");
+		await runs.setOwnedTab("x", 42);
+		setNow(first.run.startedAt + SOURCE_RUN_LEASE_MS);
+
+		const replacement = await runs.begin("x");
+
+		expect(replacement.replacedOwnedTabId).toBe(42);
+		expect(replacement.replacedRunId).toBe(first.run.runId);
+		expect(replacement.run.createdTabId).toBeUndefined();
+		expect(await runs.takeOwnedTabForRun("x", first.run.runId, 42)).toBe(42);
+	});
+
+	test("a stopped run cannot release a replacement-owned tab", async () => {
+		const { runs } = setup();
+		const first = await runs.begin("x");
+		await runs.setOwnedTab("x", 42);
+		const stopped = await runs.stopForRun("x", first.run.runId);
+		expect(stopped).toEqual({ stopped: true, tabId: 42 });
+
+		const replacement = await runs.begin("x");
+		await runs.setOwnedTabForRun("x", replacement.run.runId, 99);
+		expect(await runs.isOwnedTabForRun("x", first.run.runId, 42)).toBe(true);
+		expect(await runs.takeOwnedTabForRun("x", first.run.runId, 42)).toBe(42);
+		expect(await runs.takeOwnedTabForRun("x", replacement.run.runId, 99)).toBe(
+			99,
+		);
+	});
+
+	test("a replacement using the old tab prevents orphan cleanup", async () => {
+		const { runs } = setup();
+		const first = await runs.begin("x");
+		await runs.setOwnedTab("x", 42);
+		await runs.stopForRun("x", first.run.runId);
+		const replacement = await runs.begin("x");
+		await runs.setActiveTab("x", replacement.run.runId, 42);
+
+		expect(await runs.isOwnedTabForRun("x", first.run.runId, 42)).toBe(false);
+		expect(await runs.takeOwnedTabForRun("x", first.run.runId, 42)).toBeNull();
+	});
+
 	test("assigns stable page identities inside a persisted run", async () => {
 		const { runs } = setup();
 		const { run } = await runs.begin("reddit");
@@ -194,7 +236,7 @@ describe("capture delivery ownership", () => {
 });
 
 describe("held saves", () => {
-	test("holds an id until it is taken, and only once", async () => {
+	test("holds ids until each one is acknowledged", async () => {
 		const { runs } = setup();
 
 		await runs.recordPendingSave("x", "1900000000000000001");
@@ -204,7 +246,11 @@ describe("held saves", () => {
 			"1900000000000000001",
 			"1900000000000000002",
 		]);
-		expect(await runs.takePendingSaves("x")).toEqual([]);
+		expect(await runs.ackPendingSave("x", "1900000000000000001")).toBe(true);
+		expect(await runs.takePendingSaves("x")).toEqual([
+			"1900000000000000002",
+		]);
+		expect(await runs.ackPendingSave("x", "missing")).toBe(false);
 	});
 
 	test("the same save observed twice is held once", async () => {
@@ -214,6 +260,8 @@ describe("held saves", () => {
 		await runs.recordPendingSave("x", "1900000000000000001");
 
 		expect(await runs.takePendingSaves("x")).toEqual(["1900000000000000001"]);
+		expect(await runs.ackPendingSave("x", "1900000000000000001")).toBe(true);
+		expect(await runs.takePendingSaves("x")).toEqual([]);
 	});
 
 	test("survives a worker restart, because it is in the store", async () => {
@@ -229,6 +277,7 @@ describe("held saves", () => {
 		expect(await revived.takePendingSaves("x")).toEqual([
 			"1900000000000000009",
 		]);
+		await revived.ackPendingSave("x", "1900000000000000009");
 	});
 
 	test("a flood keeps the newest saves rather than the oldest", async () => {
@@ -240,6 +289,99 @@ describe("held saves", () => {
 		const held = await runs.takePendingSaves("x");
 		expect(held).toHaveLength(200);
 		expect(held.at(-1)).toBe("id-259");
+	});
+});
+
+describe("shared source-run coordination", () => {
+	test("serializes event sequences across instances sharing one store", async () => {
+		const { store } = setup();
+		let sequence = 0;
+		const first = createSourceRuns({
+			store,
+			now: () => 10_000,
+			createId: () => `first-${++sequence}`,
+		});
+		const second = createSourceRuns({
+			store,
+			now: () => 10_000,
+			createId: () => `second-${++sequence}`,
+		});
+
+		expect((await Promise.all([
+			first.nextItemEventSequence("github"),
+			second.nextItemEventSequence("github"),
+		]))).toEqual([1, 2]);
+	});
+
+	test("holds the effect fence while a browser action is running", async () => {
+		const { store, runs: first, setNow } = setup();
+		const second = createSourceRuns({
+			store,
+			now: () => 10_000 + SOURCE_RUN_LEASE_MS * 2 + 1,
+			createId: () => "replacement",
+		});
+		const begun = await first.begin("x");
+		setNow(10_000 + SOURCE_RUN_LEASE_MS + 1);
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let entered = false;
+		const effect = first.runIfCurrent("x", begun.run.runId, async () => {
+			entered = true;
+			await gate;
+		});
+		const replacement = second.begin("x");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(entered).toBe(true);
+		release();
+		expect(await effect).toBe(true);
+		expect((await replacement).started).toBe(true);
+	});
+
+	test("does not dispose a tab claimed by a replacement", async () => {
+		const { store, runs: first, setNow } = setup();
+		const second = createSourceRuns({
+			store,
+			now: () => 10_000 + SOURCE_RUN_LEASE_MS + 1,
+			createId: () => "replacement",
+		});
+		const begun = await first.begin("x");
+		setNow(10_000 + SOURCE_RUN_LEASE_MS + 1);
+		const replacement = await second.begin("x");
+		await second.setActiveTab("x", replacement.run.runId, 77);
+		let disposed = false;
+		expect(
+			await first.disposeUnclaimedTab("x", begun.run.runId, 77, async () => {
+				disposed = true;
+			}),
+		).toBe(false);
+		expect(disposed).toBe(false);
+	});
+
+	test("keeps replacement runs behind an owned-tab close", async () => {
+		const { store, runs: first, setNow } = setup();
+		const second = createSourceRuns({
+			store,
+			now: () => 10_000 + SOURCE_RUN_LEASE_MS * 2 + 1,
+			createId: () => "replacement",
+		});
+		const begun = await first.begin("x");
+		await first.setOwnedTabForRun("x", begun.run.runId, 88);
+		setNow(10_000 + SOURCE_RUN_LEASE_MS + 1);
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const close = first.closeOwnedTabForRun("x", begun.run.runId, 88, async () => {
+			await gate;
+		});
+		const replacement = second.begin("x");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		release();
+		expect(await close).toBe(true);
+		expect((await replacement).started).toBe(true);
+		expect((await second.current("x")).orphanedTabId).toBeUndefined();
 	});
 });
 

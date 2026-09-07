@@ -1,9 +1,29 @@
 import { expect, test } from "bun:test";
 import {
 	DAILY_SYNC_MINUTES,
+	OUTBOX_RETRY_DELAY_MS,
 	SYNC_ALARM,
 	scheduleDailyCatchUp,
+	scheduleOutboxRetry,
 } from "./schedule.ts";
+
+test("a failed outbox item gets a concrete one-shot retry", () => {
+	const created: Array<{ name: string; info: { when: number } }> = [];
+	scheduleOutboxRetry(
+		{
+			create(name, info) {
+				created.push({ name, info });
+			},
+		},
+		"anansi-outbox",
+		10_000,
+	);
+
+	expect(OUTBOX_RETRY_DELAY_MS).toBe(2_500);
+	expect(created).toEqual([
+		{ name: "anansi-outbox", info: { when: 12_500 } },
+	]);
+});
 
 test("catch-up is fixed to once every 24 hours", async () => {
 	const cleared: string[] = [];

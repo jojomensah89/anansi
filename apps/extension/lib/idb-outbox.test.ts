@@ -3,6 +3,7 @@ import type { ItemEventCapture } from "@anansi/sources";
 import { IDBFactory } from "fake-indexeddb";
 import type { OutboxRecord } from "./capture-queue.ts";
 import { createIndexedDbOutbox } from "./idb-outbox.ts";
+import { createSourceRuns } from "./source-runs.ts";
 
 const record = (
 	eventId: string,
@@ -96,5 +97,36 @@ describe("IndexedDB outbox adapter", () => {
 			phase: "idle",
 			updatedAt: 5_000,
 		});
+	});
+
+	test("coordinates SourceRuns across two adapters for one IndexedDB database", async () => {
+		const factory = new IDBFactory();
+		const firstStore = createIndexedDbOutbox({
+			factory,
+			name: "anansi-shared-coordination",
+		});
+		const secondStore = createIndexedDbOutbox({
+			factory,
+			name: "anansi-shared-coordination",
+		});
+		expect(firstStore.coordinationKey).toBe(secondStore.coordinationKey);
+
+		const first = createSourceRuns({
+			store: firstStore,
+			now: () => 10_000,
+			createId: () => "first",
+		});
+		const second = createSourceRuns({
+			store: secondStore,
+			now: () => 10_000,
+			createId: () => "second",
+		});
+
+		expect(
+			await Promise.all([
+				first.nextItemEventSequence("github"),
+				second.nextItemEventSequence("github"),
+			]),
+		).toEqual([1, 2]);
 	});
 });

@@ -1,5 +1,19 @@
 export const DAILY_SYNC_MINUTES = 24 * 60;
 export const SYNC_ALARM = "anansi-sync";
+export const OUTBOX_RETRY_DELAY_MS = 2_500;
+
+export interface OneShotAlarmScheduler {
+	create(name: string, info: { when: number }): void;
+}
+
+/** A failed capture must wake the worker even if its lifecycle snapshot is stale. */
+export function scheduleOutboxRetry(
+	alarms: OneShotAlarmScheduler,
+	name: string,
+	now: number,
+): void {
+	alarms.create(name, { when: now + OUTBOX_RETRY_DELAY_MS });
+}
 
 export interface AlarmScheduler {
 	get(name: string): Promise<{ periodInMinutes?: number } | undefined>;

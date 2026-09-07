@@ -15,6 +15,11 @@ export interface SyncStateRecord {
 	nextPage?: number;
 	pendingRefresh?: boolean;
 	createdTabId?: number;
+	/** Tab currently driving a page import; unlike createdTabId it is not owned. */
+	activeTabId?: number;
+	/** A stopped/replaced owned tab awaiting run-fenced browser cleanup. */
+	orphanedTabId?: number;
+	orphanedTabRunId?: string;
 	pendingSaves?: string[];
 	handle?: string;
 	paused?: boolean;
@@ -25,6 +30,8 @@ export interface SyncStateRecord {
 }
 
 export interface IndexedDbOutbox extends OutboxStore {
+	/** Same-realm identity shared by adapters for this IndexedDB database. */
+	readonly coordinationKey: object;
 	getSyncState(source: string): Promise<SyncStateRecord | null>;
 	putSyncState(state: SyncStateRecord): Promise<void>;
 	deleteSyncState(source: string): Promise<void>;
@@ -33,6 +40,31 @@ export interface IndexedDbOutbox extends OutboxStore {
 export interface IndexedDbOutboxOptions {
 	factory?: IDBFactory;
 	name?: string;
+}
+
+/**
+ * Adapter instances are cheap and the MV3 worker can create more than one.
+ * Keep one identity per factory/database pair so SourceRuns can coordinate
+ * them in this JavaScript realm. This is not a cross-context CAS mechanism;
+ * production's background worker remains the sole writer across contexts.
+ */
+const coordinationKeys = new WeakMap<
+	IDBFactory,
+	Map<string, object>
+>();
+
+function coordinationKeyFor(factory: IDBFactory, name: string): object {
+	let keys = coordinationKeys.get(factory);
+	if (!keys) {
+		keys = new Map<string, object>();
+		coordinationKeys.set(factory, keys);
+	}
+	let key = keys.get(name);
+	if (!key) {
+		key = {};
+		keys.set(name, key);
+	}
+	return key;
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -59,6 +91,7 @@ export function createIndexedDbOutbox(
 ): IndexedDbOutbox {
 	const factory = options.factory ?? indexedDB;
 	const name = options.name ?? DATABASE_NAME;
+	const coordinationKey = coordinationKeyFor(factory, name);
 	let database: Promise<IDBDatabase> | null = null;
 
 	const open = () => {
@@ -89,6 +122,7 @@ export function createIndexedDbOutbox(
 	};
 
 	return {
+		coordinationKey,
 		async add(record) {
 			const db = await open();
 			const transaction = db.transaction(OUTBOX, "readwrite");
