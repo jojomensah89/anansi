@@ -228,7 +228,7 @@ describe("search result projection characterization", () => {
       metrics: item.metrics,
     });
 
-    const expectedCommon = {
+    const expectedCommon: ReturnType<typeof common> = {
       id: richId,
       url: "https://x.com/i/status/projection-rich",
       author: "jojo",
@@ -280,7 +280,9 @@ describe("search result projection characterization", () => {
   test("malformed decoration falls back without dropping a valid card", async () => {
     const db = openTestDb();
     await upsertItems(db, [projectionFixture()]);
-    const [{ id }] = await db.select({ id: items.id }).from(items);
+    const [row] = await db.select({ id: items.id }).from(items);
+    if (!row) throw new Error("expected projection fixture row");
+    const { id } = row;
     await db.update(items).set({
       metrics: "{malformed",
       raw: JSON.stringify({
