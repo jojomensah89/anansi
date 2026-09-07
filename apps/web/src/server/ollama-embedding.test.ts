@@ -50,6 +50,45 @@ describe("Ollama embedding provider", () => {
 		expect(provider.observedDimensions).toBe(3);
 	});
 
+	test("keeps a configured alias stable when Ollama returns a resolved model", async () => {
+		const calls: FetchCall[] = [];
+		const fetcher: OllamaFetch = async (input, init) => {
+			calls.push({ input, init });
+			return jsonResponse({ model: "resolved-embedding", embeddings: [[1, 0]] });
+		};
+		const provider = new OllamaEmbeddingProvider({
+			model: "embedding-alias",
+			fetch: fetcher,
+		});
+
+		await expect(provider.embed("first")).resolves.toEqual([1, 0]);
+		await expect(provider.embed("second")).resolves.toEqual([1, 0]);
+		expect(provider.model).toBe("embedding-alias");
+		expect(provider.observedModel).toBe("resolved-embedding");
+		expect(calls.map(bodyOf)).toEqual([
+			{ model: "embedding-alias", input: "first" },
+			{ model: "embedding-alias", input: "second" },
+		]);
+	});
+
+	test("rejects a resolved model identity that changes between requests", async () => {
+		let request = 0;
+		const provider = new OllamaEmbeddingProvider({
+			model: "embedding-alias",
+			fetch: async () => {
+				request += 1;
+				return jsonResponse({
+					model: request === 1 ? "resolved-embedding" : "other-embedding",
+					embeddings: [[1, 0]],
+				});
+			},
+		});
+		await provider.embed("first");
+		await expect(provider.embed("second")).rejects.toMatchObject({
+			code: "malformed",
+		});
+	});
+
 	test("uses bounded array inputs and preserves order across requests", async () => {
 		const calls: FetchCall[] = [];
 		const fetcher: OllamaFetch = async (input, init) => {

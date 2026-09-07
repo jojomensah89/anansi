@@ -1,17 +1,14 @@
 import {
 	type AnansiDb,
 	aiProgress,
-	claimAiJobs,
-	completeAiJob,
 	contentHash,
-	failAiJob,
 	getAiSettings,
-	itemEmbeddings,
 	items,
-	reconcileAiJobs,
 	requeueEmbeddingJobs,
 	semanticText,
+	upsertItemEmbedding,
 } from "@anansi/db";
+import { createAiJobRunner } from "./ai-job-runner.ts";
 import { AiProviderError, type EmbeddingProvider } from "./ai.ts";
 import type { LocalSemanticCache } from "./local-semantic-cache.ts";
 import type { SemanticRuntimeSnapshot } from "./semantic-search.ts";
@@ -20,11 +17,6 @@ export interface LocalSemanticWorker {
 	runOnce(): Promise<void>;
 	status(): SemanticRuntimeSnapshot;
 }
-
-function safeError(error: unknown): string {
-	return (error instanceof Error ? error.message : String(error)).slice(0, 500);
-}
-
 /** Processes local embedding jobs without ever running local AI tagging. */
 export function createLocalSemanticWorker(
 	db: AnansiDb,
@@ -50,7 +42,6 @@ export function createLocalSemanticWorker(
 				return;
 			}
 			cache.replaceGeneration(provider.model);
-			await reconcileAiJobs(db, Math.max(batchSize, 1) * 4, provider.model, ["embedding"]);
 			// A sidecar can be removed or rebuilt independently of the canonical
 			// database. Reopen completed jobs whose current projection is absent (or
 			// stale), and drop stale vectors before they can affect search.
@@ -65,81 +56,55 @@ export function createLocalSemanticWorker(
 			}
 			await requeueEmbeddingJobs(db, missingVectors, provider.model, firstRun);
 			firstRun = false;
-			const progressBefore = await aiProgress(db, "embedding");
+			const progressBefore = await aiProgress(db, "embedding", provider.model);
 			cache.setStatus({
 				state: "warming",
 				pending: progressBefore.pending,
 				indexed: cache.snapshot().indexed,
 				dimension: provider.dimensions || undefined,
 			});
-			const jobs = await claimAiJobs(
+			const runner = createAiJobRunner({
 				db,
-				"embedding",
-				Math.min(Math.max(batchSize, 1), 20),
-			);
-			for (const job of jobs) {
-				try {
-					const item = canonicalItems.find(
-						(candidate) => candidate.id === job.itemId,
-					);
-					if (!item) {
-						await cache.invalidate([job.itemId]);
-						await completeAiJob(db, job.id, job.token);
-						continue;
-					}
-					const values = await provider.embed(semanticText(item));
-					await cache.upsertRecords([
-						{ id: item.id, contentHash: job.contentHash, values },
-					]);
-					const timestamp = Math.floor(Date.now() / 1000);
-					await db
-						.insert(itemEmbeddings)
-						.values({
-							itemId: item.id,
-							vectorId: item.id,
-							model: provider.model,
-							dimensions: values.length,
-							contentHash: job.contentHash,
-							status: "complete",
-							createdAt: timestamp,
-							updatedAt: timestamp,
-						})
-						.onConflictDoUpdate({
-							target: itemEmbeddings.itemId,
-							set: {
-								vectorId: item.id,
+				batchSize,
+				reconcile: { limit: Math.max(batchSize, 1) * 4, model: provider.model },
+					executor: {
+					kind: "embedding",
+					model: provider.model,
+					onMissingItem: (job) => cache.invalidate([job.itemId]),
+					prepare: async (item) => {
+						try {
+							return await provider.embed(semanticText(item));
+						} catch (error) {
+							if (error instanceof AiProviderError) {
+								if (error.code === "unavailable") providerUnavailable = true;
+								else providerFailed = true;
+							}
+							throw error;
+						}
+					},
+					publish: async (item, job, values) => {
+						try {
+							await cache.upsertRecords([
+								{ id: item.id, contentHash: job.contentHash, values },
+							]);
+							await upsertItemEmbedding(db, {
+								itemId: item.id,
 								model: provider.model,
 								dimensions: values.length,
 								contentHash: job.contentHash,
-								status: "complete",
-								updatedAt: timestamp,
-								lastError: null,
-							},
-						});
-					await completeAiJob(db, job.id, job.token);
-				} catch (error) {
-					if (error instanceof AiProviderError) {
-						if (error.code === "unavailable") providerUnavailable = true;
-						else providerFailed = true;
-					}
-					await failAiJob(
-						db,
-						job.id,
-						job.token,
-						job.attempts,
-						safeError(error),
-					);
-					const progress = await aiProgress(db, "embedding");
-					cache.setStatus({
-						state: providerUnavailable ? "unavailable" : "error",
-						pending: progress.pending,
-						indexed: cache.snapshot().indexed,
-						dimension: provider.dimensions || undefined,
-						errorCode: "embedding-failed",
-					});
-				}
-			}
-			const progress = await aiProgress(db, "embedding");
+							});
+						} catch (error) {
+							if (error instanceof AiProviderError) {
+								if (error.code === "unavailable") providerUnavailable = true;
+								else providerFailed = true;
+							}
+							throw error;
+						}
+					},
+				},
+			});
+			await runner.runOnce();
+			const progress = await aiProgress(db, "embedding", provider.model);
 			const snapshot = cache.snapshot();
 			cache.setStatus({
 				state: providerUnavailable

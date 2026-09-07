@@ -7,7 +7,19 @@ import { createLocalTaggingWorker } from "./local-tagging-worker.ts";
 function setup() {
 	const local = openLocalDb(":memory:");
 	migrateLocalDb(local);
-	return { db: local as unknown as AnansiDb };
+	const db = local as unknown as AnansiDb;
+	setActiveModels(db, "qwen-test");
+	return { db };
+}
+
+function setActiveModels(db: AnansiDb, model: string) {
+	(
+		db as unknown as {
+			$client: { prepare(sql: string): { run(...params: unknown[]): unknown } };
+		}
+	).$client
+		.prepare("INSERT INTO ai_settings (id, embedding_model, tag_model) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET embedding_model = excluded.embedding_model, tag_model = excluded.tag_model")
+		.run(model, model);
 }
 
 async function addItem(db: AnansiDb, externalId: string, body = "SQLite FTS5 and MCP search") {

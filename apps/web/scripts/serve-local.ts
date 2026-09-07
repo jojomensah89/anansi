@@ -22,6 +22,7 @@ import { createOllamaTaggingProvider, DEFAULT_OLLAMA_TAG_MODEL } from "../src/se
 import { openLocalSemanticCache } from "../src/server/local-semantic-cache.ts";
 import { createLocalSemanticWorker } from "../src/server/local-semantic-worker.ts";
 import { createLocalTaggingWorker } from "../src/server/local-tagging-worker.ts";
+import { syncLocalAiModels } from "../src/server/local-ai-settings.ts";
 
 const port = Number(process.env.PORT ?? 8788);
 const dbPath = process.env.ANANSI_DB_PATH ?? "data/anansi.db";
@@ -48,6 +49,7 @@ const mediaDir = process.env.ANANSI_MEDIA_DIR ?? "data/media";
 const media = { dir: mediaDir };
 const ollamaModel = process.env.OLLAMA_EMBEDDING_MODEL ?? "embeddinggemma";
 const ollamaTagModel = process.env.OLLAMA_TAG_MODEL ?? DEFAULT_OLLAMA_TAG_MODEL;
+syncLocalAiModels(db, { embeddingModel: ollamaModel, tagModel: ollamaTagModel });
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
 try {
   const ollamaHost = new URL(ollamaBaseUrl).hostname.toLowerCase();

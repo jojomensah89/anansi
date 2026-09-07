@@ -17,6 +17,44 @@ describe("Ollama tagging provider", () => {
 		expect(request?.format).toMatchObject({ type: "object", required: ["tags"] });
 	});
 
+	test("keeps a configured alias stable when Ollama returns a resolved model", async () => {
+		const requests: Array<Record<string, unknown>> = [];
+		const provider = new OllamaTaggingProvider({
+			model: "tag-alias",
+			fetch: async (_input, init) => {
+				requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+				return Response.json({
+					model: "resolved-tagging",
+					message: { content: '{"tags":["web-dev"]}' },
+				});
+			},
+		});
+
+		await expect(provider.generateTags("first")).resolves.toEqual(["web-dev"]);
+		await expect(provider.generateTags("second")).resolves.toEqual(["web-dev"]);
+		expect(provider.model).toBe("tag-alias");
+		expect(provider.observedModel).toBe("resolved-tagging");
+		expect(requests.map((body) => body.model)).toEqual(["tag-alias", "tag-alias"]);
+	});
+
+	test("rejects a resolved model identity that changes between requests", async () => {
+		let request = 0;
+		const provider = new OllamaTaggingProvider({
+			model: "tag-alias",
+			fetch: async () => {
+				request += 1;
+				return Response.json({
+					model: request === 1 ? "resolved-tagging" : "other-tagging",
+					message: { content: '{"tags":["web-dev"]}' },
+				});
+			},
+		});
+		await provider.generateTags("first");
+		await expect(provider.generateTags("second")).rejects.toMatchObject({
+			code: "malformed",
+		});
+	});
+
 	test("rejects malformed, duplicate, and excessive output", async () => {
 		for (const content of [
 			"not-json",

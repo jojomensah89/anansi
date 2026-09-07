@@ -121,10 +121,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Server-only adapter for Ollama's `/api/embed` endpoint.
  *
- * The configured model is used for requests. Ollama's response model is
- * exposed after the first successful request, which lets callers retain the
- * resolved model identity when an alias is used. Vector dimensions are
- * discovered from the response unless an expected dimension was supplied.
+ * The configured model is used for requests and remains the stable provider
+ * identity even when Ollama resolves an alias in its response. The observed
+ * response model is available separately for diagnostics. Vector dimensions
+ * are discovered from the response unless an expected dimension was supplied.
  */
 export class OllamaEmbeddingProvider implements EmbeddingProvider {
 	readonly batchSize: number;
@@ -180,7 +180,12 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 	}
 
 	get model(): string {
-		return this.#resolvedModel ?? this.#requestedModel;
+		return this.#requestedModel;
+	}
+
+	/** The model identity Ollama returned, which may differ from the alias used. */
+	get observedModel(): string | undefined {
+		return this.#resolvedModel;
 	}
 
 	/** The observed vector dimension, or the configured expected dimension. */

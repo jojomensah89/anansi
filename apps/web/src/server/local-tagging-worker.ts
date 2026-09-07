@@ -1,25 +1,17 @@
 import {
 	applyAiTags,
 	aiProgress,
-	claimAiJobs,
-	completeAiJob,
-	failAiJob,
 	getAiSettings,
-	reconcileAiJobs,
 	searchableText,
-	items,
 	type AnansiDb,
 } from "@anansi/db";
+import { createAiJobRunner } from "./ai-job-runner.ts";
 import type { TagGenerationProvider } from "./ai.ts";
 
 export interface LocalTaggingWorker {
 	runOnce(): Promise<void>;
 	status(): Promise<{ pending: number; failed: number; complete: number }>;
 }
-function safeError(error: unknown): string {
-	return (error instanceof Error ? error.message : String(error)).slice(0, 500);
-}
-
 /** Processes local tagging jobs without coupling inference to ingest. */
 export function createLocalTaggingWorker(
 	db: AnansiDb,
@@ -33,23 +25,20 @@ export function createLocalTaggingWorker(
 		try {
 			const settings = await getAiSettings(db);
 			if (!settings.autoTaggingEnabled) return;
-			await reconcileAiJobs(db, Math.max(batchSize, 1) * 4, undefined, ["tagging"]);
-			const canonicalItems = await db.select().from(items);
-			const jobs = await claimAiJobs(db, "tagging", Math.min(Math.max(batchSize, 1), 20));
-			for (const job of jobs) {
-				try {
-					const item = canonicalItems.find((candidate) => candidate.id === job.itemId);
-					if (!item) {
-						await completeAiJob(db, job.id, job.token);
-						continue;
-					}
-					const labels = await provider.generateTags(searchableText(item));
-					await applyAiTags(db, item.id, labels, provider.model);
-					await completeAiJob(db, job.id, job.token);
-				} catch (error) {
-					await failAiJob(db, job.id, job.token, job.attempts, safeError(error));
-				}
-			}
+			const runner = createAiJobRunner({
+				db,
+				batchSize,
+				reconcile: { limit: Math.max(batchSize, 1) * 4 },
+				executor: {
+					kind: "tagging",
+					model: provider.model,
+					prepare: async (item) => provider.generateTags(searchableText(item)),
+					publish: async (item, _job, labels) => {
+						await applyAiTags(db, item.id, labels, provider.model);
+					},
+				},
+			});
+			await runner.runOnce();
 		} finally {
 			running = false;
 		}
@@ -57,6 +46,6 @@ export function createLocalTaggingWorker(
 
 	return {
 		runOnce,
-		status: () => aiProgress(db, "tagging"),
+		status: () => aiProgress(db, "tagging", provider.model),
 	};
 }

@@ -90,7 +90,12 @@ export class OllamaTaggingProvider implements TagGenerationProvider {
 	}
 
 	get model(): string {
-		return this.#resolvedModel ?? this.#requestedModel;
+		return this.#requestedModel;
+	}
+
+	/** The model identity Ollama returned, which may differ from the alias used. */
+	get observedModel(): string | undefined {
+		return this.#resolvedModel;
 	}
 
 	get endpoint(): string {
