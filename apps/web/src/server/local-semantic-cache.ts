@@ -19,6 +19,8 @@ interface VectorRow {
 export interface LocalSemanticCache extends VectorIndex {
 	readonly model: string;
 	readonly generation: string;
+	recordHash(id: string): string | null;
+	hasRecord(id: string, contentHash: string): boolean;
 	snapshot(): SemanticRuntimeSnapshot;
 	setStatus(status: {
 		state: CacheState;
@@ -109,6 +111,9 @@ export function openLocalSemanticCache(
 	const removeStatement = prepare(
 		"DELETE FROM semantic_vectors WHERE generation = ? AND item_id = ?",
 	);
+	const recordHashStatement = prepare<{ contentHash?: string }>(
+		"SELECT content_hash AS contentHash FROM semantic_vectors WHERE generation = ? AND item_id = ?",
+	);
 	const selectStatement = prepare<VectorRow>(
 		'SELECT item_id AS itemId, content_hash AS contentHash, dimensions, vector_blob AS "values" FROM semantic_vectors WHERE generation = ?',
 	);
@@ -145,6 +150,17 @@ export function openLocalSemanticCache(
 		},
 		get dimensions() {
 			return Number(getMeta("dimensions") ?? 0);
+		},
+
+		recordHash(id) {
+			const row = recordHashStatement.get(generation, id) as {
+				contentHash?: string;
+			} | null;
+			return row?.contentHash ?? null;
+		},
+
+		hasRecord(id, contentHash) {
+			return index.recordHash(id) === contentHash;
 		},
 
 		snapshot() {

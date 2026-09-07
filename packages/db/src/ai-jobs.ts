@@ -96,6 +96,34 @@ export async function failAiJob(db: AnansiDb, id: string, token: string, attempt
   await db.update(aiEnrichmentJobs).set({ status: attempts >= 5 ? "failed" : "retrying", claimToken: null, leaseUntil: 0, nextRunAt: now + delay, updatedAt: now, lastError: error.slice(0, 500) }).where(and(eq(aiEnrichmentJobs.id, id), eq(aiEnrichmentJobs.claimToken, token)));
 }
 
+/**
+ * Reopens terminal embedding jobs when the local sidecar no longer contains
+ * their vectors. The canonical job row survives a sidecar rebuild, so without
+ * this reset a fresh cache would look permanently complete and never warm.
+ */
+export async function requeueEmbeddingJobs(db: AnansiDb, itemIds: string[], embeddingModel?: string, includeFailed = false) {
+  const ids = [...new Set(itemIds)].filter(Boolean);
+  if (ids.length === 0) return 0;
+  const wanted = new Set(ids);
+  const terminalStatuses = includeFailed ? ["complete", "failed"] : ["complete"];
+  const candidates = await db.select({ id: aiEnrichmentJobs.id, itemId: aiEnrichmentJobs.itemId })
+    .from(aiEnrichmentJobs)
+    .where(and(eq(aiEnrichmentJobs.kind, "embedding"), inArray(aiEnrichmentJobs.status, terminalStatuses)));
+  const targetIds = candidates
+    .filter((job) => wanted.has(job.itemId) && (!embeddingModel || job.id.startsWith(`embedding:${embeddingModel}:`)))
+    .map((job) => job.id);
+  if (targetIds.length === 0) return 0;
+  let changed = 0;
+  for (let offset = 0; offset < targetIds.length; offset += 500) {
+    const result = await db.update(aiEnrichmentJobs)
+      .set({ status: "pending", attempts: 0, nextRunAt: 0, leaseUntil: 0, claimToken: null, lastError: null, updatedAt: Math.floor(Date.now() / 1000) })
+      .where(inArray(aiEnrichmentJobs.id, targetIds.slice(offset, offset + 500)))
+      .run();
+    changed += Number((result as { changes?: number }).changes ?? 0);
+  }
+  return changed;
+}
+
 export async function aiProgress(db: AnansiDb, kind?: AiJobKind) {
   const [row] = await db.select({ pending: sql<number>`sum(case when status in ('pending','retrying','running') then 1 else 0 end)`, failed: sql<number>`sum(case when status='failed' then 1 else 0 end)`, complete: sql<number>`sum(case when status='complete' then 1 else 0 end)` }).from(aiEnrichmentJobs).where(kind ? eq(aiEnrichmentJobs.kind, kind) : undefined);
   return { pending: Number(row?.pending ?? 0), failed: Number(row?.failed ?? 0), complete: Number(row?.complete ?? 0) };

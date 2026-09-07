@@ -3,11 +3,13 @@ import {
 	aiProgress,
 	claimAiJobs,
 	completeAiJob,
+	contentHash,
 	failAiJob,
 	getAiSettings,
 	itemEmbeddings,
 	items,
 	reconcileAiJobs,
+	requeueEmbeddingJobs,
 	semanticText,
 } from "@anansi/db";
 import { AiProviderError, type EmbeddingProvider } from "./ai.ts";
@@ -31,6 +33,7 @@ export function createLocalSemanticWorker(
 	batchSize = 4,
 ): LocalSemanticWorker {
 	let running = false;
+	let firstRun = true;
 	const runOnce = async (): Promise<void> => {
 		if (running) return;
 		running = true;
@@ -48,6 +51,20 @@ export function createLocalSemanticWorker(
 			}
 			cache.replaceGeneration(provider.model);
 			await reconcileAiJobs(db, Math.max(batchSize, 1) * 4, provider.model);
+			// A sidecar can be removed or rebuilt independently of the canonical
+			// database. Reopen completed jobs whose current projection is absent (or
+			// stale), and drop stale vectors before they can affect search.
+			const canonicalItems = await db.select().from(items);
+			const missingVectors: string[] = [];
+			for (const item of canonicalItems) {
+				const hash = await contentHash(semanticText(item));
+				if (!cache.hasRecord(item.id, hash)) {
+					if (cache.recordHash(item.id)) await cache.invalidate([item.id]);
+					missingVectors.push(item.id);
+				}
+			}
+			await requeueEmbeddingJobs(db, missingVectors, provider.model, firstRun);
+			firstRun = false;
 			const progressBefore = await aiProgress(db, "embedding");
 			cache.setStatus({
 				state: "warming",
@@ -62,7 +79,7 @@ export function createLocalSemanticWorker(
 			);
 			for (const job of jobs) {
 				try {
-					const item = (await db.select().from(items)).find(
+					const item = canonicalItems.find(
 						(candidate) => candidate.id === job.itemId,
 					);
 					if (!item) {

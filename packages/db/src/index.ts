@@ -16,5 +16,5 @@ export type { ExtensionHealth } from "./extension-health.ts";
 export { setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary, restoreLibrary } from "./organization.ts";
 export type { Collection, CollectionFilters, LibraryExport } from "./organization.ts";
 export { claimMediaJobs, completeMediaJob, failMediaJob } from "./media-jobs.ts";
-export { aiEnrichmentJobs, aiSettings, itemEmbeddings, aiProgress, claimAiJobs, completeAiJob, contentHash, failAiJob, getAiSettings, reconcileAiJobs, searchableText, semanticText, setAiSettings } from "./ai-jobs.ts";
+export { aiEnrichmentJobs, aiSettings, itemEmbeddings, aiProgress, claimAiJobs, completeAiJob, contentHash, failAiJob, getAiSettings, reconcileAiJobs, requeueEmbeddingJobs, searchableText, semanticText, setAiSettings } from "./ai-jobs.ts";
 export type { AiJob, AiJobKind } from "./ai-jobs.ts";

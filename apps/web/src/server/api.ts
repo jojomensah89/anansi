@@ -339,7 +339,11 @@ const aiSettingsUpdateRoute: Route = {
   handle: async ({ env, request }) => {
     const body = await request.json().catch(() => null) as { semanticSearchEnabled?: unknown; autoTaggingEnabled?: unknown } | null;
     if (!body || (body.semanticSearchEnabled !== undefined && typeof body.semanticSearchEnabled !== "boolean") || (body.autoTaggingEnabled !== undefined && typeof body.autoTaggingEnabled !== "boolean")) return json({ error: "invalid AI settings" }, 400);
-    return json({ settings: await setAiSettings(env.db, { semanticSearchEnabled: body.semanticSearchEnabled as boolean | undefined, autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined }), progress: await aiProgress(env.db) });
+    const settings = await setAiSettings(env.db, { semanticSearchEnabled: body.semanticSearchEnabled as boolean | undefined, autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined });
+    // A local toggle should start reconciliation immediately; the periodic
+    // worker remains the recovery path if this nudge is interrupted.
+    if (env.semanticKick && body.semanticSearchEnabled !== undefined) env.semanticKick();
+    return json({ settings, progress: await aiProgress(env.db) });
   },
 };
 
