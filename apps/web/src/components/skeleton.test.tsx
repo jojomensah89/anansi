@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-	ConnectionGateSkeleton,
 	LoadMoreSkeleton,
 	PageSkeleton,
 	PaletteResultsSkeleton,
@@ -13,7 +12,6 @@ import {
 test("page and gate loading states use accessible skeleton regions", () => {
 	for (const [component, label] of [
 		[PageSkeleton, "Loading page"],
-		[ConnectionGateSkeleton, "Connecting to your library"],
 		[SettingsSkeleton, "Loading settings"],
 	] as const) {
 		const html = renderToStaticMarkup(createElement(component));

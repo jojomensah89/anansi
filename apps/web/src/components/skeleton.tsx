@@ -110,22 +110,6 @@ export function PageSkeleton() {
   );
 }
 
-/** A centered shell shape for the initial library connection check. */
-export function ConnectionGateSkeleton() {
-  return (
-    <Loading label="Connecting to your library">
-      <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 }}>
-        <Bone width={42} height={42} radius={12} />
-        <Bone width="58%" height={20} />
-        <Bone width="92%" height={10} />
-        <Bone width="76%" height={10} />
-        <Bone width="100%" height={40} radius={6} />
-        <Bone width="100%" height={38} radius={6} />
-      </div>
-    </Loading>
-  );
-}
-
 /** The settings card shape, including both feature rows and progress count. */
 export function SettingsSkeleton() {
   return (
