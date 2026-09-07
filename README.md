@@ -135,13 +135,25 @@ for EmbeddingGemma). A clone-to-working semantic setup is:
    search**. Automatic tags are intentionally disabled in local mode because
    they remain a hosted Cloudflare feature.
 
-6. Build/load the extension from the main Quickstart steps, import a few
-   bookmarks, and search using a concept rather than an exact keyword. Anansi
-   calls Ollama on `http://127.0.0.1:11434` from the local server and stores
-   vectors in the ignored SQLite sidecar at `data/semantic/ollama.sqlite`. New
-   bookmarks are saved and keyword-searchable immediately; semantic indexing
-   catches up in the background. If Ollama is stopped or the model is missing,
-   the UI says so and continues with BM25 keyword results.
+6. Build and load the extension so you can import real bookmarks:
+
+   ```powershell
+   bun run --cwd apps/extension build
+   ```
+
+   In `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**,
+   and select `apps/extension/.output/chrome-mv3`. Sign in to a supported source
+   and import a few bookmarks. Then search using a concept rather than an exact
+   keyword. Anansi calls Ollama on `http://127.0.0.1:11434` from the local server
+   and stores vectors in the ignored SQLite sidecar at
+   `data/semantic/ollama.sqlite`. New bookmarks are saved and keyword-searchable
+   immediately; semantic indexing catches up in the background. If Ollama is
+   stopped or the model is missing, the UI says so and continues with BM25
+   keyword results.
+
+   The extension is optional if the clone already contains library data or you
+   only want to run the synthetic smoke test; it is required to capture new
+   browser bookmarks.
 
 Before using private bookmarks, validate the complete local path with synthetic
 data:
