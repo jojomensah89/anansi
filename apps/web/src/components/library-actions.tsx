@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { api, type Collection } from "../lib/api.ts";
 import { libraryKeys } from "../lib/library-query.ts";
+import { SavedViewsSkeleton, useSlowLoad } from "./skeleton.tsx";
 
 export function LibraryActions({ current, onApply }: {
   current: Collection["filters"];
@@ -16,6 +17,7 @@ export function LibraryActions({ current, onApply }: {
     queryFn: ({ signal }) => api.collections(signal),
     staleTime: 30_000,
   });
+  const collectionsSlow = useSlowLoad(collections.isPending);
   const save = useMutation({
     mutationFn: () => api.saveCollection(name.trim(), current),
     onSuccess: ({ collection }) => {
@@ -76,7 +78,7 @@ export function LibraryActions({ current, onApply }: {
       <summary style={summaryStyle}>Saved views</summary>
       <div style={{ position: "absolute", right: 0, top: 36, zIndex: 70, width: 310, padding: 10, border: "1px solid var(--edge-strong)", borderRadius: 8, background: "var(--card)", boxShadow: "0 16px 40px #0009" }}>
         <div className="mono" style={{ fontSize: 10, color: "var(--faint)", margin: "2px 3px 8px" }}>A saved view remembers these filters</div>
-        {collections.isPending && <div role="status" style={statusStyle}>Loading saved views…</div>}
+        {collections.isPending && collectionsSlow && <SavedViewsSkeleton />}
         {collections.isError && <div role="alert" style={{ ...statusStyle, color: "#f2a7a7" }}>{message(collections.error)} <button type="button" onClick={() => void collections.refetch()} style={linkStyle}>Retry</button></div>}
         {collections.data?.collections.map((collection) => (
           <div key={collection.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 3px", borderBottom: "1px solid var(--line-soft)" }}>

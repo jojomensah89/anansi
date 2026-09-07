@@ -2,6 +2,7 @@ import type { SearchHit } from "@anansi/db";
 import { useEffect, useRef, useState } from "react";
 import { api, shortDate, sourceLabel, type ItemQuery } from "../lib/api.ts";
 import { useDialogFocus } from "../lib/use-dialog-focus.ts";
+import { Bone, PaletteResultsSkeleton, useSlowLoad } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 
 export function Palette({ open, onClose, onOpen, onSearch, total, filters }: {
@@ -21,6 +22,7 @@ export function Palette({ open, onClose, onOpen, onSearch, total, filters }: {
   const dialog = useRef<HTMLDivElement>(null);
 
   useDialogFocus(open, dialog, input, onClose);
+  const slow = useSlowLoad(loading);
 
   useEffect(() => {
     if (!open) return;
@@ -88,12 +90,12 @@ export function Palette({ open, onClose, onOpen, onSearch, total, filters }: {
           <button type="button" onClick={onClose} aria-label="Close search" style={quietButton}>esc</button>
         </div>
         <div className="mono" aria-live="polite" style={{ display: "flex", alignItems: "center", padding: "9px 17px", borderBottom: "1px solid var(--line)", background: "#0e1317", fontSize: 10.5, color: "var(--faint)" }}>
-          {term ? (loading ? "Searching…" : error ? "Search failed" : `${hits.length}${hits.length === 8 ? "+" : ""} quick result${hits.length === 1 ? "" : "s"}`) : "Type to search"}
+          {term ? (loading ? slow ? <Bone width={72} height={8} /> : null : error ? "Search failed" : `${hits.length}${hits.length === 8 ? "+" : ""} quick result${hits.length === 1 ? "" : "s"}`) : "Type to search"}
           <span style={{ marginLeft: "auto" }}>{hasFilters(filters) ? "within current filters" : "across your library"}</span>
         </div>
         <div className="scroll" style={{ maxHeight: 420 }}>
           {error && <div role="alert" style={{ padding: 18, color: "#f2a7a7", fontSize: 13 }}>{error}<button type="button" onClick={() => setQuery(`${term} `)} style={{ ...quietButton, marginLeft: 10 }}>Retry</button></div>}
-          {!error && hits.map((hit, index) => (
+          {loading && slow ? <PaletteResultsSkeleton /> : !error && hits.map((hit, index) => (
             <button key={hit.id} type="button" onMouseEnter={() => setCursor(index)} onClick={() => onOpen(hit)} style={{ display: "flex", gap: 13, padding: "13px 17px", width: "100%", textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer", background: index === cursor ? "#161c22" : "transparent", borderLeft: `2px solid ${index === cursor ? "var(--accent)" : "transparent"}`, borderTop: index ? "1px solid #161c22" : "none", borderRight: "none", borderBottom: "none" }}>
               <span style={{ width: 26, height: 26, display: "grid", placeItems: "center", flexShrink: 0 }}><SourceMark source={hit.source} size={17} /></span>
               <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>

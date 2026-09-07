@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Avatar } from "../components/avatar.tsx";
-import { Bone, CreatorRowsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
+import { Bone, CountBone, CreatorRowsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { FieldFilter } from "../components/filters.tsx";
 import { Rail } from "../components/rail.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
@@ -82,7 +82,7 @@ function Creators() {
 				>
 					<span style={{ fontSize: 14, fontWeight: 600 }}>Authors</span>
 					<span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
-						{stats.authors} authors · {stats.items.toLocaleString()} saved items
+						{loading ? slow ? <><CountBone digits={3} height={8} /> authors · <CountBone digits={5} height={8} /> saved items</> : null : `${stats.authors} authors · ${stats.items.toLocaleString()} saved items`}
 					</span>
 					<span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
 						<FieldFilter
@@ -179,7 +179,7 @@ function Creators() {
 					</div>
 
 					<div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 30px 40px", fontSize: 11, color: "var(--fainter)" }}>
-						{once} of {stats.authors} saved exactly once
+						{loading ? slow ? <><CountBone digits={3} height={8} /> of <CountBone digits={3} height={8} /> saved exactly once</> : null : `${once} of ${stats.authors} saved exactly once`}
 						<span style={{ flex: 1, height: 1, background: "var(--line-soft)" }} />
 					</div>
 				</div>

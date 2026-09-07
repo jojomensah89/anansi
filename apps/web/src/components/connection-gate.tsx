@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { api } from "../lib/api.ts";
+import { ConnectionGateSkeleton } from "./skeleton.tsx";
 
 const sessionKey = ["auth", "session"] as const;
 
@@ -22,7 +23,7 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
   });
 
   if (session.isPending) {
-    return <GateFrame><span role="status" aria-label="Loading" style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--accent)" }} /> </GateFrame>;
+    return <GateFrame><ConnectionGateSkeleton /></GateFrame>;
   }
 
   if (session.isError) {

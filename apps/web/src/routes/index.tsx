@@ -13,6 +13,7 @@ import { LibraryActions } from "../components/library-actions.tsx";
 import {
   CountBone,
   GridSkeleton,
+  LoadMoreSkeleton,
   RowsSkeleton,
   useSlowLoad,
 } from "../components/skeleton.tsx";
@@ -385,9 +386,7 @@ function Library() {
           {!firstLoad && !search.q && view === "timeline" && <TimelineView items={items} onOpen={openItem} />}
           <div ref={sentinel} style={{ height: 40 }} />
             {library.isFetchingNextPage && items.length > 0 && (
-              <div className="mono" style={{ fontSize: 11, color: "var(--faint)", padding: 8 }} aria-live="polite">
-                loading more…
-              </div>
+              <LoadMoreSkeleton />
             )}
             {library.isFetchNextPageError && (
               <div role="alert" style={{ display: "flex", alignItems: "center", gap: 9, color: "#f2a7a7", fontSize: 12, padding: 8 }}>

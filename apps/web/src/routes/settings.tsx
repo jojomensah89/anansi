@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Rail } from "../components/rail.tsx";
+import { SettingsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { api, type AiSettingsResponse } from "../lib/api.ts";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
@@ -9,6 +10,7 @@ function Settings() {
   const [data, setData] = useState<AiSettingsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { api.ai().then(setData).catch((e) => setError(e instanceof Error ? e.message : "Unable to load settings")); }, []);
+  const slow = useSlowLoad(data === null && !error);
   const toggle = (key: "semanticSearchEnabled" | "autoTaggingEnabled", value: boolean) => {
     if (!data) return;
     setData({ ...data, settings: { ...data.settings, [key]: value ? 1 : 0 } });
@@ -20,7 +22,7 @@ function Settings() {
       <h1 className="anansi-settings-title">Settings</h1>
       <p className="anansi-settings-subtitle">{data?.runtime === "ollama" ? "Local semantic search runs through Ollama on this machine; automatic tags remain separate." : "Optional AI features run in your Cloudflare account and never replace manual tags."}</p>
       {error && <p role="alert" style={{ color: "var(--accent-text)" }}>{error}</p>}
-      {!data ? <p className="mono">Loading…</p> : <>
+      {!data ? (error ? null : slow ? <SettingsSkeleton /> : null) :
         <section className="anansi-settings-section">
           <h2 className="anansi-settings-heading">AI features</h2>
           {!data.available && <p className="anansi-settings-unavailable">AI bindings are unavailable in this environment. Keyword search and manual tags continue to work.</p>}
@@ -30,8 +32,7 @@ function Settings() {
             <Toggle icon={<SparkIcon />} label="Enable automatic tags" badge="Beta" description={data.capabilities?.autoTagging === false ? "No local or hosted tag model is configured." : "Apply concise topic tags to new saves."} checked={data.settings.autoTaggingEnabled === 1} disabled={data.capabilities?.autoTagging === false} onChange={(v) => toggle("autoTaggingEnabled", v)} />
           </div>
           <p className="mono anansi-settings-progress">{data.progress.pending} pending · {data.progress.complete} complete · {data.progress.failed} failed</p>
-        </section>
-      </>}
+        </section>}
     </main>
   </div>;
 }

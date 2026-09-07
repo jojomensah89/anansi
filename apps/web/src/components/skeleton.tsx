@@ -87,6 +87,117 @@ export function Loading({ label, children }: { label: string; children: React.Re
   );
 }
 
+/** A neutral page shape used while a route component is still loading. */
+export function PageSkeleton() {
+  return (
+    <Loading label="Loading page">
+      <main style={{ minHeight: "100%", padding: "32px 22px" }}>
+        <div style={{ width: "min(100%, 860px)", margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
+          <Bone width={160} height={15} />
+          <Bone width="38%" height={8} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 10 }}>
+            {[0, 1, 2].map((index) => (
+              <div key={index} style={{ display: "flex", flexDirection: "column", gap: 9, padding: 14, border: "1px solid var(--line)", borderRadius: 8, background: "var(--card)" }}>
+                <Bone width="48%" height={10} delay={index * 60} />
+                <Bone width="82%" height={8} delay={index * 60 + 40} />
+                <Bone height={74} radius={5} delay={index * 60 + 80} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
+    </Loading>
+  );
+}
+
+/** A centered shell shape for the initial library connection check. */
+export function ConnectionGateSkeleton() {
+  return (
+    <Loading label="Connecting to your library">
+      <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 }}>
+        <Bone width={42} height={42} radius={12} />
+        <Bone width="58%" height={20} />
+        <Bone width="92%" height={10} />
+        <Bone width="76%" height={10} />
+        <Bone width="100%" height={40} radius={6} />
+        <Bone width="100%" height={38} radius={6} />
+      </div>
+    </Loading>
+  );
+}
+
+/** The settings card shape, including both feature rows and progress count. */
+export function SettingsSkeleton() {
+  return (
+    <Loading label="Loading settings">
+      <section className="anansi-settings-section">
+        <Bone width="24%" height={14} style={{ margin: "0 6px 12px" }} />
+        <div className="anansi-settings-list">
+          {[0, 1].map((index) => (
+            <div key={index} className="anansi-settings-row">
+              <Bone width={38} height={38} radius={9} delay={index * 70} />
+              <span style={{ display: "flex", flex: 1, minWidth: 0, flexDirection: "column", gap: 7 }}>
+                <Bone width="46%" height={10} delay={index * 70 + 40} />
+                <Bone width="72%" height={8} delay={index * 70 + 80} />
+              </span>
+              <Bone width={32} height={18} radius={999} delay={index * 70 + 120} />
+            </div>
+          ))}
+        </div>
+        <Bone width="42%" height={8} style={{ margin: "12px 4px 1px" }} />
+      </section>
+    </Loading>
+  );
+}
+
+/** Compact rows for a Saved Views panel that has not returned yet. */
+export function SavedViewsSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <Loading label="Loading saved views">
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 3px" }}>
+        {Array.from({ length: count }, (_, index) => (
+          <div key={index} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 28, borderBottom: "1px solid var(--line-soft)" }}>
+            <Bone width="52%" height={8} delay={index * 60} />
+            <Bone width={34} height={7} delay={index * 60 + 40} style={{ marginLeft: "auto" }} />
+            <Bone width={34} height={7} delay={index * 60 + 80} />
+          </div>
+        ))}
+      </div>
+    </Loading>
+  );
+}
+
+/** Result-row shapes for the command palette search. */
+export function PaletteResultsSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <Loading label="Searching your library">
+      <div>
+        {Array.from({ length: count }, (_, index) => (
+          <div key={index} style={{ display: "flex", gap: 13, padding: "13px 17px", borderTop: index ? "1px solid #161c22" : "none" }}>
+            <Bone width={26} height={26} radius={13} delay={index * 60} />
+            <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+              <Bone width="42%" height={9} delay={index * 60 + 40} />
+              <Bone height={8} delay={index * 60 + 80} />
+              <Bone width="74%" height={8} delay={index * 60 + 120} />
+            </span>
+          </div>
+        ))}
+      </div>
+    </Loading>
+  );
+}
+
+/** A compact placeholder that preserves the reader's position while paging. */
+export function LoadMoreSkeleton() {
+  return (
+    <Loading label="Loading more results">
+      <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
+        <Bone width={116} height={8} />
+      </div>
+    </Loading>
+  );
+}
+
 /* ------------------------------------------------------------- cards --- */
 
 /**
