@@ -24,10 +24,10 @@ function Settings() {
         <section className="anansi-settings-section">
           <h2 className="anansi-settings-heading">AI features</h2>
           {!data.available && <p className="anansi-settings-unavailable">AI bindings are unavailable in this environment. Keyword search and manual tags continue to work.</p>}
-          {data.runtime === "ollama" && <p className="anansi-settings-unavailable">Ollama is configured for local semantic search. Start Ollama and pull the configured embedding model to enable semantic indexing; keyword search continues to work meanwhile.</p>}
+          {data.runtime === "ollama" && <p className="anansi-settings-unavailable">Ollama is configured for local semantic search. Start Ollama and pull the configured embedding model to enable semantic indexing; keyword search continues to work meanwhile. Automatic tags are hosted-only.</p>}
           <div className="anansi-settings-list">
             <Toggle icon={<CpuIcon />} label="Enable AI semantic search" badge="Smart" description="Find content by meaning, not exact wording." checked={data.settings.semanticSearchEnabled === 1} onChange={(v) => toggle("semanticSearchEnabled", v)} />
-            <Toggle icon={<SparkIcon />} label="Enable automatic tags" badge="Beta" description="Apply concise topic tags to new saves." checked={data.settings.autoTaggingEnabled === 1} onChange={(v) => toggle("autoTaggingEnabled", v)} />
+            <Toggle icon={<SparkIcon />} label="Enable automatic tags" badge="Beta" description={data.runtime === "ollama" ? "Available in hosted Cloudflare mode." : "Apply concise topic tags to new saves."} checked={data.settings.autoTaggingEnabled === 1} disabled={data.runtime === "ollama"} onChange={(v) => toggle("autoTaggingEnabled", v)} />
           </div>
           <p className="mono anansi-settings-progress">{data.progress.pending} pending · {data.progress.complete} complete · {data.progress.failed} failed</p>
         </section>
@@ -36,11 +36,11 @@ function Settings() {
   </div>;
 }
 
-function Toggle({ icon, label, badge, description, checked, onChange }: { icon: React.ReactNode; label: string; badge: "Smart" | "Beta"; description: string; checked: boolean; onChange: (value: boolean) => void }) {
+function Toggle({ icon, label, badge, description, checked, disabled = false, onChange }: { icon: React.ReactNode; label: string; badge: "Smart" | "Beta"; description: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
   return <div className="anansi-settings-row">
     <span className="anansi-settings-icon" aria-hidden="true">{icon}</span>
     <span className="anansi-settings-copy"><strong>{label}</strong><span className={`anansi-settings-badge anansi-settings-badge-${badge.toLowerCase()}`}>{badge}</span><span className="anansi-settings-description">{description}</span></span>
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} className="anansi-settings-toggle" data-state={checked ? "on" : "off"} onClick={() => onChange(!checked)}><span /></button>
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className="anansi-settings-toggle" data-state={checked ? "on" : "off"} onClick={() => onChange(!checked)}><span /></button>
   </div>;
 }
 

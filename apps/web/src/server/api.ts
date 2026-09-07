@@ -339,6 +339,7 @@ const aiSettingsUpdateRoute: Route = {
   handle: async ({ env, request }) => {
     const body = await request.json().catch(() => null) as { semanticSearchEnabled?: unknown; autoTaggingEnabled?: unknown } | null;
     if (!body || (body.semanticSearchEnabled !== undefined && typeof body.semanticSearchEnabled !== "boolean") || (body.autoTaggingEnabled !== undefined && typeof body.autoTaggingEnabled !== "boolean")) return json({ error: "invalid AI settings" }, 400);
+    if (env.semantic && body.autoTaggingEnabled === true) return json({ error: "automatic tags require hosted Cloudflare AI" }, 400);
     const settings = await setAiSettings(env.db, { semanticSearchEnabled: body.semanticSearchEnabled as boolean | undefined, autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined });
     // A local toggle should start reconciliation immediately; the periodic
     // worker remains the recovery path if this nudge is interrupted.

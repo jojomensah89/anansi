@@ -214,6 +214,27 @@ describe("handleApi", () => {
 		}
 	});
 
+	test("local runtime keeps automatic tags hosted-only and nudges semantic work", async () => {
+		let kicks = 0;
+		const localEnv: ApiEnv = {
+			...env,
+			semantic: {
+				local: true,
+				provider: { model: "local", dimensions: 384, embed: async () => [1, ...Array.from({ length: 383 }, () => 0)] },
+				index: new LocalVectorIndex(384),
+			},
+			semanticKick: () => { kicks += 1; },
+		};
+		const headers = { authorization: "Bearer library-test-token", "content-type": "application/json" };
+		const tags = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ autoTaggingEnabled: true }) }));
+		expect(tags.status).toBe(400);
+		expect(kicks).toBe(0);
+		const semantic = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ semanticSearchEnabled: true }) }));
+		expect(semantic.status).toBe(200);
+		expect(kicks).toBe(1);
+		await setAiSettings(db, { semanticSearchEnabled: false, autoTaggingEnabled: false });
+	});
+
 	test("GET /api/items/:id returns the full item, never raw", async () => {
 		const list = await readJson(get("/api/items?limit=1"));
 		const item = await readJson(get(`/api/items/${list.items[0].id}`));
