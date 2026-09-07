@@ -52,12 +52,15 @@ function normalizeEndpoint(baseUrl: string): string {
 	} catch {
 		throw providerError("malformed", "Ollama base URL is invalid");
 	}
-		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-			throw providerError("malformed", "Ollama base URL must use HTTP or HTTPS");
-		}
-		if (parsed.username || parsed.password) {
-			throw providerError("malformed", "Ollama base URL must not contain credentials");
-		}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		throw providerError("malformed", "Ollama base URL must use HTTP or HTTPS");
+	}
+	if (parsed.username || parsed.password) {
+		throw providerError(
+			"malformed",
+			"Ollama base URL must not contain credentials",
+		);
+	}
 	parsed.pathname = "/api/embed";
 	parsed.search = "";
 	parsed.hash = "";
@@ -220,9 +223,9 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
 		const vectors: number[][] = [];
 		for (let start = 0; start < texts.length; start += this.batchSize) {
-				const batch = texts
-					.slice(start, start + this.batchSize)
-					.map((text) => text.slice(0, MAX_OLLAMA_TEXT));
+			const batch = texts
+				.slice(start, start + this.batchSize)
+				.map((text) => text.slice(0, MAX_OLLAMA_TEXT));
 			const input = batch.length === 1 ? batch[0] : batch;
 			if (input === undefined)
 				throw providerError("malformed", "Ollama embedding batch is empty");

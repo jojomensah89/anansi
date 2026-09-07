@@ -147,30 +147,43 @@ describe("local semantic worker", () => {
 	test("requeues completed jobs when a sidecar is recreated", async () => {
 		const { db, cache, directory } = setup();
 		try {
-			await upsertItems(db, [{
-				source: "web",
-				externalId: "sidecar-rebuild",
-				url: "https://example.com/sidecar-rebuild",
-				kind: "article",
-				body: "A vector that must survive a cache rebuild",
-				savedAt: 1,
-				savedAtIsExact: true,
-				metrics: {},
-				media: [],
-				links: [],
-				raw: {},
-			}]);
+			await upsertItems(db, [
+				{
+					source: "web",
+					externalId: "sidecar-rebuild",
+					url: "https://example.com/sidecar-rebuild",
+					kind: "article",
+					body: "A vector that must survive a cache rebuild",
+					savedAt: 1,
+					savedAtIsExact: true,
+					metrics: {},
+					media: [],
+					links: [],
+					raw: {},
+				},
+			]);
 			await setAiSettings(db, { semanticSearchEnabled: true });
-			const provider = { model: "test-model", dimensions: 2, embed: async () => [1, 0] };
+			const provider = {
+				model: "test-model",
+				dimensions: 2,
+				embed: async () => [1, 0],
+			};
 			await createLocalSemanticWorker(db, cache, provider).runOnce();
 			expect(cache.snapshot().indexed).toBe(1);
 			cache.close();
 
-			const reopened = openLocalSemanticCache(join(directory, "semantic.sqlite"), "test-model");
+			const reopened = openLocalSemanticCache(
+				join(directory, "semantic.sqlite"),
+				"test-model",
+			);
 			try {
 				const worker = createLocalSemanticWorker(db, reopened, provider);
 				await worker.runOnce();
-				expect(reopened.snapshot()).toMatchObject({ state: "ready", indexed: 1, pending: 0 });
+				expect(reopened.snapshot()).toMatchObject({
+					state: "ready",
+					indexed: 1,
+					pending: 0,
+				});
 				expect(await reopened.query([1, 0])).toHaveLength(1);
 			} finally {
 				reopened.close();
@@ -178,7 +191,11 @@ describe("local semantic worker", () => {
 		} finally {
 			// The first cache is closed above before reopening; Bun close is
 			// intentionally idempotent for this test's cleanup path.
-			try { cache.close(); } catch { /* already closed */ }
+			try {
+				cache.close();
+			} catch {
+				/* already closed */
+			}
 			rmSync(directory, { recursive: true, force: true });
 		}
 	});
