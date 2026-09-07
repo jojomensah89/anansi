@@ -87,23 +87,41 @@ Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** �
 
 GitHub first import: sign in to GitHub in the same browser profile → popup → **Import** beside GitHub. It walks your stars pages in the worker (no tabs open), persists the pagination cursor, and resumes after interruptions. Unstarring hides from current-star view without deleting history; re-starring restores it.
 
-### Developer-only semantic smoke
+### Developer-only local semantic search
 
 The hosted path uses the existing Cloudflare Workers AI and Vectorize bindings;
-users only enable Semantic search in Settings. A local model is not required
-for installation, `bun run dev:local`, or deployment. To validate semantic
-candidate union offline with a synthetic corpus, opt in explicitly:
+hosted users only enable Semantic search in Settings. A local model is not
+required for installation, `bun run dev:local`, or deployment.
+
+For the local web UI, install [Ollama](https://ollama.com/download) (0.11.10+
+for EmbeddingGemma), then pull the documented embedding model once:
 
 ```bash
-bun run semantic:local
+ollama pull embeddinggemma
 ```
 
-This downloads and caches `Xenova/bge-small-en-v1.5` (384 dimensions) under
-the operating system temporary directory, then runs the real local provider,
-in-memory index, D1 hydration, and hybrid search path. Set
-`ANANSI_TRANSFORMERS_CACHE` to choose another developer-only cache directory;
-remove that directory when you want to reclaim the model files. The remote
-Workers AI/Vectorize check is separate and documented in
+Start Anansi normally with `bun run dev:local`, enable **AI semantic search**
+from Settings, and search the library. Anansi calls Ollama on
+`http://127.0.0.1:11434` from the local server and stores vectors in the ignored
+SQLite sidecar at `data/semantic/ollama.sqlite`. New bookmarks are saved and
+keyword-searchable immediately; semantic indexing catches up in the background.
+If Ollama is stopped or the model is missing, the UI says so and continues with
+BM25 keyword results.
+
+To validate the real local provider, sidecar, and hybrid search path against a
+synthetic corpus, opt in explicitly:
+
+```bash
+bun run semantic:ollama
+```
+
+The command never uses private captures or Cloudflare credentials. Change
+`OLLAMA_EMBEDDING_MODEL` in `.env` to try `nomic-embed-text` (smaller,
+English-focused) or `nomic-embed-text-v2-moe` (larger, multilingual) instead;
+changing models creates a fresh local index generation. The
+existing `bun run semantic:local` Transformers.js smoke remains available for
+offline contract testing only. The remote Workers AI/Vectorize check is
+separate and documented in
 `docs/superpowers/plans/2026-09-07-alchemy-semantic-smoke-runbook.md`.
 
 ### B. Cloudflare — your account, ~$0 (preview, not yet verified)

@@ -194,6 +194,26 @@ describe("handleApi", () => {
 		}
 	});
 
+	test("an empty warming semantic index preserves the lexical page", async () => {
+		await setAiSettings(db, { semanticSearchEnabled: true });
+		const vector = [1, ...Array.from({ length: 383 }, () => 0)];
+		const emptyIndex = new LocalVectorIndex(384);
+		const warmingEnv: ApiEnv = {
+			...env,
+			ai: { run: async () => ({ data: [vector] }) },
+			vectorize: { upsert: async () => {}, query: async (values, options) => ({ matches: await emptyIndex.query(values, options) }) },
+		};
+		try {
+			const body = await readJson(handleApi(warmingEnv, new Request("https://anansi.test/api/search?q=ai+sdk+artifacts", {
+				headers: { authorization: "Bearer library-test-token" },
+			})));
+			expect(body.results.length).toBeGreaterThan(0);
+			expect(body.semantic).toMatchObject({ enabled: true, applied: false });
+		} finally {
+			await setAiSettings(db, { semanticSearchEnabled: false });
+		}
+	});
+
 	test("GET /api/items/:id returns the full item, never raw", async () => {
 		const list = await readJson(get("/api/items?limit=1"));
 		const item = await readJson(get(`/api/items/${list.items[0].id}`));

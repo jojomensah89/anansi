@@ -14,6 +14,16 @@ export function searchableText(item: Pick<typeof items.$inferSelect, "title" | "
     .slice(0, 12_000);
 }
 
+/** Stable, bounded projection used for semantic vectors. */
+export function semanticText(item: Pick<typeof items.$inferSelect, "title" | "body" | "articleText" | "authorName" | "authorHandle" | "source" | "url">): string {
+  return [item.title, item.body, item.articleText, item.authorName, item.authorHandle, item.source, item.url]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .join("\n")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 12_000);
+}
+
 export async function contentHash(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(bytes)].map((v) => v.toString(16).padStart(2, "0")).join("");
@@ -32,20 +42,26 @@ export async function setAiSettings(db: AnansiDb, patch: { semanticSearchEnabled
 }
 
 /** Reconciles changed items without calling a remote provider. */
-export async function reconcileAiJobs(db: AnansiDb, limit = 100): Promise<number> {
+export async function reconcileAiJobs(db: AnansiDb, limit = 100, embeddingModel?: string): Promise<number> {
   const settings = await getAiSettings(db);
   if (!settings.semanticSearchEnabled && !settings.autoTaggingEnabled) return 0;
   const rows = await db.select().from(items).orderBy(items.savedAt).limit(500);
-  const existing = new Set((await db.select({ itemId: aiEnrichmentJobs.itemId, kind: aiEnrichmentJobs.kind, contentHash: aiEnrichmentJobs.contentHash }).from(aiEnrichmentJobs)).map((job) => `${job.kind}:${job.itemId}:${job.contentHash}`));
+  const existing = new Set((await db.select({ id: aiEnrichmentJobs.id }).from(aiEnrichmentJobs)).map((job) => job.id));
   let inserted = 0;
   const now = Math.floor(Date.now() / 1000);
   for (const item of rows) {
-    const hash = await contentHash(searchableText(item));
     const kinds: AiJobKind[] = [];
     if (settings.semanticSearchEnabled) kinds.push("embedding");
     if (settings.autoTaggingEnabled) kinds.push("tagging");
     for (const kind of kinds) {
-      const id = `${kind}:${item.id}:${hash}`;
+      const hash = await contentHash(kind === "embedding" ? semanticText(item) : searchableText(item));
+      // Embedding vectors live in a model-specific vector space. Include the
+      // active model in the durable job identity so switching models queues a
+      // rebuild instead of incorrectly treating the previous model's job as
+      // complete. The projection hash itself remains model-independent.
+      const id = kind === "embedding"
+        ? `${kind}:${embeddingModel ?? settings.embeddingModel}:${item.id}:${hash}`
+        : `${kind}:${item.id}:${hash}`;
       if (existing.has(id) || inserted >= Math.min(Math.max(limit, 1), 100)) continue;
       const result = await db.insert(aiEnrichmentJobs).values({ id, itemId: item.id, kind, contentHash: hash, createdAt: now, updatedAt: now }).onConflictDoNothing().run();
       existing.add(id);
@@ -58,7 +74,10 @@ export async function reconcileAiJobs(db: AnansiDb, limit = 100): Promise<number
 export async function claimAiJobs(db: AnansiDb, kind: AiJobKind, limit = 4, now = Math.floor(Date.now() / 1000)): Promise<AiJob[]> {
   const settings = await getAiSettings(db);
   if ((kind === "embedding" && !settings.semanticSearchEnabled) || (kind === "tagging" && !settings.autoTaggingEnabled)) return [];
-  const rows = await db.select().from(aiEnrichmentJobs).where(and(eq(aiEnrichmentJobs.kind, kind), inArray(aiEnrichmentJobs.status, ["pending", "retrying"]), lte(aiEnrichmentJobs.nextRunAt, now), lte(aiEnrichmentJobs.leaseUntil, now))).orderBy(aiEnrichmentJobs.nextRunAt, aiEnrichmentJobs.id).limit(Math.min(Math.max(limit, 1), 20));
+  // An expired running lease belongs to a worker that stopped before it could
+  // complete the job. Reclaim it alongside pending/retrying work so a local
+  // server restart cannot strand an embedding forever.
+  const rows = await db.select().from(aiEnrichmentJobs).where(and(eq(aiEnrichmentJobs.kind, kind), inArray(aiEnrichmentJobs.status, ["pending", "retrying", "running"]), lte(aiEnrichmentJobs.nextRunAt, now), lte(aiEnrichmentJobs.leaseUntil, now))).orderBy(aiEnrichmentJobs.nextRunAt, aiEnrichmentJobs.id).limit(Math.min(Math.max(limit, 1), 20));
   const claimed: AiJob[] = [];
   for (const row of rows) {
     const token = crypto.randomUUID();
@@ -77,8 +96,8 @@ export async function failAiJob(db: AnansiDb, id: string, token: string, attempt
   await db.update(aiEnrichmentJobs).set({ status: attempts >= 5 ? "failed" : "retrying", claimToken: null, leaseUntil: 0, nextRunAt: now + delay, updatedAt: now, lastError: error.slice(0, 500) }).where(and(eq(aiEnrichmentJobs.id, id), eq(aiEnrichmentJobs.claimToken, token)));
 }
 
-export async function aiProgress(db: AnansiDb) {
-  const [row] = await db.select({ pending: sql<number>`sum(case when status in ('pending','retrying','running') then 1 else 0 end)`, failed: sql<number>`sum(case when status='failed' then 1 else 0 end)`, complete: sql<number>`sum(case when status='complete' then 1 else 0 end)` }).from(aiEnrichmentJobs);
+export async function aiProgress(db: AnansiDb, kind?: AiJobKind) {
+  const [row] = await db.select({ pending: sql<number>`sum(case when status in ('pending','retrying','running') then 1 else 0 end)`, failed: sql<number>`sum(case when status='failed' then 1 else 0 end)`, complete: sql<number>`sum(case when status='complete' then 1 else 0 end)` }).from(aiEnrichmentJobs).where(kind ? eq(aiEnrichmentJobs.kind, kind) : undefined);
   return { pending: Number(row?.pending ?? 0), failed: Number(row?.failed ?? 0), complete: Number(row?.complete ?? 0) };
 }
 

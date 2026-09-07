@@ -16,7 +16,7 @@ import {
   RowsSkeleton,
   useSlowLoad,
 } from "../components/skeleton.tsx";
-import { api, type Collection, type ItemRow } from "../lib/api.ts";
+import { api, type Collection, type ItemRow, type SemanticSearchStatus } from "../lib/api.ts";
 import { libraryKeys, useLibraryQuery } from "../lib/library-query.ts";
 import { useHideRemoved } from "../lib/settings.ts";
 import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
@@ -25,6 +25,31 @@ export const Route = createFileRoute("/")({
   component: Library,
   validateSearch: validateLibrarySearch,
 });
+
+function semanticNoticeFor(query: string | undefined, status: SemanticSearchStatus | undefined): { message: string; status: SemanticSearchStatus } | null {
+  if (!query || !status?.enabled || (status.applied && status.state !== "warming") || status.degradedReason === "pagination-boundary") return null;
+  const message = status.state === "warming"
+    ? "Semantic index warming — showing available semantic results."
+      : status.local && (status.state === "unavailable" || status.degradedReason === "provider-unavailable")
+        ? "Ollama is unavailable — showing keyword results."
+      : status.state === "error" || status.state === "paused" || status.degradedReason
+        ? "Semantic search is unavailable — showing keyword results."
+        : null;
+  return message ? { message, status } : null;
+}
+
+function SemanticSearchNotice({ query, status }: { query: string | undefined; status: SemanticSearchStatus | undefined }) {
+  const notice = semanticNoticeFor(query, status);
+  if (!notice) return null;
+  return (
+    <div role="status" aria-live="polite" style={{ margin: "0 20px 10px", padding: "7px 10px", border: "1px solid var(--edge)", borderRadius: 5, color: "var(--faint)", fontSize: 11.5, background: "color-mix(in srgb, var(--card) 82%, transparent)" }}>
+      {notice.message}
+      {notice.status.pending !== undefined && notice.status.pending > 0 && (
+        <span className="mono" style={{ marginLeft: 8, color: "var(--fainter)" }}>{notice.status.pending} pending</span>
+      )}
+    </div>
+  );
+}
 
 
 /**
@@ -301,6 +326,7 @@ function Library() {
             </div>
 
             <FilterChips bar={bar} matched={!library.hasNextPage && !library.isPending && !library.isError ? items.length : null} />
+            <SemanticSearchNotice query={search.q} status={library.semantic} />
           </div>
 
           <div style={{ padding: "16px 20px" }}>

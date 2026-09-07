@@ -76,7 +76,7 @@ async function main() {
   const index = new LocalVectorIndex(DIMENSIONS);
   for (const item of all.items) await index.upsert([{ id: item.id, values: await provider.embed(item.excerpt) }]);
   const lexical = await searchItemsPage(db, options);
-  const hybrid = await hybridSearch(db, options.query, options, lexical, { enabled: true, dimensions: DIMENSIONS }, provider, index);
+  const hybrid = await hybridSearch(db, options.query, options, lexical, { enabled: true, dimensions: DIMENSIONS }, { provider, index });
   const lexicalIds = lexical.items.map((item) => item.id);
   const hybridIds = hybrid.items.map((item) => item.id);
   const report = {

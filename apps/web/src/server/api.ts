@@ -24,7 +24,7 @@ import { parseExtensionHeartbeat } from "@anansi/sources";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import type { AiBinding, VectorizeBinding } from "./ai.ts";
 import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
-import { hybridSearch } from "./semantic-search.ts";
+import { hybridSearch, type SemanticRuntime } from "./semantic-search.ts";
 import { ingestCapture } from "./ingest.ts";
 import {
 	isToggleableSource,
@@ -72,6 +72,10 @@ export interface ApiEnv extends LibraryAuthEnv {
 	media?: MediaSource;
 	ai?: AiBinding;
 	vectorize?: VectorizeBinding;
+	/** Local-only Ollama + sidecar runtime. Hosted Workers use ai/vectorize. */
+	semantic?: SemanticRuntime;
+	/** Local-only nudge; ingestion itself never waits for semantic indexing. */
+	semanticKick?: () => void;
 	/** Shared secret for /api/ingest. Absent means ingest is closed. */
 	ingestToken?: string;
 }
@@ -171,14 +175,17 @@ const searchRoute: Route = {
           };
           const page = await searchItemsPage(env.db, searchOptions);
           const aiSettings = await getAiSettings(env.db);
+          const runtime = env.semantic ?? (env.ai && env.vectorize ? {
+            provider: createEmbeddingProvider(env.ai, aiSettings.embeddingModel, aiSettings.embeddingDimensions),
+            index: createVectorIndex(env.vectorize, aiSettings.embeddingDimensions),
+          } : undefined);
           const hybrid = await hybridSearch(
             env.db,
             query,
             searchOptions,
             page,
-            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: aiSettings.embeddingDimensions },
-            env.ai ? createEmbeddingProvider(env.ai, aiSettings.embeddingModel, aiSettings.embeddingDimensions) : undefined,
-            env.vectorize ? createVectorIndex(env.vectorize, aiSettings.embeddingDimensions) : undefined,
+            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: env.semantic ? undefined : aiSettings.embeddingDimensions },
+            runtime,
           );
           return json({ query, items: hybrid.items, results: hybrid.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
         } catch (error) {
@@ -323,7 +330,7 @@ const statsRoute: Route = {
 const aiSettingsRoute: Route = {
   method: "GET",
   path: "/api/ai",
-  handle: async ({ env }) => json({ settings: await getAiSettings(env.db), progress: await aiProgress(env.db), available: Boolean(env.ai && env.vectorize) }),
+  handle: async ({ env }) => json({ settings: await getAiSettings(env.db), progress: await aiProgress(env.db), available: Boolean(env.semantic || (env.ai && env.vectorize)), runtime: env.semantic ? "ollama" : env.ai && env.vectorize ? "cloudflare" : "none" }),
 };
 
 const aiSettingsUpdateRoute: Route = {
@@ -465,6 +472,7 @@ const ingestRoute: Route = {
 			const work = fetchPendingMedia(env.db, env.media);
 			if (env.waitUntil) env.waitUntil(work); else await work;
 		}
+		if (env.semanticKick) env.semanticKick();
 
 		return json(result.body, result.status);
 	},

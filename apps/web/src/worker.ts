@@ -1,7 +1,7 @@
 import startEntry from "@tanstack/react-start/server-entry";
 import { openD1 } from "@anansi/db/d1";
 import { fetchPendingMedia } from "./server/media.ts";
-import { claimAiJobs, completeAiJob, failAiJob, getAiSettings, reconcileAiJobs, searchableText, itemEmbeddings, itemTagOverrides, items, tags, itemTags } from "@anansi/db";
+import { claimAiJobs, completeAiJob, failAiJob, getAiSettings, reconcileAiJobs, searchableText, semanticText, itemEmbeddings, itemTagOverrides, items, tags, itemTags } from "@anansi/db";
 import { createEmbeddingProvider, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
 
 interface WorkerBindings {
@@ -34,7 +34,7 @@ export async function runAiSchedule(env: WorkerBindings): Promise<void> {
         if (!item) { await completeAiJob(db, job.id, job.token); continue; }
         const text = searchableText(item);
         if (kind === "embedding") {
-          const values = await embeddingProvider.embed(text);
+          const values = await embeddingProvider.embed(semanticText(item));
           if (env.VECTORIZE) await env.VECTORIZE.upsert([{ id: item.id, values }]);
           await db.insert(itemEmbeddings).values({ itemId: item.id, vectorId: item.id, model: settings.embeddingModel, dimensions: values.length, contentHash: job.contentHash, status: "complete", createdAt: Math.floor(Date.now()/1000), updatedAt: Math.floor(Date.now()/1000) }).onConflictDoUpdate({ target: itemEmbeddings.itemId, set: { vectorId: item.id, model: settings.embeddingModel, dimensions: values.length, contentHash: job.contentHash, status: "complete", updatedAt: Math.floor(Date.now()/1000), lastError: null } });
         } else {

@@ -39,6 +39,7 @@
     "destroy": "turbo run destroy -F @anansi/infra --",
     "dev": "turbo run dev",
     "semantic:local": "bun run scripts/semantic-local-smoke.ts",
+    "semantic:ollama": "bun run scripts/semantic-ollama-smoke.ts",
     "check-types": "turbo run check-types",
     "check": "biome check --write ."
   },

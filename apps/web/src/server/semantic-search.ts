@@ -1,12 +1,36 @@
-import { hydrateSearchItems, searchItemsPage, type AnansiDb, type SearchHit, type SearchOptions } from "@anansi/db";
+import { hydrateSearchItems, type searchItemsPage, type AnansiDb, type SearchHit, type SearchOptions } from "@anansi/db";
 import { AiProviderError, reciprocalRankFusion, type EmbeddingProvider, type VectorIndex } from "./ai.ts";
 
 export type SemanticDegradedReason = "provider-unavailable" | "provider-failed" | "quota" | "dimension-mismatch" | "pagination-boundary";
+
+export type SemanticRuntimeState = "ready" | "warming" | "unavailable" | "error" | "paused";
+
+export interface SemanticRuntimeSnapshot {
+  state: SemanticRuntimeState;
+  model?: string;
+  dimension?: number;
+  pending?: number;
+  indexed?: number;
+}
+
+export interface SemanticRuntime {
+	provider: EmbeddingProvider;
+	index: VectorIndex;
+	/** True only for the local Ollama runtime; hosted responses omit it. */
+	local?: boolean;
+	status?: () => SemanticRuntimeSnapshot | Promise<SemanticRuntimeSnapshot>;
+}
 
 export interface SemanticSearchStatus {
   enabled: boolean;
   applied: boolean;
   degradedReason?: SemanticDegradedReason;
+  state?: SemanticRuntimeState;
+  model?: string;
+  dimension?: number;
+	pending?: number;
+	indexed?: number;
+	local?: boolean;
 }
 
 export interface HybridSearchResult {
@@ -32,31 +56,61 @@ export async function hybridSearch(
   query: string,
   opts: Omit<SearchOptions, "query">,
   lexical: Awaited<ReturnType<typeof searchItemsPage>>,
-  settings: { enabled: boolean; dimensions: number },
-  provider?: EmbeddingProvider,
-  index?: VectorIndex,
+  settings: { enabled: boolean; dimensions?: number },
+  runtime?: SemanticRuntime,
 ): Promise<HybridSearchResult> {
   const base = { items: lexical.items, nextCursor: lexical.nextCursor };
   if (!settings.enabled) return { ...base, semantic: { enabled: false, applied: false } };
-  if (!provider || !index) return { ...base, semantic: { enabled: true, applied: false, degradedReason: "provider-unavailable" } };
-  if (opts.cursor) return { ...base, semantic: { enabled: true, applied: false, degradedReason: "pagination-boundary" } };
+  if (!runtime) return { ...base, semantic: { enabled: true, applied: false, degradedReason: "provider-unavailable" } };
+
+  let snapshot: SemanticRuntimeSnapshot | undefined;
+  try { snapshot = runtime.status ? await runtime.status() : undefined; } catch { /* status is advisory; search still gets a chance */ }
+  const withSnapshot = (status: SemanticSearchStatus): SemanticSearchStatus => snapshot ? {
+    ...status,
+    ...(runtime.local ? { local: true } : {}),
+    state: status.state ?? snapshot.state,
+    model: status.model ?? snapshot.model,
+    dimension: status.dimension ?? snapshot.dimension,
+    pending: status.pending ?? snapshot.pending,
+    indexed: status.indexed ?? snapshot.indexed,
+  } : status;
+  if (opts.cursor) return { ...base, semantic: withSnapshot({ enabled: true, applied: false, degradedReason: "pagination-boundary" }) };
 
   try {
-    if (provider.dimensions !== settings.dimensions || index.dimensions !== settings.dimensions) {
+    const expected = settings.dimensions;
+    if (expected !== undefined && expected > 0 && ((runtime.provider.dimensions > 0 && runtime.provider.dimensions !== expected) || (runtime.index.dimensions > 0 && runtime.index.dimensions !== expected))) {
       throw new AiProviderError("dimension", "semantic components have incompatible dimensions");
     }
-    const vector = await provider.embed(query);
+    if (runtime.provider.dimensions > 0 && runtime.index.dimensions > 0 && runtime.provider.dimensions !== runtime.index.dimensions) {
+      throw new AiProviderError("dimension", "semantic components have incompatible dimensions");
+    }
+    const vector = await runtime.provider.embed(query);
     const limit = Math.min(Math.max(Math.floor(opts.limit ?? 30), 1), 100);
-    const nearest = await index.query(vector, { topK: Math.min(Math.max(limit * 3, 20), 100) });
-    const vectorOnlyIds = nearest.map((match) => match.id).filter((id) => !lexical.items.some((item) => item.id === id));
+    const nearest = await runtime.index.query(vector, { topK: Math.min(Math.max(limit * 3, 20), 100) });
+    // An empty/warming sidecar is a normal state. Preserve the lexical page
+    // until the first vector is indexed rather than turning a successful
+    // provider call into an empty result set.
+    if (nearest.length === 0) return { ...base, semantic: withSnapshot({ enabled: true, applied: false }) };
+    const lexicalIds = new Set(lexical.items.map((item) => item.id));
+    const vectorOnlyIds: string[] = [];
+    for (const match of nearest) if (!lexicalIds.has(match.id)) vectorOnlyIds.push(match.id);
     const hydrated = await hydrateSearchItems(db, vectorOnlyIds, opts);
     const itemsById = new Map([...lexical.items, ...hydrated].map((item) => [item.id, item]));
     const lexicalRanks = lexical.items.map((item) => ({ id: item.id }));
-    const semanticRanks = nearest.filter((match) => itemsById.has(match.id)).map((match) => ({ id: match.id, score: match.score }));
+    const semanticRanks: Array<{ id: string; score: number }> = [];
+    for (const match of nearest) if (itemsById.has(match.id)) semanticRanks.push({ id: match.id, score: match.score });
     const order = reciprocalRankFusion([lexicalRanks, semanticRanks]);
-    const items = order.map(({ id }) => itemsById.get(id)).filter((item): item is SearchHit => Boolean(item)).slice(0, limit);
-    return { items, nextCursor: null, semantic: { enabled: true, applied: true } };
+    const items: SearchHit[] = [];
+    for (const { id } of order) {
+      const item = itemsById.get(id);
+      if (item) items.push(item);
+      if (items.length >= limit) break;
+    }
+    return { items, nextCursor: null, semantic: withSnapshot({ enabled: true, applied: true }) };
   } catch (error) {
-    return { ...base, semantic: { enabled: true, applied: false, degradedReason: reasonFor(error) } };
+    const degradedReason = reasonFor(error);
+    const degraded: SemanticSearchStatus = { enabled: true, applied: false, degradedReason };
+    if (snapshot) degraded.state = degradedReason === "provider-unavailable" ? "unavailable" : "error";
+    return { ...base, semantic: withSnapshot(degraded) };
   }
 }

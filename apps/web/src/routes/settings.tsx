@@ -18,12 +18,13 @@ function Settings() {
     <Rail total={0} authors={0} bySource={{}} />
     <main className="anansi-settings-page">
       <h1 className="anansi-settings-title">Settings</h1>
-      <p className="anansi-settings-subtitle">Optional AI features run in your Cloudflare account and never replace manual tags.</p>
+      <p className="anansi-settings-subtitle">{data?.runtime === "ollama" ? "Local semantic search runs through Ollama on this machine; automatic tags remain separate." : "Optional AI features run in your Cloudflare account and never replace manual tags."}</p>
       {error && <p role="alert" style={{ color: "var(--accent-text)" }}>{error}</p>}
       {!data ? <p className="mono">Loading…</p> : <>
         <section className="anansi-settings-section">
           <h2 className="anansi-settings-heading">AI features</h2>
           {!data.available && <p className="anansi-settings-unavailable">AI bindings are unavailable in this environment. Keyword search and manual tags continue to work.</p>}
+          {data.runtime === "ollama" && <p className="anansi-settings-unavailable">Ollama is configured for local semantic search. Start Ollama and pull the configured embedding model to enable semantic indexing; keyword search continues to work meanwhile.</p>}
           <div className="anansi-settings-list">
             <Toggle icon={<CpuIcon />} label="Enable AI semantic search" badge="Smart" description="Find content by meaning, not exact wording." checked={data.settings.semanticSearchEnabled === 1} onChange={(v) => toggle("semanticSearchEnabled", v)} />
             <Toggle icon={<SparkIcon />} label="Enable automatic tags" badge="Beta" description="Apply concise topic tags to new saves." checked={data.settings.autoTaggingEnabled === 1} onChange={(v) => toggle("autoTaggingEnabled", v)} />

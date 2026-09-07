@@ -88,12 +88,19 @@ export interface ItemQuery {
 export interface Page {
   items: ItemRow[];
   nextCursor: string | null;
+  semantic?: SemanticSearchStatus;
 }
 
 export interface SemanticSearchStatus {
   enabled: boolean;
   applied: boolean;
   degradedReason?: "provider-unavailable" | "provider-failed" | "quota" | "dimension-mismatch" | "pagination-boundary";
+  state?: "ready" | "warming" | "unavailable" | "error" | "paused";
+  model?: string;
+  dimension?: number;
+  pending?: number;
+  indexed?: number;
+  local?: boolean;
 }
 
 export interface SessionState {
@@ -105,6 +112,7 @@ export interface AiSettingsResponse {
   settings: { semanticSearchEnabled: number; autoTaggingEnabled: number; embeddingModel: string; embeddingDimensions: number; tagModel: string; quotaPauseReason: string | null; lastRunAt: number | null };
   progress: { pending: number; failed: number; complete: number };
   available: boolean;
+  runtime?: "ollama" | "cloudflare" | "none";
 }
 
 export interface Collection {

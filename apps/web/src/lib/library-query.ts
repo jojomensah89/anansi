@@ -26,6 +26,7 @@ const defaultLoader: LibraryPageLoader = async ({ query, options, signal }) => {
   return {
     items: page.items.map((item) => ({ ...item, saveOrder: null } as ItemRow)),
     nextCursor: page.nextCursor,
+    semantic: page.semantic,
   };
 };
 
@@ -85,5 +86,9 @@ export function useLibraryQuery({
   return {
     ...result,
     items: useMemo(() => mergeUniquePages(result.data?.pages), [result.data?.pages]),
+    semantic: useMemo(() => {
+      const pages = result.data?.pages ?? [];
+      return [...pages].reverse().find((page) => page.semantic)?.semantic;
+    }, [result.data?.pages]),
   };
 }
