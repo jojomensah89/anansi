@@ -105,23 +105,102 @@ export interface SearchHit {
   tags?: TagSummary[];
 }
 
-type SearchPageRow = Omit<SearchHit, "favorite" | "hasNote" | "tags"> & {
+/** Raw row for the card fields shared by lexical, semantic, and list results. */
+type CardProjectionRow = Omit<SearchHit, "favorite" | "hasNote" | "tags" | "media" | "metrics"> & {
 	favorite: number;
-	mediaJson: string;
-	metricsJson: string;
-	tagsJson: string;
+	mediaJson: string | null;
+	metricsJson: string | null;
+	tagsJson: string | null;
 	hasNote: number;
 };
 
-type ListPageRow = Omit<SearchHit, "favorite" | "hasNote" | "tags"> & {
+type SearchPageRow = CardProjectionRow;
+
+type ListPageRow = CardProjectionRow & {
 	saveOrder: number | null;
-	favorite: number;
-	mediaJson: string;
-	metricsJson: string;
-	quotedJson: string;
-	tagsJson: string;
-	hasNote: number;
+	quotedJson: string | null;
 };
+
+/**
+ * The stable card projection. Excerpts, scores, ordering keys, and quoted
+ * media stay outside this fragment because each retrieval mode owns them.
+ */
+function cardProjection(): SQL {
+	return sql`
+      i.id, i.url, i.author_handle as author, i.author_name as authorName,
+      i.author_avatar as authorAvatar, i.title, i.posted_at as postedAt,
+      i.saved_at as savedAt, i.saved_at_exact as savedAtExact, i.source,
+      i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
+      i.favorite, i.metrics as metricsJson,
+      json_extract(i.raw, '$.language') as language,
+      json_extract(i.raw, '$.visibility') as visibility,
+      (select count(*) from media m where m.item_id=i.id) as mediaCount,
+      (select json_group_array(json_object('key',m.stored_key,'kind',m.kind,'url',m.origin_url))
+         from media m where m.item_id=i.id and m.stored_key is not null) as mediaJson,
+      (select json_group_array(json_object('label',t.label,'color',t.color))
+         from item_tags it join tags t on t.id=it.tag_id where it.item_id=i.id) as tagsJson,
+      case when length(coalesce(i.note, '')) > 0 then 1 else 0 end as hasNote
+  `;
+}
+
+function parseDecoration<T>(text: string | null | undefined, fallback: T): T {
+	try {
+		return (JSON.parse(text ?? "") as T) ?? fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+/** Hydrate the shared card shape without letting optional decoration break a row. */
+function hydrateCardRow(rawRow: CardProjectionRow): SearchHit {
+	return {
+		id: rawRow.id,
+		url: rawRow.url,
+		author: rawRow.author,
+		authorName: rawRow.authorName,
+		authorAvatar: rawRow.authorAvatar,
+		language: rawRow.language,
+		visibility: rawRow.visibility,
+		title: rawRow.title,
+		postedAt: rawRow.postedAt,
+		savedAt: rawRow.savedAt,
+		savedAtExact: rawRow.savedAtExact,
+		source: rawRow.source,
+		platformSaved: rawRow.platformSaved,
+		removedFromSourceAt: rawRow.removedFromSourceAt,
+		favorite: rawRow.favorite === 1,
+		mediaCount: rawRow.mediaCount,
+		excerpt: rawRow.excerpt,
+		score: rawRow.score,
+		hasNote: rawRow.hasNote === 1,
+		tags: parseTagSummary(rawRow.tagsJson ?? undefined),
+		media: parseDecoration<CardMedia[]>(rawRow.mediaJson, []),
+		metrics: parseDecoration<Record<string, number>>(rawRow.metricsJson, {}),
+	};
+}
+
+type QuotedCard = {
+	handle: string | null;
+	name: string | null;
+	avatar: string | null;
+	text: string;
+	url: string | null;
+	mediaUrls: string[];
+};
+
+/** List-only hydration keeps quote media nested instead of changing its contract. */
+function hydrateListRow(rawRow: ListPageRow) {
+	const all = parseDecoration<CardMedia[]>(rawRow.mediaJson, []);
+	const quoted = parseDecoration<QuotedCard | null>(rawRow.quotedJson, null);
+	const quotedUrls = new Set(quoted?.mediaUrls ?? []);
+	const card = hydrateCardRow(rawRow);
+	return {
+		...card,
+		saveOrder: rawRow.saveOrder,
+		media: all.filter((m) => !quotedUrls.has(m.url)),
+		quoted: quoted ? { ...quoted, media: all.filter((m) => quotedUrls.has(m.url)) } : null,
+	};
+}
 
 /**
  * Hybrid search is day-2-of-phase-2 work; this is keyword only, and honest
@@ -153,17 +232,7 @@ export async function searchItemsPage(db: AnansiDb, opts: SearchOptions): Promis
     } catch { throw new InvalidSearchCursorError(); }
   }
   const rows = await db.all<SearchPageRow>(sql`
-    select i.id, i.url, i.author_handle as author, i.author_name as authorName,
-      i.author_avatar as authorAvatar, i.title, i.posted_at as postedAt,
-      i.saved_at as savedAt, i.saved_at_exact as savedAtExact, i.source,
-      i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
-      i.favorite, i.metrics as metricsJson,
-      json_extract(i.raw, '$.language') as language,
-      json_extract(i.raw, '$.visibility') as visibility,
-      (select count(*) from media m where m.item_id=i.id) as mediaCount,
-      (select json_group_array(json_object('key',m.stored_key,'kind',m.kind,'url',m.origin_url)) from media m where m.item_id=i.id and m.stored_key is not null) as mediaJson,
-      (select json_group_array(json_object('label',t.label,'color',t.color)) from item_tags it join tags t on t.id=it.tag_id where it.item_id=i.id) as tagsJson,
-      case when length(coalesce(i.note, '')) > 0 then 1 else 0 end as hasNote,
+    select ${cardProjection()},
       snippet(items_fts, -1, ${open}, ${close}, '…', 28) as excerpt,
       bm25(items_fts, 1.0, 2.0, 0.4, 1.0, 1.5) as score
     from items_fts join items i on i.rowid = items_fts.rowid
@@ -179,32 +248,7 @@ export async function searchItemsPage(db: AnansiDb, opts: SearchOptions): Promis
     order by score asc, i.id asc limit ${limit + 1}
   `);
   const hasMore = rows.length > limit;
-  const page = rows.slice(0, limit).map((rawRow) => {
-		return {
-			id: rawRow.id,
-			url: rawRow.url,
-			author: rawRow.author,
-			authorName: rawRow.authorName,
-			authorAvatar: rawRow.authorAvatar,
-			language: rawRow.language,
-			visibility: rawRow.visibility,
-			title: rawRow.title,
-			postedAt: rawRow.postedAt,
-			savedAt: rawRow.savedAt,
-			savedAtExact: rawRow.savedAtExact,
-			source: rawRow.source,
-			platformSaved: rawRow.platformSaved,
-			removedFromSourceAt: rawRow.removedFromSourceAt,
-			favorite: rawRow.favorite === 1,
-			mediaCount: rawRow.mediaCount,
-			excerpt: rawRow.excerpt,
-			score: rawRow.score,
-			hasNote: rawRow.hasNote === 1,
-			tags: parseTagSummary(rawRow.tagsJson),
-			media: JSON.parse(rawRow.mediaJson ?? "[]") as CardMedia[],
-			metrics: JSON.parse(rawRow.metricsJson ?? "{}") as Record<string, number>,
-		};
-	});
+  const page = rows.slice(0, limit).map(hydrateCardRow);
   const last = page.at(-1);
   return { items: page, nextCursor: hasMore && last ? encodeURIComponent(JSON.stringify({ key, score: last.score, id: last.id })) : null };
 }
@@ -226,23 +270,8 @@ export async function hydrateSearchItems(
 ): Promise<SearchHit[]> {
   const uniqueIds = [...new Set(ids)].filter(Boolean).slice(0, 100);
   if (uniqueIds.length === 0) return [];
-  type Row = Omit<SearchHit, "favorite" | "hasNote" | "tags"> & {
-    favorite: number; mediaJson: string; metricsJson: string; tagsJson: string; hasNote: number;
-  };
-  const rows = await db.all<Row>(sql`
-    select i.id, i.url, i.author_handle as author, i.author_name as authorName,
-      i.author_avatar as authorAvatar, i.title, i.posted_at as postedAt,
-      i.saved_at as savedAt, i.saved_at_exact as savedAtExact, i.source,
-      i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
-      i.favorite, i.metrics as metricsJson,
-      json_extract(i.raw, '$.language') as language,
-      json_extract(i.raw, '$.visibility') as visibility,
-      (select count(*) from media m where m.item_id=i.id) as mediaCount,
-      (select json_group_array(json_object('key',m.stored_key,'kind',m.kind,'url',m.origin_url))
-         from media m where m.item_id=i.id and m.stored_key is not null) as mediaJson,
-      (select json_group_array(json_object('label',t.label,'color',t.color))
-         from item_tags it join tags t on t.id=it.tag_id where it.item_id=i.id) as tagsJson,
-      case when length(coalesce(i.note, '')) > 0 then 1 else 0 end as hasNote,
+  const rows = await db.all<SearchPageRow>(sql`
+    select ${cardProjection()},
       substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
       0 as score
     from items i
@@ -259,20 +288,7 @@ export async function hydrateSearchItems(
   return uniqueIds.flatMap((id) => {
     const rawRow = byId.get(id);
     if (!rawRow) return [];
-    const parse = <T,>(text: string | undefined, fallback: T): T => {
-      try { return (JSON.parse(text ?? "") as T) ?? fallback; } catch { return fallback; }
-    };
-    return [{
-      id: rawRow.id, url: rawRow.url, author: rawRow.author, authorName: rawRow.authorName,
-      authorAvatar: rawRow.authorAvatar, language: rawRow.language, visibility: rawRow.visibility,
-      title: rawRow.title, postedAt: rawRow.postedAt, savedAt: rawRow.savedAt,
-      savedAtExact: rawRow.savedAtExact, source: rawRow.source, platformSaved: rawRow.platformSaved,
-      removedFromSourceAt: rawRow.removedFromSourceAt, favorite: rawRow.favorite === 1,
-      mediaCount: rawRow.mediaCount, excerpt: rawRow.excerpt, score: rawRow.score,
-      hasNote: rawRow.hasNote === 1, tags: parseTagSummary(rawRow.tagsJson),
-      media: parse<CardMedia[]>(rawRow.mediaJson, []),
-      metrics: parse<Record<string, number>>(rawRow.metricsJson, {}),
-    } satisfies SearchHit];
+    return [hydrateCardRow(rawRow)];
   });
 }
 
@@ -678,27 +694,13 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
     : sql`order by i.saved_at desc, coalesce(i.save_order, 0) desc, i.id asc`;
 
   const rows = await db.all<ListPageRow>(sql`
-    select i.id, i.url, i.author_handle as author, i.author_name as authorName,
-           i.author_avatar as authorAvatar,
-           json_extract(i.raw, '$.language') as language,
-           json_extract(i.raw, '$.visibility') as visibility,
-           i.title, i.posted_at as postedAt, i.saved_at as savedAt,
-           i.saved_at_exact as savedAtExact, i.source, i.save_order as saveOrder,
-           i.favorite,
-           i.platform_saved as platformSaved,
-           i.removed_from_source_at as removedFromSourceAt,
+    select ${cardProjection()}, i.save_order as saveOrder,
            substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
            0 as score,
            -- Every stored image, not one representative. A card that shows
            -- one of four is a card that misrepresents the post. Stored keys
            -- only, so the grid never hot-links the platform.
-           (select json_group_array(json_object('key', m.stored_key, 'kind', m.kind, 'url', m.origin_url))
-              from media m where m.item_id = i.id and m.stored_key is not null) as mediaJson,
-           (select count(*) from media m where m.item_id = i.id) as mediaCount,
-           (select json_group_array(json_object('label',t.label,'color',t.color)) from item_tags it join tags t on t.id=it.tag_id where it.item_id=i.id) as tagsJson,
-           case when length(coalesce(i.note, '')) > 0 then 1 else 0 end as hasNote,
-           json_extract(i.raw, '$.quoted') as quotedJson,
-           i.metrics as metricsJson
+           json_extract(i.raw, '$.quoted') as quotedJson
     from items i
     where 1 = 1
       and ${visibleSourceClause(sql`i.source`)}
@@ -716,52 +718,7 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
   `);
 
   const hasMore = rows.length > limit;
-  const page = (hasMore ? rows.slice(0, limit) : rows).map((rawRow) => {
-    const parse = <T,>(text: string | undefined, fallback: T): T => {
-      try {
-        return (JSON.parse(text ?? "") as T) ?? fallback;
-      } catch {
-        // Decoration, all of it. A malformed blob costs the extras, not the row.
-        return fallback;
-      }
-    };
-
-    const all = parse<{ key: string; kind: string; url: string }[]>(rawRow.mediaJson, []);
-    const quoted = parse<{
-      handle: string | null; name: string | null; avatar: string | null;
-      text: string; url: string | null; mediaUrls: string[];
-    } | null>(rawRow.quotedJson, null);
-
-    // A quote's images live on the parent row; split them back apart so the
-    // card can nest them where they belong.
-    const quotedUrls = new Set(quoted?.mediaUrls ?? []);
-    return {
-      id: rawRow.id,
-      url: rawRow.url,
-      author: rawRow.author,
-      authorName: rawRow.authorName,
-      authorAvatar: rawRow.authorAvatar,
-      language: rawRow.language,
-      visibility: rawRow.visibility,
-      title: rawRow.title,
-      postedAt: rawRow.postedAt,
-      savedAt: rawRow.savedAt,
-      savedAtExact: rawRow.savedAtExact,
-      source: rawRow.source,
-      saveOrder: rawRow.saveOrder,
-      platformSaved: rawRow.platformSaved,
-      removedFromSourceAt: rawRow.removedFromSourceAt,
-      favorite: rawRow.favorite === 1,
-      mediaCount: rawRow.mediaCount,
-      excerpt: rawRow.excerpt,
-      score: rawRow.score,
-      hasNote: rawRow.hasNote === 1,
-      tags: parseTagSummary(rawRow.tagsJson),
-      metrics: parse<Record<string, number>>(rawRow.metricsJson, {}),
-      media: all.filter((m) => !quotedUrls.has(m.url)),
-      quoted: quoted ? { ...quoted, media: all.filter((m) => quotedUrls.has(m.url)) } : null,
-    };
-  });
+  const page = (hasMore ? rows.slice(0, limit) : rows).map(hydrateListRow);
   const last = page.at(-1);
   const nextCursor = !hasMore || !last
     ? null
