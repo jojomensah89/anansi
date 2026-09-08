@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "anansi": {
+      "type": "local",
+      "command": ["bun", "run", "apps/cli/src/cli.ts", "serve", "--mcp"],
+      "enabled": true
+    }
+  }
+}
