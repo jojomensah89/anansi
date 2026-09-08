@@ -40,12 +40,12 @@ Anansi fixes that:
 
 | Source | Capture | Status |
 | --- | --- | --- |
-| X bookmarks | History import + live saves | Supported |
-| Reddit saves | History import + live saves | Supported |
-| GitHub stars | Full import + live star/unstar events | Supported |
-| Web pages & bookmarks | Save pages, selections, and Chrome bookmarks | Supported |
-| Chrome bookmarks (web submode) | Optional mirroring into Web pages & bookmarks | Supported |
-| TikTok favorites | — | Paused for repair; existing rows retained but hidden |
+| <img src="./docs/assets/source-icons/x.svg" width="16" height="16" alt=""> X bookmarks | History import + live saves | Supported |
+| <img src="./docs/assets/source-icons/reddit.svg" width="16" height="16" alt=""> Reddit saves | History import + live saves | Supported |
+| <img src="./docs/assets/source-icons/github.svg" width="16" height="16" alt=""> GitHub stars | Full import + live star/unstar events | Supported |
+| <img src="./docs/assets/source-icons/web.svg" width="16" height="16" alt=""> Web pages & bookmarks | Save pages, selections, and Chrome bookmarks | Supported |
+| <img src="./docs/assets/source-icons/web.svg" width="16" height="16" alt=""> Chrome bookmarks (web submode) | Optional mirroring into Web pages & bookmarks | Supported |
+| <img src="./docs/assets/source-icons/tiktok.svg" width="16" height="16" alt=""> TikTok favorites | — | Paused for repair; existing rows retained but hidden |
 
 > GitHub capture is extension-only. It reads the signed-in GitHub stars pages in your browser, includes repositories visible to that account — including visible private repositories — and needs no GitHub OAuth or personal access token.
 
@@ -211,11 +211,56 @@ Common fixes:
   a warning because bookmark text will leave the machine. The default is
   loopback.
 
-### B. Cloudflare — your account, ~$0 (preview, not yet verified)
+### B. Cloudflare — your account, ~$0 (intended deployment path)
 
-> ⚠️ The hosted path is the intended shape — one Worker, one D1, one R2, deployed with `bun run deploy` — but no clean-account deploy has succeeded yet. Treat this section as the plan, not instructions. First verified deploy will turn it into real steps.
+> ⚠️ The hosted path is wired in the repository, but a clean-account Cloudflare deployment has not been verified in this checkout. Treat the procedure below as the intended path until that external acceptance gate is completed.
 
-The shape (`packages/infra/alchemy.run.ts`): D1 holds searchable metadata and text (migrations live in `packages/db/drizzle`, never `db:push` — the FTS5 virtual table and triggers need the migration path); R2 holds accepted image copies; retry state lives in D1 in small batches via request `waitUntil` plus scheduled recovery, so there is nothing paid to provision. Workers AI and a 384-dimensional Vectorize index are provisioned but both AI features start off; enable Semantic search or Automatic tags from `/settings` when you want to spend your own Cloudflare quota. Three separate secrets gate the three doors: `LIBRARY_TOKEN` (web UI session), `INGEST_TOKEN` (extension), `MCP_TOKEN` (agents). Absent means closed, never open.
+The stack is managed by Alchemy (`packages/infra/alchemy.run.ts`): one Anansi Worker, one D1, one R2 bucket, one Workers AI binding, and one Vectorize index per Alchemy stage. D1 holds searchable metadata and text. Migrations live in `packages/db/drizzle`; never use `db:push` because the FTS5 virtual table and triggers require the migration path. R2 holds accepted image copies, and retry state lives in D1 in small batches via request `waitUntil` plus scheduled recovery, so there is nothing paid to provision. Both AI features start off; enable Semantic search or Automatic tags from `/settings` when you want to spend your own Cloudflare quota. Three separate secrets gate the three doors: `LIBRARY_TOKEN` (web UI session), `INGEST_TOKEN` (extension), and `MCP_TOKEN` (agents). Absent means closed, never open.
+
+#### First deploy versus later deploys
+
+`bun run deploy` is safe to run repeatedly. It is a desired-state update, not a command that creates a new Anansi Worker every time:
+
+- **First deploy for a stage:** Alchemy creates the stage's D1, R2, Vectorize index, and Anansi Worker, then applies the complete migration history.
+- **Later deploy with no changes:** Alchemy plans no-ops and does not create another Worker or database.
+- **Later deploy after code changes:** Alchemy updates the existing Anansi Worker in that same stage.
+- **Later deploy after a migration is added:** Alchemy updates the D1 resource, applies only migrations that are not already recorded, and then reconciles the Worker if its bundle or bindings changed.
+
+This stack also uses `Cloudflare.state()`. On the first Alchemy run in a Cloudflare account, Alchemy may create its separate state-store Worker and supporting state resources. That state store is reused by later deploys and by other stacks and stages using the same account; it is not recreated for every `bun run deploy`.
+
+Stages are isolated. Keep using the same stage when you intend to update the same installation. Alchemy defaults to a per-user development stage such as `dev_<user>`; use an explicit stable stage for a long-lived installation, for example:
+
+```powershell
+# Default stage, from the repository root
+bun run deploy
+
+# Stable long-lived stage, from the repository root
+$env:STAGE = "prod"
+bun run deploy
+
+# The equivalent direct infra command
+bun run --cwd packages/infra deploy -- --stage prod
+```
+
+Changing the stage creates or updates a different isolated installation. Changing the logical resource IDs in `packages/infra/alchemy.run.ts`, destroying the stage, or deploying with a different Cloudflare account can also point the command at different infrastructure.
+
+#### Schema migrations after the first deploy
+
+The TypeScript schema and the SQL migration history are separate responsibilities. A change to `packages/db/src/schema.ts` does not change remote D1 by itself.
+
+When adding a table or changing the schema:
+
+1. Change `packages/db/src/schema.ts`.
+2. Run `bun run db:generate` and review the new numbered SQL file in `packages/db/drizzle`.
+3. Test the migration locally with `bun run dev:local` or the focused database tests.
+4. Commit the schema change, the generated SQL, and the generated Drizzle metadata.
+5. Pull the commit into the deployed clone and run `bun run deploy`.
+
+The deploy command first copies the canonical SQL files into the ignored Alchemy staging directory, then Alchemy compares them with the migration history in that D1 database. Already-applied migrations are skipped; new files are applied in numeric order. A fresh installation runs the complete history. Do not edit or delete an already-applied migration. Add a new migration instead. For renames, drops, or data transformations, use an expand/backfill/contract sequence so the running Worker remains compatible during the rollout.
+
+If only the application code changed, run `bun run deploy` to publish that Worker change. If neither the code nor infrastructure changed, there is normally no reason to deploy again. A `git pull` changes local files only; it does not update the Cloudflare installation until a deploy is run.
+
+These semantics are documented by [Alchemy's deploy command](https://alchemy.run/cli/deploy/), [Alchemy stages](https://alchemy.run/environments/stages/), and [Alchemy's Cloudflare D1 migration resource](https://alchemy.run/providers/cloudflare/d1/database/).
 
 Cloudflare credentials for deploy (unverified — least-privilege list to be confirmed on first successful deploy):
 
@@ -255,6 +300,12 @@ cp .env.example .env
 # Never put them in VITE_* vars or commit them.
 bun run deploy   # turbo → @anansi/infra → alchemy deploy
 ```
+
+Run the command again after pulling a later Anansi release when you want that
+release's Worker code, bindings, or database migrations in this stage. It does
+not create a second Worker: Alchemy plans an update or no-op against the
+existing stage. Do not run `bun run db:migrate:deploy` for the remote D1; that
+Drizzle command targets the local SQLite database configured for development.
 
 After deployment returns `https://<worker>.workers.dev`:
 

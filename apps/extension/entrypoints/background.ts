@@ -1333,16 +1333,6 @@ async function processPendingRefreshes(): Promise<void> {
   }
 }
 
-async function maybeStartInitialGitHubImport(): Promise<void> {
-  const runs = persistentState().runs;
-  if (!(await runs.initialImportDue("github"))) return;
-  const config = await loadConfig();
-  if (!config?.enabled || !config.sources.some((entry) => entry.source === "github")) {
-    return;
-  }
-  await startCapture("github", true);
-}
-
 const EMPTY_COUNTS: CaptureQueueStatus = {
   queued: 0,
   uploading: 0,
@@ -1454,7 +1444,6 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
       return { ok: true, snapshot: await durableSnapshot() };
     case "reschedule":
       await rescheduleAlarm();
-      void maybeStartInitialGitHubImport();
       return { ok: true };
     case "retry-queue":
       await wakeDurableQueue(true, msg.source);
@@ -1701,19 +1690,16 @@ export default defineBackground(() => {
   void rescheduleAlarm();
   void rescheduleHeartbeat();
   void wakeDurableQueue().then(processPendingRefreshes);
-  void maybeStartInitialGitHubImport();
   requestHeartbeat();
   // The worker restarts constantly; the listeners have to come back with it.
   void startMirroring();
   browser.runtime.onStartup.addListener(() => {
     void wakeDurableQueue().then(processPendingRefreshes);
-    void maybeStartInitialGitHubImport();
     requestHeartbeat();
   });
   browser.runtime.onInstalled.addListener(() => {
     void wakeDurableQueue().then(processPendingRefreshes);
     void armOpenTabs();
-    void maybeStartInitialGitHubImport();
     requestHeartbeat();
   });
 
