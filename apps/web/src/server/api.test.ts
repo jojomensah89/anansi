@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { applyAiTags, itemTags, searchItemsPage, setAiSettings, upsertItems, type AnansiDb } from "@anansi/db";
+import { aiEnrichmentJobs, applyAiTags, itemTags, reconcileAiJobs, searchItemsPage, setAiSettings, upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
 import { LocalVectorIndex } from "./local-vector-index.ts";
@@ -135,11 +135,24 @@ describe("handleApi", () => {
 	test("POST /api/ai/reclassify clears AI assignments and reopens tagging jobs", async () => {
 		const item = (await searchItemsPage(db, { query: "seed", limit: 1 })).items[0];
 		if (!item) throw new Error("expected seeded item");
+		await setAiSettings(db, { autoTaggingEnabled: true });
+		await reconcileAiJobs(db, 100, undefined, ["tagging"]);
+		expect((await db.select().from(aiEnrichmentJobs)).length).toBeGreaterThan(0);
+		await db.update(aiEnrichmentJobs).set({ status: "complete" }).run();
 		await applyAiTags(db, item.id, ["web-dev"], "test-model");
 		const response = await handleApi(env, new Request("https://anansi.test/api/ai/reclassify", { method: "POST" }));
+		const first = await readJson(response);
 		expect(response.status).toBe(200);
 		expect((await db.select().from(itemTags)).some((assignment) => assignment.itemId === item.id && assignment.provenance === "ai")).toBe(false);
-		expect((await readJson(response)).taxonomyVersion).toBe("v1");
+		expect(first.taxonomyVersion).toBe("v1");
+		expect(first.taggingProgress.pending).toBeGreaterThan(0);
+		const jobsAfterFirst = await db.select().from(aiEnrichmentJobs);
+		await applyAiTags(db, item.id, ["web-dev"], "test-model");
+		const repeated = await handleApi(env, new Request("https://anansi.test/api/ai/reclassify", { method: "POST" }));
+		const second = await readJson(repeated);
+		expect(second.taggingProgress.pending).toBe(first.taggingProgress.pending);
+		expect((await db.select().from(aiEnrichmentJobs)).length).toBe(jobsAfterFirst.length);
+		expect((await db.select().from(itemTags)).some((assignment) => assignment.itemId === item.id && assignment.provenance === "ai")).toBe(true);
 	});
 
 	test("semantic-only candidates are hydrated and filtered by D1", async () => {

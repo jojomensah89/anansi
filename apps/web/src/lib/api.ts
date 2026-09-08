@@ -112,6 +112,7 @@ export interface SessionState {
 export interface AiSettingsResponse {
   settings: { semanticSearchEnabled: number; autoTaggingEnabled: number; embeddingModel: string; embeddingDimensions: number; tagModel: string; quotaPauseReason: string | null; lastRunAt: number | null };
   progress: { pending: number; failed: number; complete: number };
+  taggingProgress: { pending: number; failed: number; complete: number };
   available: boolean;
   capabilities?: { semanticSearch: boolean; autoTagging: boolean };
   runtime?: "ollama" | "cloudflare" | "none";
@@ -192,7 +193,7 @@ export interface SourcesResponse {
 export const api = {
 	ai: (signal?: AbortSignal) => get<AiSettingsResponse>("/api/ai", signal),
   updateAi: (body: { semanticSearchEnabled?: boolean; autoTaggingEnabled?: boolean }) => send<AiSettingsResponse>("/api/ai", "PATCH", body),
-  reclassifyAiTags: () => post<{ taxonomyVersion: string; progress: AiSettingsResponse["progress"] }>("/api/ai/reclassify", {}),
+  reclassifyAiTags: () => post<{ taxonomyVersion: string; progress: AiSettingsResponse["progress"]; taggingProgress: AiSettingsResponse["taggingProgress"] }>("/api/ai/reclassify", {}),
   stats: (signal?: AbortSignal) =>
     get<{
       items: number;
