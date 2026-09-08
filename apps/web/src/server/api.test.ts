@@ -483,9 +483,46 @@ describe("handleApi", () => {
 	});
 
 	test("ingest parses a raw payload server-side", async () => {
-		const raw = await Bun.file(
-			"data/raw/x/page-1788389226894-0001.json",
-		).json();
+		const raw = {
+			data: {
+				bookmark_timeline_v2: {
+					timeline: {
+						instructions: [
+							{
+								entries: ["1001", "1002"].map((id, index) => ({
+									entryId: `tweet-${id}`,
+									sortIndex: String(2 - index),
+									content: {
+										itemContent: {
+											tweet_results: {
+												result: {
+													rest_id: id,
+													core: {
+														user_results: {
+															result: {
+																legacy: {
+																	screen_name: `user-${id}`,
+																	name: `User ${id}`,
+														},
+													},
+												},
+													},
+													legacy: {
+														full_text: `Fixture ${id}`,
+														created_at: "Wed Sep 01 00:00:00 +0000 2021",
+														entities: { urls: [] },
+													},
+												},
+											},
+										},
+									},
+								})),
+							},
+						],
+					},
+				},
+			},
+		};
 		const res = await handleApi(
 			env,
 			new Request("https://anansi.test/api/ingest", {
@@ -498,7 +535,7 @@ describe("handleApi", () => {
 			}),
 		);
 		expect(res.status).toBe(200);
-		expect((await readJson(res)).parsed).toBeGreaterThan(50);
+		expect((await readJson(res)).parsed).toBe(2);
 	});
 
 	test("a raw payload that parses to nothing is an error, not a cheerful zero", async () => {

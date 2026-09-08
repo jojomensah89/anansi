@@ -31,6 +31,11 @@ jobs:
   build-extension:
     runs-on: ubuntu-latest
     needs: test
+    # This job validates the artifact build only; it never publishes the
+    # bundle, so use inert values instead of embedding a production secret.
+    env:
+      ANANSI_EXTENSION_ORIGIN: https://ci.invalid
+      ANANSI_EXTENSION_INGEST_TOKEN: ci-build-placeholder-0123456789
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

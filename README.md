@@ -2,7 +2,7 @@
 
 # 🕸️ Anansi
 
-**Your personal web memory in your own Cloudflare account — free tier, ~$0. Local SQLite for dev, Worker + D1 + R2 for hosting.**
+**Your personal web memory, all in one place.**
 
 Anansi captures the things you save online — bookmarks, saved posts, GitHub stars, web pages — into one searchable library your coding agent can query over MCP. Your browser supplies the platform session; your Cloudflare account (or a local SQLite file for dev) stores the capture.
 
@@ -10,8 +10,6 @@ Anansi captures the things you save online — bookmarks, saved posts, GitHub st
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple)](https://modelcontextprotocol.io)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Free--tier-orange?logo=cloudflare)](https://github.com/jojomensah89/anansi)
 [![Repo](https://img.shields.io/badge/GitHub-jojomensah89%2Fanansi-black?logo=github)](https://github.com/jojomensah89/anansi)
-[![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jojomensahh)
-<a href="https://x.com/jojomensah89"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs" /><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" height="20" align="middle" /></picture></a>
 <!-- PUBLIC LAUNCH: uncomment after repo goes public -->
 <!-- [![Stars](https://img.shields.io/github/stars/jojomensah89/anansi?style=social)](https://github.com/jojomensah89/anansi) -->
 <!-- [![Issues](https://img.shields.io/github/issues/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/issues) -->
@@ -34,7 +32,7 @@ Anansi fixes that:
 - 💸 **~$0 hosting in your account** — one Worker, one D1, one R2. No server to babysit, no account controlled by anyone else, no paid Queues or Durable Objects by design
 - 🔍 **One searchable library** — full text, authors, recency, source filters
 - 🏷️ **Organize your way** — manual tags (bulk included), saved views, highlights, private notes, favorites
-- 🧠 **Agent-native** — Streamable HTTP MCP server with 4 read-focused tools
+- 🧠 **Agent-native** — Streamable HTTP MCP server with 8 read-focused tools
 - 🔒 **Conservative by design** — bearer-auth ingest, no `<all_urls>`, no `cookies` permission, no GitHub OAuth/PAT
 - 🔁 **Durable** — queued capture with retry + resume cursors, survives restarts and rate limits
 
@@ -392,7 +390,8 @@ Covers queue recovery, retries, parser fixtures, authenticated ingest, GitHub im
 - [ ] First clean-account deploy: install → migrate → first capture → search → export → restore against Cloudflare
 - [ ] Measured free-tier usage + media-host allowlist published here
 - [ ] Synthetic demo library
-- [ ] More supported sources (TikTok graduates from experimental)
+- [ ] Pinterest capture — add a browser-session importer and live-save path
+- [ ] TikTok favorites — restore capture after the authenticated path is repaired
 
 Have an idea? [Open a feature request](https://github.com/jojomensah89/anansi/issues/new?template=feature_request.yml).
 
@@ -406,4 +405,7 @@ MIT © 2026 Jojo Mensah — see [LICENSE](./LICENSE).
 
 ---
 
-Built by [Jojo Mensah](https://x.com/jojomensah89) · Follow along for demos and changelogs · [☕ Buy me a coffee](https://buymeacoffee.com/jojomensahh)
+Built by Jojo Mensah · Follow along for demos and changelogs
+
+<a href="https://buymeacoffee.com/jojomensahh"><img src="https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?logo=buy-me-a-coffee&logoColor=black" alt="Buy me a coffee" height="20" align="middle" /></a>
+<a href="https://x.com/jojomensah89"><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" height="20" align="middle" /></a>
