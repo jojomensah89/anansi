@@ -5,7 +5,7 @@ export { TOPIC_DEFINITIONS, TOPIC_TAGS, TOPIC_TAXONOMY_VERSION, canonicalTopicId
 export type { TagKind, TopicId } from "./topics.ts";
 export { upsertItems, countItems, creators, setArchived, tagItems, listTags, disabledSources, setSourceEnabled } from "./queries.ts";
 export type { CaptureOrigin, UpsertOptions } from "./queries.ts";
-export { searchItems, searchItemsPage, hydrateSearchItems, recentSaves, findByAuthor, getItem, listItems, libraryStats, sourceHealth, toFtsQuery } from "./search.ts";
+export { searchItems, searchItemsPage, hydrateSearchItems, recentSaves, findByAuthor, getItem, getItems, listItems, libraryStats, sourceHealth, toFtsQuery } from "./search.ts";
 export { InvalidListCursorError, InvalidSearchCursorError } from "./search.ts";
 export type { SearchHit, SearchOptions, ListOptions, ItemDetail, SourceHealth, CardMedia } from "./search.ts";
 export { pendingMedia, markMediaStored, mediaStats } from "./media.ts";

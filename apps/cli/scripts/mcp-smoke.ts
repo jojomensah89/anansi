@@ -24,11 +24,11 @@ send({
 });
 send({ jsonrpc: "2.0", method: "notifications/initialized" });
 send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
-call(3, "search_memory", { query: "ai sdk artifacts", limit: 2 });
-call(4, "find_by_author", { handle: "@pontusab", limit: 2 });
-call(5, "recent_saves", { limit: 2 });
+call(3, "search_saved", { query: "ai sdk artifacts", limit: 2 });
+call(4, "list_author_saves", { handle: "@pontusab", limit: 2 });
+call(5, "list_recent_saves", { limit: 2 });
 // Every one of these throws if bound raw into an FTS5 match.
-call(6, "search_memory", { query: "it's a * mess (unbalanced AND", limit: 2 });
+call(6, "search_saved", { query: "it's a * mess (unbalanced AND", limit: 2 });
 await proc.stdin.flush();
 
 const seen = new Map<number, any>();
@@ -60,11 +60,11 @@ while (Date.now() < deadline && !seen.has(7)) {
       }
     }
   }
-  // get_item is only meaningful on an id search actually returned.
+  // get_saved is only meaningful on an id search actually returned.
   if (!chained && seen.has(3)) {
     chained = true;
     const first = JSON.parse(seen.get(3).result.content[0].text).results[0];
-    call(7, "get_item", { id: first.id });
+    call(7, "get_saved", { id: first.id });
     await proc.stdin.flush();
   }
 }
@@ -78,20 +78,20 @@ const fail = (msg: string) => {
 
 const tools = (seen.get(2)?.result?.tools ?? []).map((t: any) => t.name);
 console.log("tools:", tools.join(", "));
-for (const want of ["search_memory", "get_item", "recent_saves", "find_by_author"]) {
+for (const want of ["search_saved", "get_saved", "list_recent_saves", "list_author_saves"]) {
   if (!tools.includes(want)) fail("missing tool " + want);
 }
 
-if (body(3).count === 0) fail("search_memory found nothing");
-if (body(4).count === 0) fail("find_by_author found nothing");
-if (body(5).count === 0) fail("recent_saves found nothing");
+if (body(3).count === 0) fail("search_saved found nothing");
+if (body(4).count === 0) fail("list_author_saves found nothing");
+if (body(5).count === 0) fail("list_recent_saves found nothing");
 if (seen.get(6)?.error) fail("hostile query threw instead of returning nothing");
 
 const item = body(7);
 console.log(
-  `get_item: @${item.author} · ${item.media.length} media · ${item.links.length} links · ${item.thread.length} thread`,
+  `get_saved: @${item.author} · ${item.media.length} media · ${item.links.length} links · ${item.thread.length} thread`,
 );
-if ("raw" in item) fail("get_item leaked the raw payload into agent context");
-if (!item.url) fail("get_item returned no url");
+if ("raw" in item) fail("get_saved leaked the raw payload into agent context");
+if (!item.url) fail("get_saved returned no url");
 
 console.log(process.exitCode ? "smoke FAILED" : "smoke ok");

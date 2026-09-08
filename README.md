@@ -276,10 +276,14 @@ Streamable HTTP MCP server at `http://127.0.0.1:3001/mcp` locally (or `https://<
 
 | Tool | Purpose |
 | --- | --- |
-| `search_memory` | Search saved items, ranked excerpts + source URLs |
-| `get_item` | One item with text, links, media, thread context |
-| `recent_saves` | Newest saved items |
-| `find_by_author` | Items from one author |
+| `search_saved` | Search saved items, ranked excerpts + source URLs |
+| `get_saved` | One item with text, links, media, thread context |
+| `get_saved_many` | A bounded shortlist of items in requested order |
+| `list_saved` | Browse saved items with filters and a cursor |
+| `list_recent_saves` | Newest saved items |
+| `list_author_saves` | Items from one author |
+| `list_tags` | Visible tag vocabulary and usage counts |
+| `library_stats` | Visible library and media statistics |
 
 The optional `source` filter accepts visible `x`, `reddit`, `github`, and `web`
 items. TikTok rows remain hidden while that source is paused. MCP search is

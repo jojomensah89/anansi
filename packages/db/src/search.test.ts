@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { setArchived, setSourceEnabled, tagItems, type IngestItem, upsertItems } from "./queries.ts";
 import { items, media, tags } from "./schema.ts";
-import { hydrateSearchItems, listItems, searchItemsPage, sourceHealth, toFtsQuery } from "./search.ts";
+import { getItems, hydrateSearchItems, listItems, searchItemsPage, sourceHealth, toFtsQuery } from "./search.ts";
 import { openTestDb } from "./test-db.ts";
 
 /**
@@ -110,6 +110,32 @@ describe("sourceHealth", () => {
       chromeBookmarks: 0,
       legacyUnknown: 1,
     });
+  });
+});
+
+describe("batch detail hydration", () => {
+  test("keeps ten thread peers even when the selected item sorts first", async () => {
+    const db = openTestDb();
+    await upsertItems(db, Array.from({ length: 12 }, (_, index) => ({
+      source: "x",
+      externalId: `thread-peer-${index}`,
+      url: `https://x.test/thread/${index}`,
+      kind: "post",
+      body: `thread body ${index}`,
+      savedAt: index + 1,
+      savedAtIsExact: true,
+      metrics: {},
+      media: [],
+      links: [],
+      raw: { conversationId: "thread-one" },
+    })));
+
+    const rows = await db.select({ id: items.id }).from(items);
+    const selected = [...rows].sort((left, right) => left.id.localeCompare(right.id))[0];
+    if (!selected) throw new Error("expected a thread item");
+
+    const result = await getItems(db, [selected.id]);
+    expect(result.items[0]?.thread).toHaveLength(10);
   });
 });
 

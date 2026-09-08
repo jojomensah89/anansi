@@ -112,7 +112,7 @@ async function stdioSmoke(): Promise<void> {
     });
     await send({ jsonrpc: "2.0", method: "notifications/initialized" });
     await send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
-    await send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "search_memory", arguments: { query: "keyword search", source: "web", limit: 5 } } });
+    await send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "search_saved", arguments: { query: "keyword search", source: "web", limit: 5 } } });
     await proc.stdin.flush();
 
     const seen = new Map<number, any>();
@@ -139,7 +139,7 @@ async function stdioSmoke(): Promise<void> {
     reader.releaseLock();
     if (!seen.get(1)?.result || !seen.get(2)?.result || !seen.get(3)?.result) throw new Error("stdio MCP did not complete initialize/list/search");
     const tools = (seen.get(2).result.tools ?? []).map((tool: { name: string }) => tool.name);
-    for (const expected of ["search_memory", "get_item", "recent_saves", "find_by_author"]) {
+    for (const expected of ["search_saved", "get_saved", "list_recent_saves", "list_author_saves"]) {
       if (!tools.includes(expected)) throw new Error(`stdio MCP missing ${expected}`);
     }
     const payload = JSON.parse(seen.get(3).result.content[0].text);
@@ -224,12 +224,12 @@ try {
   if (init.result?.serverInfo?.name !== "anansi") throw new Error("HTTP MCP initialize failed");
   const list = await mcpRpc("tools/list", {});
   const names = (list.result?.tools ?? []).map((tool: { name: string }) => tool.name);
-  if (!["search_memory", "get_item", "recent_saves", "find_by_author"].every((name) => names.includes(name))) throw new Error("HTTP MCP tool list is incomplete");
-  const search = await mcpRpc("tools/call", { name: "search_memory", arguments: { query: "keyword search", source: "web", limit: 5 } });
+  if (!["search_saved", "get_saved", "list_recent_saves", "list_author_saves"].every((name) => names.includes(name))) throw new Error("HTTP MCP tool list is incomplete");
+  const search = await mcpRpc("tools/call", { name: "search_saved", arguments: { query: "keyword search", source: "web", limit: 5 } });
   const mcpPayload = JSON.parse(search.result.content[0].text);
   if (mcpPayload.count !== 1 || mcpPayload.results[0].id !== ingest.itemId) throw new Error("HTTP MCP search did not return the ingested bookmark");
-  const item = await mcpRpc("tools/call", { name: "get_item", arguments: { id: ingest.itemId } });
-  if (JSON.parse(item.result.content[0].text).id !== ingest.itemId) throw new Error("HTTP MCP get_item failed");
+  const item = await mcpRpc("tools/call", { name: "get_saved", arguments: { id: ingest.itemId } });
+  if (JSON.parse(item.result.content[0].text).id !== ingest.itemId) throw new Error("HTTP MCP get_saved failed");
 
   await stdioSmoke();
   console.log(JSON.stringify({

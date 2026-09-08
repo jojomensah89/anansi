@@ -46,23 +46,23 @@ if (init.status !== 200) fail("initialize");
 const list = await rpc("tools/list");
 const tools = (list.json?.result?.tools ?? []).map((t: { name: string }) => t.name);
 console.log("tools ->", tools.join(", "));
-for (const want of ["search_memory", "get_item", "recent_saves", "find_by_author"]) {
+for (const want of ["search_saved", "get_saved", "list_recent_saves", "list_author_saves"]) {
   if (!tools.includes(want)) fail("missing " + want);
 }
 
 const search = await rpc("tools/call", {
-  name: "search_memory",
+  name: "search_saved",
   arguments: { query: "phone farm", limit: 1 },
 });
 const payload = JSON.parse(search.json?.result?.content?.[0]?.text ?? "{}");
-console.log("search_memory ->", payload.count, "result(s)");
+console.log("search_saved ->", payload.count, "result(s)");
 if (!payload.count) fail("search over http returned nothing");
 
 const first = payload.results?.[0];
 if (first) {
-  const item = await rpc("tools/call", { name: "get_item", arguments: { id: first.id } });
+  const item = await rpc("tools/call", { name: "get_saved", arguments: { id: first.id } });
   const detail = JSON.parse(item.json?.result?.content?.[0]?.text ?? "{}");
-  console.log(`get_item -> @${detail.author} · ${detail.links?.length ?? 0} links`);
+  console.log(`get_saved -> @${detail.author} · ${detail.links?.length ?? 0} links`);
   if ("raw" in detail) fail("raw leaked over http");
 }
 

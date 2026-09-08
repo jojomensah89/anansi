@@ -22,6 +22,9 @@ apps/extension/.output/
 apps/extension/.wxt/
 *.tsbuildinfo
 
+# Local review probes and generated architecture reports
+outputs/
+
 # test / coverage
 coverage/
 .nyc_output/

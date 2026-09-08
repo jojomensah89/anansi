@@ -372,71 +372,54 @@ export interface ItemDetail {
   thread: { id: string; url: string; author: string | null; excerpt: string }[];
 }
 
-/**
- * The full object, called after a search to pull one thing into context.
- *
- * `raw` is deliberately not returned. The spec's sketch includes it, but a
- * single raw tweet payload is 5-15KB of nested JSON, and an agent that
- * fetched three of them would have spent its context on `__typename` fields.
- * Everything raw is actually consulted for — links, thread, media — is
- * extracted here instead.
- */
-export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | null> {
-  const rows = await db.all<{
-    id: string; url: string; source: string; author: string | null; authorName: string | null;
-    authorAvatar: string | null;
-    title: string | null; body: string | null; postedAt: number | null; savedAt: number;
-    savedAtExact: number; platformSaved: number; removedFromSourceAt: number | null;
-    metrics: string; raw: string; articleText: string | null; articleFormat: string; contentTruncated: number; note: string; favorite: number; archivedAt: number | null;
-  }>(sql`
-    select id, url, source, author_handle as author, author_name as authorName,
-           author_avatar as authorAvatar,
-           platform_saved as platformSaved,
-           removed_from_source_at as removedFromSourceAt,
-           title, body, posted_at as postedAt, saved_at as savedAt,
-           saved_at_exact as savedAtExact, metrics, raw, article_text as articleText, article_format as articleFormat, content_truncated as contentTruncated, note, favorite, archived_at as archivedAt
-    from items where id = ${id} and ${visibleSourceClause(sql`source`)} limit 1
-  `);
+type DetailRow = {
+  id: string; url: string; source: string; author: string | null; authorName: string | null;
+  authorAvatar: string | null; title: string | null; body: string | null;
+  postedAt: number | null; savedAt: number; savedAtExact: number; platformSaved: number;
+  removedFromSourceAt: number | null; metrics: string; raw: string; articleText: string | null;
+  articleFormat: string; contentTruncated: number; note: string; favorite: number;
+  archivedAt: number | null;
+};
 
-  const row = rows[0];
-  if (!row) return null;
+type ParsedDetail = {
+  links?: string[];
+  conversationId?: string;
+  ownText?: string;
+  quoted?: {
+    handle: string | null; name: string | null; avatar: string | null;
+    text: string; url: string | null; mediaUrls: string[];
+  } | null;
+};
 
-  let parsed: {
-    links?: string[];
-    conversationId?: string;
-    ownText?: string;
-    quoted?: {
-      handle: string | null; name: string | null; avatar: string | null;
-      text: string; url: string | null; mediaUrls: string[];
-    } | null;
-  } = {};
+type DetailMedia = {
+  itemId: string; kind: string; originUrl: string; storedKey: string | null;
+  width: number | null; height: number | null;
+};
+
+type DetailThread = { conversationId: string; id: string; url: string; author: string | null; excerpt: string };
+
+function idsClause(ids: string[]) {
+  return sql`(${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`;
+}
+
+function parseDetail(raw: string): ParsedDetail {
   try {
-    parsed = JSON.parse(row.raw) as typeof parsed;
+    return JSON.parse(raw) as ParsedDetail;
   } catch {
     // A payload we cannot parse should cost the extras, not the item.
+    return {};
   }
+}
 
-  const mediaRows = await db.all<{
-    kind: string; originUrl: string; storedKey: string | null;
-    width: number | null; height: number | null;
-  }>(sql`
-    select kind, origin_url as originUrl, stored_key as storedKey, width, height
-    from media where item_id = ${id}
-  `);
-
+function detailFromRows(
+  row: DetailRow,
+  mediaRows: DetailMedia[],
+  highlights: { id: string; text: string; createdAt: number }[],
+  tagMeta: TagSummary[],
+  thread: { id: string; url: string; author: string | null; excerpt: string }[],
+): ItemDetail {
+  const parsed = parseDetail(row.raw);
   const quotedUrls = new Set(parsed.quoted?.mediaUrls ?? []);
-  const conversationId = parsed.conversationId ?? null;
-  const thread = conversationId
-    ? await db.all<{ id: string; url: string; author: string | null; excerpt: string }>(sql`
-        select id, url, author_handle as author, substr(coalesce(body,''), 1, 200) as excerpt
-        from items
-        where ${visibleSourceClause(sql`source`)}
-          and json_extract(raw, '$.conversationId') = ${conversationId}
-          and id != ${id}
-        limit 10
-      `)
-    : [];
-
   let metrics: Record<string, number> = {};
   try {
     metrics = JSON.parse(row.metrics) as Record<string, number>;
@@ -458,11 +441,11 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     articleText: row.articleText,
     articleFormat: row.articleFormat === "markdown" ? "markdown" : "plain",
     contentTruncated: row.contentTruncated === 1,
-    highlights: await db.all<{id:string; text:string; createdAt:number}>(sql`select id,text,created_at as createdAt from highlights where item_id=${id} order by created_at,id`),
+    highlights,
     note: row.note,
     favorite: row.favorite === 1,
-    tags: (await db.all<{label:string}>(sql`select t.label from tags t join item_tags it on it.tag_id=t.id where it.item_id=${id} order by t.label`)).map(t => t.label),
-    tagMeta: await db.all<TagSummary>(sql`select t.label, t.color from tags t join item_tags it on it.tag_id=t.id where it.item_id=${id} order by t.label`),
+    tags: tagMeta.map((tag) => tag.label),
+    tagMeta,
     archived: row.archivedAt !== null,
     postedAt: row.postedAt,
     savedAt: row.savedAt,
@@ -472,7 +455,7 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
     metrics,
     // A quote's images are stored on the parent row, so they are partitioned
     // back out by origin url rather than duplicated.
-    media: mediaRows.filter((m) => !quotedUrls.has(m.originUrl)),
+    media: mediaRows.filter((media) => !quotedUrls.has(media.originUrl)).map(({ itemId: _itemId, ...media }) => media),
     links: parsed.links ?? [],
     quoted: parsed.quoted
       ? {
@@ -481,10 +464,120 @@ export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | nu
           avatar: parsed.quoted.avatar,
           text: parsed.quoted.text,
           url: parsed.quoted.url,
-          media: mediaRows.filter((m) => quotedUrls.has(m.originUrl)),
+          media: mediaRows
+            .filter((media) => quotedUrls.has(media.originUrl))
+            .map((media) => ({ kind: media.kind, originUrl: media.originUrl, storedKey: media.storedKey })),
         }
       : null,
     thread,
+  };
+}
+
+/**
+ * The full object, called after a search to pull one thing into context.
+ *
+ * `raw` is deliberately not returned. Everything raw is actually consulted
+ * for — links, thread, media — is extracted here instead.
+ */
+export async function getItem(db: AnansiDb, id: string): Promise<ItemDetail | null> {
+  return (await getItems(db, [id])).items[0] ?? null;
+}
+
+/**
+ * Pull a bounded shortlist into context while preserving the caller's order.
+ * The limit is intentionally small: full details include body, media, notes,
+ * tags, highlights, quotes, and a thread. Hidden rows are indistinguishable
+ * from missing rows at this boundary. Related rows are hydrated in bounded
+ * set queries rather than one query per ID, which keeps the same function
+ * usable through local SQLite and the D1 adapter.
+ */
+export async function getItems(
+  db: AnansiDb,
+  ids: string[],
+): Promise<{ items: ItemDetail[]; missingIds: string[] }> {
+  if (ids.length < 1 || ids.length > 20) {
+    throw new RangeError("getItems accepts between 1 and 20 ids");
+  }
+  if (new Set(ids).size !== ids.length) {
+    throw new RangeError("getItems does not accept duplicate ids");
+  }
+
+  const rows = await db.all<DetailRow>(sql`
+    select id, url, source, author_handle as author, author_name as authorName,
+           author_avatar as authorAvatar, platform_saved as platformSaved,
+           removed_from_source_at as removedFromSourceAt, title, body,
+           posted_at as postedAt, saved_at as savedAt, saved_at_exact as savedAtExact,
+           metrics, raw, article_text as articleText, article_format as articleFormat,
+           content_truncated as contentTruncated, note, favorite, archived_at as archivedAt
+    from items
+    where id in ${idsClause(ids)} and ${visibleSourceClause(sql`source`)}
+  `);
+  const found = new Map(rows.map((row) => [row.id, row]));
+  const visibleIds = rows.map((row) => row.id);
+  if (visibleIds.length === 0) return { items: [], missingIds: ids };
+
+  const [mediaRows, highlightRows, tagRows] = await Promise.all([
+    db.all<DetailMedia>(sql`
+      select item_id as itemId, kind, origin_url as originUrl, stored_key as storedKey, width, height
+      from media where item_id in ${idsClause(visibleIds)}
+    `),
+    db.all<{ itemId: string; id: string; text: string; createdAt: number }>(sql`
+      select item_id as itemId, id, text, created_at as createdAt
+      from highlights where item_id in ${idsClause(visibleIds)} order by created_at, id
+    `),
+    db.all<{ itemId: string; label: string; color: string }>(sql`
+      select it.item_id as itemId, t.label, t.color
+      from tags t join item_tags it on it.tag_id = t.id
+      where it.item_id in ${idsClause(visibleIds)} order by it.item_id, t.label
+    `),
+  ]);
+
+  const parsedById = new Map(rows.map((row) => [row.id, parseDetail(row.raw)]));
+  const conversationIds = [...new Set([...parsedById.values()].map((parsed) => parsed.conversationId).filter((id): id is string => Boolean(id)))];
+  const threadRows = conversationIds.length === 0
+    ? []
+    : await db.all<DetailThread>(sql`
+        select conversationId, id, url, author, excerpt
+        from (
+          select json_extract(raw, '$.conversationId') as conversationId,
+                 id, url, author_handle as author,
+                 substr(coalesce(body, ''), 1, 200) as excerpt,
+                 row_number() over (
+                   partition by json_extract(raw, '$.conversationId') order by id
+                 ) as threadRank
+          from items
+          where ${visibleSourceClause(sql`source`)}
+            and json_extract(raw, '$.conversationId') in ${idsClause(conversationIds)}
+        )
+        where threadRank <= ${10 + visibleIds.length}
+        order by conversationId, id
+      `);
+
+  const mediaById = new Map<string, DetailMedia[]>();
+  for (const media of mediaRows) mediaById.set(media.itemId, [...(mediaById.get(media.itemId) ?? []), media]);
+  const highlightsById = new Map<string, { id: string; text: string; createdAt: number }[]>();
+  for (const highlight of highlightRows) {
+    highlightsById.set(highlight.itemId, [...(highlightsById.get(highlight.itemId) ?? []), {
+      id: highlight.id, text: highlight.text, createdAt: highlight.createdAt,
+    }]);
+  }
+  const tagsById = new Map<string, TagSummary[]>();
+  for (const tag of tagRows) tagsById.set(tag.itemId, [...(tagsById.get(tag.itemId) ?? []), { label: tag.label, color: tag.color }]);
+  const threadsByConversation = new Map<string, DetailThread[]>();
+  for (const thread of threadRows) threadsByConversation.set(thread.conversationId, [...(threadsByConversation.get(thread.conversationId) ?? []), thread]);
+
+  const items = ids.flatMap((id) => {
+    const row = found.get(id);
+    if (!row) return [];
+    const parsed = parsedById.get(id) ?? {};
+    const thread = (threadsByConversation.get(parsed.conversationId ?? "") ?? [])
+      .filter((entry) => entry.id !== id).slice(0, 10)
+      .map(({ conversationId: _conversationId, ...entry }) => entry);
+    return [detailFromRows(row, mediaById.get(id) ?? [], highlightsById.get(id) ?? [], tagsById.get(id) ?? [], thread)];
+  });
+  return {
+    items,
+    missingIds: ids.filter((id) => !found.has(id)),
   };
 }
 
@@ -637,6 +730,9 @@ export interface ListOptions {
   /** Bookmark order by default; "posted" is chronological by the post's date. */
   order?: ListOrder;
   favorite?: boolean;
+  /** Saved-time boundaries; since is inclusive and until is exclusive. */
+  since?: number;
+  until?: number;
 }
 
 /**
@@ -712,6 +808,8 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
       ${removedClause(opts.removed)}
       ${mediaClause(opts.media)}
       ${typeClause(opts.contentType)}
+      ${opts.since === undefined ? sql`` : sql`and i.saved_at >= ${opts.since}`}
+      ${opts.until === undefined ? sql`` : sql`and i.saved_at < ${opts.until}`}
       ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
     ${ordering}
     limit ${limit + 1}
