@@ -13,8 +13,9 @@
  * returns the same listing shape the server parser already reads — content and
  * event travel together, in one message, in the right order.
  *
- * MAIN world at document_start, because an isolated content script's
- * window.fetch is a different object from the one Reddit's page calls.
+ * MAIN world at document_idle, because an isolated content script's
+ * window.fetch is a different object from the one Reddit's page calls, while
+ * idle timing keeps Reddit's own preload lifecycle outside the observer.
  */
 import { MESSAGE_PROTOCOL_VERSION } from "../lib/messages.ts";
 import { observeRedditFetch } from "../lib/reddit-fetch-observer.ts";
@@ -28,7 +29,7 @@ import {
 export default defineContentScript({
   matches: ["https://www.reddit.com/*", "https://old.reddit.com/*", "https://reddit.com/*"],
   world: "MAIN",
-  runAt: "document_start",
+  runAt: "document_idle",
 
   main() {
     let nonce: string | null = null;

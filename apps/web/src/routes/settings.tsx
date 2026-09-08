@@ -10,21 +10,59 @@ function Settings() {
   const [data, setData] = useState<AiSettingsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reclassifying, setReclassifying] = useState(false);
-  useEffect(() => { api.ai().then(setData).catch((e) => setError(e instanceof Error ? e.message : "Unable to load settings")); }, []);
+  const [watchingTagging, setWatchingTagging] = useState(false);
+  useEffect(() => {
+    api.ai().then((next) => {
+      setData(next);
+      setWatchingTagging(next.settings.autoTaggingEnabled === 1 && next.taggingProgress.pending > 0);
+    }).catch((e) => setError(e instanceof Error ? e.message : "Unable to load settings"));
+  }, []);
+  useEffect(() => {
+    if (!watchingTagging) return;
+    let stopped = false;
+    const timer = window.setInterval(() => {
+      void api.ai().then((next) => {
+        if (stopped) return;
+        setData(next);
+        if (next.taggingProgress.pending === 0) {
+          setWatchingTagging(false);
+          setReclassifying(false);
+        }
+      }).catch((e) => {
+        if (stopped) return;
+        setError(e instanceof Error ? e.message : "Unable to refresh tagging progress");
+        setWatchingTagging(false);
+        setReclassifying(false);
+      });
+    }, 2000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [watchingTagging]);
   const slow = useSlowLoad(data === null && !error);
   const toggle = (key: "semanticSearchEnabled" | "autoTaggingEnabled", value: boolean) => {
     if (!data) return;
     setData({ ...data, settings: { ...data.settings, [key]: value ? 1 : 0 } });
-    api.updateAi({ [key]: value }).catch((e) => { setError(e instanceof Error ? e.message : "Unable to save settings"); });
+    if (key === "autoTaggingEnabled" && !value) {
+      setWatchingTagging(false);
+      setReclassifying(false);
+    }
+    api.updateAi({ [key]: value }).then((next) => {
+      setData(next);
+      setWatchingTagging(next.settings.autoTaggingEnabled === 1 && next.taggingProgress.pending > 0);
+    }).catch((e) => { setError(e instanceof Error ? e.message : "Unable to save settings"); });
   };
   const reclassify = async () => {
     setReclassifying(true);
     try {
       const next = await api.reclassifyAiTags();
-      setData((previous) => previous ? { ...previous, taxonomyVersion: next.taxonomyVersion, progress: next.progress } : previous);
+      setData((previous) => previous ? { ...previous, taxonomyVersion: next.taxonomyVersion, progress: next.progress, taggingProgress: next.taggingProgress } : previous);
+      const queued = data?.settings.autoTaggingEnabled === 1 && next.taggingProgress.pending > 0;
+      setReclassifying(queued);
+      setWatchingTagging(queued);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to reclassify topics");
-    } finally {
       setReclassifying(false);
     }
   };
@@ -43,10 +81,10 @@ function Settings() {
             <Toggle icon={<CpuIcon />} label="Enable AI semantic search" badge="Smart" description="Find content by meaning, not exact wording." checked={data.settings.semanticSearchEnabled === 1} onChange={(v) => toggle("semanticSearchEnabled", v)} />
             <Toggle icon={<SparkIcon />} label="Enable automatic tags" badge="Beta" description={data.capabilities?.autoTagging === false ? "No local or hosted tag model is configured." : "Apply concise topic tags to new saves."} checked={data.settings.autoTaggingEnabled === 1} disabled={data.capabilities?.autoTagging === false} onChange={(v) => toggle("autoTaggingEnabled", v)} />
           </div>
-          <p className="mono anansi-settings-progress">{data.progress.pending} pending · {data.progress.complete} complete · {data.progress.failed} failed</p>
+          <p className="mono anansi-settings-progress">{data.taggingProgress.pending} AI topics pending · {data.taggingProgress.complete} complete · {data.taggingProgress.failed} failed</p>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
             <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>Canonical topics {data.taxonomyVersion}</span>
-            <button type="button" className="mono" disabled={reclassifying || data.capabilities?.autoTagging === false} onClick={() => void reclassify()} style={{ border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 8px", background: "transparent", color: "var(--muted)", fontSize: 10.5, cursor: reclassifying ? "wait" : "pointer" }}>{reclassifying ? "Reclassifying…" : "Reclassify AI topics"}</button>
+            <button type="button" className="mono" disabled={reclassifying || watchingTagging || data.capabilities?.autoTagging === false} onClick={() => void reclassify()} style={{ border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 8px", background: "transparent", color: "var(--muted)", fontSize: 10.5, cursor: reclassifying || watchingTagging ? "wait" : "pointer" }}>{reclassifying ? "Reclassifying…" : "Reclassify AI topics"}</button>
           </div>
         </section>}
     </main>

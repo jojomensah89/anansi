@@ -338,26 +338,43 @@ const statsRoute: Route = {
 const aiSettingsRoute: Route = {
   method: "GET",
   path: "/api/ai",
-  handle: async ({ env }) => json({
-    settings: await getAiSettings(env.db),
-    taxonomyVersion: TOPIC_TAXONOMY_VERSION,
-    progress: await aiProgress(env.db),
-    available: Boolean(env.semantic || env.tagger || env.ai),
-    capabilities: {
-      semanticSearch: Boolean(env.semantic || (env.ai && env.vectorize)),
-      autoTagging: Boolean(env.tagger || env.ai),
-    },
-    runtime: env.semantic || env.tagger ? "ollama" : env.ai ? "cloudflare" : "none",
-  }),
+  handle: async ({ env }) => {
+    const settings = await getAiSettings(env.db);
+    return json({
+      settings,
+      taxonomyVersion: TOPIC_TAXONOMY_VERSION,
+      progress: await aiProgress(env.db),
+      taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
+      available: Boolean(env.semantic || env.tagger || env.ai),
+      capabilities: {
+        semanticSearch: Boolean(env.semantic || (env.ai && env.vectorize)),
+        autoTagging: Boolean(env.tagger || env.ai),
+      },
+      runtime: env.semantic || env.tagger ? "ollama" : env.ai ? "cloudflare" : "none",
+    });
+  },
 };
 
 const aiReclassifyRoute: Route = {
   method: "POST",
   path: "/api/ai/reclassify",
   handle: async ({ env }) => {
+    const settings = await getAiSettings(env.db);
+    const taggingProgress = await aiProgress(env.db, "tagging", settings.tagModel);
+    if (settings.autoTaggingEnabled === 1 && taggingProgress.pending > 0) {
+      return json({
+        taxonomyVersion: TOPIC_TAXONOMY_VERSION,
+        progress: await aiProgress(env.db),
+        taggingProgress,
+      });
+    }
     await reclassifyAiTopics(env.db);
     env.taggingKick?.();
-    return json({ taxonomyVersion: TOPIC_TAXONOMY_VERSION, progress: await aiProgress(env.db) });
+    return json({
+      taxonomyVersion: TOPIC_TAXONOMY_VERSION,
+      progress: await aiProgress(env.db),
+      taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
+    });
   },
 };
 
@@ -373,7 +390,12 @@ const aiSettingsUpdateRoute: Route = {
     // worker remains the recovery path if this nudge is interrupted.
     if (env.semanticKick && body.semanticSearchEnabled !== undefined) env.semanticKick();
     if (env.taggingKick && body.autoTaggingEnabled !== undefined) env.taggingKick();
-    return json({ settings, taxonomyVersion: TOPIC_TAXONOMY_VERSION, progress: await aiProgress(env.db) });
+    return json({
+      settings,
+      taxonomyVersion: TOPIC_TAXONOMY_VERSION,
+      progress: await aiProgress(env.db),
+      taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
+    });
   },
 };
 

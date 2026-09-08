@@ -465,6 +465,7 @@ describe("initial import completion", () => {
 		await runs.completeInitialImport("github");
 		const manual = await runs.begin("github");
 		expect(manual.started).toBe(true);
+		expect(manual.run.runMode).toBe("full");
 	});
 
 	test("distinguishes a live refresh from a full import", async () => {
