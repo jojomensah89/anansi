@@ -354,6 +354,78 @@ bearer_token_env_var = "MCP_TOKEN"
 
 Keep `MCP_TOKEN` in the client environment, never in a committed file.
 
+### Choose a transport
+
+Anansi exposes the same MCP server through two transports. The tool definitions
+and database functions are shared; only the connection method changes.
+
+| Use case | Configuration | Transport and database | Authentication |
+| --- | --- | --- | --- |
+| OpenCode or another local agent | `opencode.json` | Starts `bun run apps/cli/src/cli.ts serve --mcp` and reads the local SQLite library directly | The local process boundary; no HTTP token |
+| Browser-based or remote-capable clients | MCP URL above | Streamable HTTP at `/mcp`; local Vite proxies `3001` to the internal Bun server on `8788` | `Authorization: Bearer <MCP_TOKEN>` |
+
+The OpenCode entry is deliberately `type: "local"`:
+
+```json
+{
+  "mcp": {
+    "anansi": {
+      "type": "local",
+      "command": ["bun", "run", "apps/cli/src/cli.ts", "serve", "--mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+This is not a second MCP implementation. The CLI connects the shared server
+to an stdio transport, while `/mcp` connects that same server to the
+Web-standard Streamable HTTP transport. The CLI writes diagnostics to stderr;
+stdout remains reserved for JSON-RPC.
+
+### Verify the MCP paths
+
+For a repeatable local acceptance check, run:
+
+```bash
+bun run scripts/e2e-local-smoke.ts
+```
+
+This requires a running Ollama daemon with the configured embedding and tag
+models. It uses a temporary SQLite library and exercises authenticated local
+ingest, `initialize`, `tools/list`, search, and both HTTP and stdio MCP. If the
+AI jobs remain pending, the harness stops before its MCP assertions; treat
+that as an Ollama/model-readiness failure rather than an MCP transport result.
+For the OpenCode wiring itself, run:
+
+```bash
+opencode mcp list
+```
+
+The Anansi entry should report `connected`. This verifies that OpenCode can
+launch the configured stdio process; it does not test the HTTP route.
+
+With `bun run dev:local` running, the HTTP route can be checked at both layers:
+
+```text
+http://127.0.0.1:8788/mcp   internal Bun handler
+http://127.0.0.1:3001/mcp   public local origin and Vite proxy
+```
+
+The authenticated HTTP check should reject a wrong bearer with `401`, accept
+`initialize` with `200`, list the same eight tools, complete a search and
+`get_saved` call, and return a normal MCP error/result for hostile search text.
+These local checks prove the local handler, proxy, auth, and transport wiring;
+they do not prove a deployed Cloudflare Worker or an external client reaching
+it over the internet.
+
+The standalone scripts under `apps/cli/scripts/mcp-smoke.ts` and
+`apps/web/scripts/mcp-http-smoke.ts` also exercise real transports. Their
+search assertions depend on the hard-coded sample query being present in the
+current library, so a zero-result failure can be a stale data fixture rather
+than a transport failure. Use `scripts/e2e-local-smoke.ts` for an isolated,
+fixture-controlled acceptance run.
+
 ## 🏗️ How it works
 
 ```mermaid
