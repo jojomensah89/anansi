@@ -14,6 +14,12 @@ export { applyCapture, CaptureApplicationError } from "./capture-events.ts";
 export type { CaptureApplicationErrorCode } from "./capture-events.ts";
 export { extensionHealth, recordExtensionHeartbeat } from "./extension-health.ts";
 export type { ExtensionHealth } from "./extension-health.ts";
+export {
+	HIDDEN_SOURCES,
+	isHiddenSource,
+	isVisibleSource,
+	visibleSourceClause,
+} from "./visibility.ts";
 
 export { setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary, restoreLibrary } from "./organization.ts";
 export type { Collection, CollectionFilters, LibraryExport } from "./organization.ts";

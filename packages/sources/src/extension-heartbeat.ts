@@ -1,4 +1,7 @@
-import type { CaptureQueueStatus, CaptureSource } from "./capture.ts";
+import { isSource, SOURCE_IDS, type Source } from "./capabilities.ts";
+import type { CaptureQueueStatus } from "./capture.ts";
+
+type CaptureSource = Source;
 
 export const HEARTBEAT_SCHEMA_VERSION = 1 as const;
 
@@ -29,13 +32,6 @@ const UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,49}$/;
 const ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
-const SOURCES = new Set<CaptureSource>([
-	"x",
-	"reddit",
-	"tiktok",
-	"github",
-	"web",
-]);
 const ROOT_KEYS = new Set([
 	"schemaVersion",
 	"installationId",
@@ -132,12 +128,12 @@ export function parseExtensionHeartbeat(value: unknown): HeartbeatParseResult {
 	if (
 		!queue(value.queue) ||
 		!record(value.sources) ||
-		Object.keys(value.sources).length > 5
+		Object.keys(value.sources).length > SOURCE_IDS.length
 	) {
 		return fail("invalid_heartbeat", "heartbeat state is invalid");
 	}
 	for (const [source, state] of Object.entries(value.sources)) {
-		if (!SOURCES.has(source as CaptureSource) || !sourceState(state)) {
+		if (!isSource(source) || !sourceState(state)) {
 			return fail("invalid_heartbeat", "source heartbeat state is invalid");
 		}
 	}

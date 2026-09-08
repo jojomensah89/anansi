@@ -12,7 +12,15 @@ import type {
   HeartbeatSourceState,
   ItemEventCapture,
   RawPageCapture,
-  CaptureSource as SharedCaptureSource,
+  ExtensionRemoteConfig,
+  ExtensionSourceConfig,
+  ShippedCaptureSource,
+} from "@anansi/sources";
+import {
+  EXTENSION_PLATFORM_SOURCES,
+  SHIPPED_CAPTURE_SOURCES,
+  isExtensionPlatformSource,
+  parseExtensionConfig,
 } from "@anansi/sources";
 import { type CaptureQueue, createCaptureQueue } from "../lib/capture-queue.ts";
 import { type BookmarkNode, importCaptures, removalCaptures, toBookmarkCapture } from "../lib/chrome-bookmarks.ts";
@@ -56,33 +64,8 @@ export interface Settings {
   token: string;
 }
 
-export interface SourceConfig {
-  source: string;
-  host: string;
-  mode: "page" | "observe";
-  operation?: string;
-  url?: string;
-  variables?: Record<string, unknown>;
-  cursorPrefix?: string;
-  cursorParam?: string;
-  cursorPath?: string;
-  entryPrefix?: string;
-  pageLimit?: number;
-  watchOperations?: string[];
-  watchUrls?: string[];
-}
-
-export interface RemoteConfig {
-  version: number;
-  enabled: boolean;
-  ingest: string;
-  ingestProtocolVersion?: number;
-  features?: {
-    captureV2?: Partial<Record<"x" | "reddit" | "github" | "web", boolean>>;
-    chromeBookmarks?: boolean;
-  };
-  sources: SourceConfig[];
-}
+export type SourceConfig = ExtensionSourceConfig;
+export type RemoteConfig = ExtensionRemoteConfig;
 
 export interface SourceStatus {
   /**
@@ -109,8 +92,8 @@ const ALARM = SYNC_ALARM;
 const OUTBOX_ALARM = "anansi-outbox";
 const HEARTBEAT_ALARM = "anansi-heartbeat";
 const SOURCE_RUN_RECOVERY_ALARM_PREFIX = "anansi-source-run-recovery:";
-const CAPTURE_SOURCES = ["x", "reddit", "github"] as const;
-const HEARTBEAT_SOURCES = ["x", "reddit", "github", "web"] as const;
+const CAPTURE_SOURCES = EXTENSION_PLATFORM_SOURCES;
+const HEARTBEAT_SOURCES = SHIPPED_CAPTURE_SOURCES;
 const tabNonces = new Map<number, string>();
 
 let cached: ServerCache<RemoteConfig> | null = null;
@@ -211,11 +194,13 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
       throw new Error(`404 at ${url} — is an older Anansi server still on that port?`);
     }
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} from ${url}`);
-    const config = (await res.json()) as RemoteConfig;
-    if (!Array.isArray(config.sources)) throw new Error(`unexpected config shape from ${url}`);
-    cached = { serverOrigin: s.server, at: Date.now(), value: config };
+    const parsed = parseExtensionConfig(await res.json());
+    if (!parsed.ok) {
+      throw new Error(`invalid extension config: ${parsed.error.message}`);
+    }
+    cached = { serverOrigin: s.server, at: Date.now(), value: parsed.config };
     await patchStatus("_", { message: null });
-    return config;
+    return parsed.config;
   } catch (err) {
     await patchStatus("_", { message: (err as Error).message });
     return cachedForServer(cached, s.server, Date.now(), CONFIG_TTL_MS, true);
@@ -223,7 +208,7 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
 }
 
 function isCaptureSource(source: string): source is CaptureSource {
-  return CAPTURE_SOURCES.includes(source as (typeof CAPTURE_SOURCES)[number]);
+  return isExtensionPlatformSource(source);
 }
 
 function queue(): CaptureQueue {
@@ -273,7 +258,7 @@ function heartbeat(): HeartbeatClient {
     now: () => Math.floor(Date.now() / 1000),
     async readState() {
       const snapshot = await durableSnapshot();
-      const sources: Partial<Record<SharedCaptureSource, HeartbeatSourceState>> = {};
+      const sources: Partial<Record<ShippedCaptureSource, HeartbeatSourceState>> = {};
       for (const source of HEARTBEAT_SOURCES) {
         const run = snapshot.runs[source];
         const counts = snapshot.bySource[source] ?? EMPTY_COUNTS;
@@ -851,13 +836,13 @@ const HOST_PATTERNS: Record<string, string[]> = {
   github: ["https://github.com/*"],
 };
 
-async function findTab(source: string, expectedUrl?: string) {
+async function findTab(source: CaptureSource, expectedUrl?: string) {
   const patterns = HOST_PATTERNS[source];
   if (!patterns) return undefined;
   const tabs = await browser.tabs.query({ url: patterns });
   return tabs.find(
     (tab) =>
-      tab.url && isExpectedImportTab(source as CaptureSource, tab.url) && (!expectedUrl || tab.url === expectedUrl),
+      tab.url && isExpectedImportTab(source, tab.url) && (!expectedUrl || tab.url === expectedUrl),
   );
 }
 
@@ -867,7 +852,7 @@ async function findTab(source: string, expectedUrl?: string) {
  * Opened inactive, so an import does not yank you out of what you were doing,
  * and closed again afterwards if we were the ones who opened it.
  */
-async function openTab(source: string, preferredUrl?: string): Promise<{ id: number; ours: boolean } | null> {
+async function openTab(source: CaptureSource, preferredUrl?: string): Promise<{ id: number; ours: boolean } | null> {
   const url = preferredUrl ?? ENTRY_URLS[source];
   if (!url) return null;
   const tab = await browser.tabs.create({ url, active: false });

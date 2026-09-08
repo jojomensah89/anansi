@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import type {
+  ExtensionRemoteConfig,
+  ExtensionSourceConfig,
+} from "@anansi/sources";
 import { extensionConnection } from "../../lib/connection.ts";
 import { MESSAGE_PROTOCOL_VERSION } from "../../lib/messages.ts";
 import {
@@ -18,7 +22,7 @@ import {
   type Tone,
   withoutStartingSource,
 } from "../../lib/popup-state.ts";
-import type { RemoteConfig, SourceConfig, Status } from "../background.ts";
+import type { Status } from "../background.ts";
 import "./App.css";
 
 /**
@@ -135,7 +139,7 @@ const retry = (source?: string) => command(source ? { action: "retry-queue", sou
 
 export default function App() {
   const [status, setStatus] = useState<Status>({});
-  const [config, setConfig] = useState<RemoteConfig | null>(null);
+  const [config, setConfig] = useState<ExtensionRemoteConfig | null>(null);
   const [connectionState, setConnectionState] = useState<PopupConnectionState>(LOADING_CONNECTION);
   const [stats, setStats] = useState<Stats | null>(null);
   const [snapshot, setSnapshot] = useState<DurableSnapshot | null>(null);
@@ -211,7 +215,7 @@ export default function App() {
           return;
         }
         if (current) {
-          setConfig(nextConfig as RemoteConfig);
+          setConfig(nextConfig);
           setConnectionState(CONNECTED_CONNECTION);
         }
 
@@ -267,7 +271,7 @@ export default function App() {
   const rows = popupSourceRows(config?.sources ?? null);
 
   /** Everything one row needs, entirely from persisted state. */
-  const viewOf = (s: SourceConfig & { enabled: boolean; configured: boolean }) => {
+  const viewOf = (s: ExtensionSourceConfig & { enabled: boolean; configured: boolean }) => {
     if (!s.configured && config === null) {
       return {
         state: "ready" as const,
@@ -294,7 +298,7 @@ export default function App() {
     return describeSource(input, now);
   };
 
-  const act = (s: SourceConfig, action: string) => {
+  const act = (s: ExtensionSourceConfig, action: string) => {
     if (action === "pause") return void pause(s.source);
     setStartingSources((previous) => new Set(previous).add(s.source));
     void start(s.source).then(

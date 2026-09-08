@@ -1,3 +1,9 @@
+import {
+	EXTENSION_PLATFORM_SOURCES,
+	isExtensionPlatformSource,
+	type ExtensionPlatformSource,
+} from "@anansi/sources";
+
 /**
  * Pure validation for the extension's three message directions.
  *
@@ -12,7 +18,7 @@
 
 export const MESSAGE_PROTOCOL_VERSION = 1 as const;
 
-export type PlatformSource = "x" | "reddit" | "github";
+export type PlatformSource = ExtensionPlatformSource;
 export type MessagePath =
 	| "page-to-relay"
 	| "runtime-to-background"
@@ -330,7 +336,7 @@ function deriveSource(urlValue: string): PlatformSource | null {
 	try {
 		const url = new URL(urlValue);
 		if (url.protocol !== "https:" || url.username || url.password) return null;
-		for (const source of ["x", "reddit", "github"] as const) {
+		for (const source of EXTENSION_PLATFORM_SOURCES) {
 			if (SOURCE_HOSTS[source].has(url.hostname.toLowerCase())) return source;
 		}
 	} catch {
@@ -348,11 +354,7 @@ function hasOnlyKeys(
 }
 
 function isSource(value: unknown): value is PlatformSource {
-	return (
-		value === "x" ||
-		value === "reddit" ||
-		value === "github"
-	);
+	return isExtensionPlatformSource(value);
 }
 
 /**

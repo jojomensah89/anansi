@@ -581,7 +581,7 @@ function ModeBadge({
 				padding: "2px 6px",
 				borderRadius: 3,
 				border: "1px solid var(--edge)",
-				color: mode === "observe" ? "var(--accent)" : "var(--faint)",
+				color: mode === "manual" ? "var(--faint)" : "var(--accent)",
 			}}
 		>
 			{mode}

@@ -6,7 +6,9 @@
  * doesn't fit here survives in `raw`.
  */
 
-export type Source = "x" | "github" | "reddit" | "tiktok" | "web";
+import type { Source } from "./capabilities.ts";
+
+export type { Source } from "./capabilities.ts";
 export type Kind = "post" | "repo" | "comment" | "video" | "article";
 
 export interface MediaRef {

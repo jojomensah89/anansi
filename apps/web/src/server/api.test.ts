@@ -436,6 +436,17 @@ describe("handleApi", () => {
 		});
 		expect(sources.sources).toHaveLength(4);
 		expect(
+			sources.sources.map((source: { source: string; mode: string }) => [
+				source.source,
+				source.mode,
+			]),
+		).toEqual([
+			["x", "page"],
+			["reddit", "session"],
+			["web", "manual"],
+			["github", "session"],
+		]);
+		expect(
 			sources.sources.find(
 				(source: { source: string }) => source.source === "github",
 			),

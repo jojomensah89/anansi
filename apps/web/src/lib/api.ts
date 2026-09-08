@@ -1,4 +1,5 @@
 import type { CardMedia, ItemDetail, SearchHit } from "@anansi/db";
+import type { ImportMode } from "@anansi/sources";
 
 /**
  * The browser's view of the API.
@@ -140,7 +141,8 @@ export interface SourceRow {
   host: string;
   note: string;
   support: "supported" | "experimental" | "coming_next";
-  mode: "page" | "observe" | "manual";
+  /** Product history/import mode, not the extension config wire mode. */
+  mode: ImportMode | "manual";
   toggleable: boolean;
   requiresExtension: boolean;
   enabled: boolean;

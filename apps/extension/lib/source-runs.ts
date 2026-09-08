@@ -1,7 +1,9 @@
+import type { ShippedCaptureSource } from "@anansi/sources";
 import type { SyncStateRecord } from "./idb-outbox.ts";
 import { validatedGitHubStarsPageUrl } from "./platforms/github.ts";
 
-export type CaptureSource = "x" | "reddit" | "github" | "web";
+/** Current extension capture identities, including manual Web capture. */
+export type CaptureSource = ShippedCaptureSource;
 
 export interface SourceRunState extends SyncStateRecord {
 	source: CaptureSource;

@@ -23,6 +23,12 @@ describe("source catalogue", () => {
 			"web",
 			"github",
 		]);
+		expect(result.sources.map((source) => [source.source, source.mode])).toEqual([
+			["x", "page"],
+			["reddit", "session"],
+			["web", "manual"],
+			["github", "session"],
+		]);
 		expect(result.sources.every((source) => source.items === 0)).toBe(true);
 	});
 

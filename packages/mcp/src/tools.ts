@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { findByAuthor, getItem, recentSaves, searchItems } from "@anansi/db";
 import type { AnansiDb, ItemDetail, SearchHit } from "@anansi/db";
+import {
+	VISIBLE_LIBRARY_SOURCES,
+	type VisibleLibrarySource,
+} from "@anansi/sources";
 import { MCP_TOOL_CATALOG } from "./catalog.ts";
 
 /**
@@ -17,7 +21,12 @@ import { MCP_TOOL_CATALOG } from "./catalog.ts";
 
 /** Excerpts, never full bodies: ten full posts would blow a context window. */
 const EXCERPT_LIMIT = 300;
-const MCP_SOURCES = z.enum(["x", "reddit", "github", "web"]);
+/** Preserve the MCP enum's historical wire order while deriving membership. */
+const MCP_SOURCE_VALUES = [
+	...VISIBLE_LIBRARY_SOURCES.filter((source) => source !== "web"),
+	...VISIBLE_LIBRARY_SOURCES.filter((source) => source === "web"),
+] as [VisibleLibrarySource, ...VisibleLibrarySource[]];
+export const MCP_SOURCES = z.enum(MCP_SOURCE_VALUES);
 
 function trim(text: string): string {
   const clean = text.replace(/\s+/g, " ").trim();

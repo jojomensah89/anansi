@@ -20,7 +20,12 @@ import {
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
 import { authorizeLibrary, sessionRoute, sameSecret, type LibraryAuthEnv } from "./library-auth.ts";
-import { parseExtensionHeartbeat } from "@anansi/sources";
+import {
+	EXTENSION_PLATFORM_SOURCES,
+	parseExtensionHeartbeat,
+	type ExtensionPlatformSource,
+	type ExtensionSourceConfig,
+} from "@anansi/sources";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import type { AiBinding, TagGenerationProvider, VectorizeBinding } from "./ai.ts";
 import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
@@ -379,11 +384,14 @@ const aiSettingsUpdateRoute: Route = {
  * platform moves an endpoint — and changing it here fixes every install on its
  * next run.
  */
-const EXTENSION_SOURCES = [
-	{
-		// Paged: the extension can walk the whole history itself.
+const EXTENSION_SOURCE_DETAILS: Record<
+	ExtensionPlatformSource,
+	Omit<ExtensionSourceConfig, "source">
+> = {
+	x: {
+		// Extension wire mode "page" drives a page/history walk. The product
+		// catalogue's mode comes from the canonical capability importMode.
 		mode: "page",
-		source: "x",
 		host: "x.com",
 		operation: "Bookmarks",
 		variables: { count: 100, includePromotedContent: false },
@@ -394,11 +402,11 @@ const EXTENSION_SOURCES = [
 		// IS in the main bundle.
 		watchOperations: ["CreateBookmark", "DeleteBookmark"],
 	},
-	{
-		// Also paged, but plain REST rather than GraphQL — no queryId to resolve,
-		// and a documented cursor. `me` resolves from the session.
+	reddit: {
+		// Wire mode "page" means a background request, not the product
+		// catalogue's session import mode. Reddit's `me` and cursor resolve from
+		// the signed-in session.
 		mode: "page",
-		source: "reddit",
 		host: "reddit.com",
 		url: "https://www.reddit.com/user/me/saved.json?limit=100&raw_json=1",
 		cursorParam: "after",
@@ -406,17 +414,22 @@ const EXTENSION_SOURCES = [
 		pageLimit: 40,
 		watchUrls: ["/api/save", "/api/unsave"],
 	},
-	{
-		// GitHub stars are rendered on a signed-in page. The extension reads only
-		// bounded repository fields from that page and follows its normal pagination.
+	github: {
+		// Wire mode "page" means the extension reads a signed-in page. The
+		// product catalogue still describes GitHub history as session import.
 		mode: "page",
-		source: "github",
 		host: "github.com",
 		url: "https://github.com/stars",
 		pageLimit: 40,
 		watchUrls: ["/star", "/unstar"],
 	},
-];
+};
+
+const EXTENSION_SOURCES: readonly ExtensionSourceConfig[] =
+	EXTENSION_PLATFORM_SOURCES.map((source) => ({
+		source,
+		...EXTENSION_SOURCE_DETAILS[source],
+	}));
 
 /**
  * The extension's instruction sheet.

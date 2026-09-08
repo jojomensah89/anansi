@@ -1,14 +1,14 @@
+import {
+	supportsRetainedCaptureMethod,
+	type CaptureMethod,
+	type CaptureSource,
+} from "./capabilities.ts";
 import type { NormalizedItem } from "./item.ts";
+
+export type { CaptureMethod, CaptureSource } from "./capabilities.ts";
 
 export const CAPTURE_SCHEMA_VERSION = 1 as const;
 
-export type CaptureSource = "x" | "reddit" | "tiktok" | "github" | "web";
-export type CaptureMethod =
-	| "platform_event"
-	| "platform_import"
-	| "toolbar"
-	| "context_menu"
-	| "chrome_bookmark";
 export type CaptureOutcome =
 	| "created"
 	| "updated"
@@ -92,26 +92,6 @@ const DEFAULT_LIMITS = {
 	maxObjectNodes: 50_000,
 };
 
-const CAPTURE_SOURCES = new Set<CaptureSource>([
-	"x",
-	"reddit",
-	"tiktok",
-	"github",
-	"web",
-]);
-const PLATFORM_METHODS = new Set<CaptureMethod>([
-	"platform_event",
-	"platform_import",
-]);
-const WEB_METHODS = new Set<CaptureMethod>([
-	"toolbar",
-	"context_menu",
-	"chrome_bookmark",
-]);
-const CAPTURE_METHODS = new Set<CaptureMethod>([
-	...PLATFORM_METHODS,
-	...WEB_METHODS,
-]);
 const ITEM_ACTIONS = new Set(["save", "unsave"]);
 const ITEM_KINDS = new Set(["post", "repo", "comment", "video", "article"]);
 const MEDIA_KINDS = new Set(["image", "video_poster", "card"]);
@@ -337,22 +317,19 @@ export function parseBookmarkCapture(
 	if (!isBoundedString(value.eventId, 200)) {
 		return fail("invalid_capture", "capture event id is invalid");
 	}
-	if (!CAPTURE_SOURCES.has(value.source as CaptureSource)) {
+	if (typeof value.source !== "string") {
 		return fail("invalid_capture", "capture source is invalid");
 	}
 	if (!isUnixSeconds(value.observedAt)) {
 		return fail("invalid_capture", "capture timestamp is invalid");
 	}
-	if (!CAPTURE_METHODS.has(value.captureMethod as CaptureMethod)) {
+	if (typeof value.captureMethod !== "string") {
 		return fail("invalid_capture", "capture method is invalid");
 	}
 
 	const source = value.source as CaptureSource;
 	const method = value.captureMethod as CaptureMethod;
-	if (
-		(source === "web" && !WEB_METHODS.has(method)) ||
-		(source !== "web" && !PLATFORM_METHODS.has(method))
-	) {
+	if (!supportsRetainedCaptureMethod(source, method)) {
 		return fail("invalid_capture", "capture method does not match its source");
 	}
 
@@ -360,7 +337,8 @@ export function parseBookmarkCapture(
 		if (
 			source === "web" ||
 			value.action !== "snapshot" ||
-			!PLATFORM_METHODS.has(method)
+			method !== "platform_event" &&
+			method !== "platform_import"
 		) {
 			return fail("invalid_capture", "raw-page capture metadata is invalid");
 		}

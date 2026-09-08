@@ -8,6 +8,8 @@
     "./x": "./src/x/parse.ts",
     "./github": "./src/github/parse.ts",
     "./reddit": "./src/reddit/parse.ts",
-    "./tiktok": "./src/tiktok/parse.ts"
+    "./tiktok": "./src/tiktok/parse.ts",
+    "./capabilities": "./src/capabilities.ts",
+    "./extension-config": "./src/extension-config.ts"
   }
 }

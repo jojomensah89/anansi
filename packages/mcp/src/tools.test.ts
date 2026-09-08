@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { type AnansiDb, upsertItems } from "@anansi/db";
+import { items, type AnansiDb, getItem, upsertItems } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { createAnansiServer } from "./index.ts";
 
@@ -18,6 +18,20 @@ describe("MCP tool contract", () => {
       title: "MCP source filtering",
       body: "A saved web page for MCP search.",
       savedAt: 1,
+      savedAtIsExact: true,
+      metrics: {},
+      media: [],
+      links: [],
+      raw: {},
+    }]);
+    await upsertItems(db, [{
+      source: "tiktok",
+      externalId: "mcp-hidden-item",
+      url: "https://tiktok.example.test/mcp-hidden-item",
+      kind: "video",
+      title: "Paused hidden source",
+      body: "A retained TikTok row that must not be visible to MCP.",
+      savedAt: 2,
       savedAtIsExact: true,
       metrics: {},
       media: [],
@@ -45,6 +59,19 @@ describe("MCP tool contract", () => {
       const payload = JSON.parse(String(content[0]?.text));
       expect(payload.count).toBe(1);
       expect(payload.results[0].url).toBe("https://example.com/mcp-web-item");
+
+      const hidden = (await db.select({ id: items.id, source: items.source }).from(items)).find(
+				(row) => row.source === "tiktok",
+			);
+      expect(hidden).toBeDefined();
+      expect(await getItem(db, hidden!.id)).toBeNull();
+
+      const hiddenSearch = await client.callTool({
+        name: "search_memory",
+        arguments: { query: "retained TikTok", limit: 5 },
+      });
+      const hiddenContent = hiddenSearch.content as Array<{ text?: string }>;
+      expect(JSON.parse(String(hiddenContent[0]?.text)).count).toBe(0);
     } finally {
       await client.close();
       await server.close();

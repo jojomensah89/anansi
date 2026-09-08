@@ -1,10 +1,23 @@
 import type { ExtensionHealth, SourceHealth } from "@anansi/db";
+import {
+	VISIBLE_LIBRARY_SOURCES,
+	isToggleableSource as isCapabilityToggleableSource,
+	sourceCapability,
+	type ImportMode,
+	type ToggleableSource,
+	type VisibleLibrarySource,
+} from "@anansi/sources";
 
 export type SourceSupport = "supported" | "experimental" | "coming_next";
-export type SourceMode = "page" | "observe" | "manual";
+/**
+ * Product catalogue capture mode. This describes how history enters Anansi;
+ * it is deliberately different from ExtensionSourceConfig.mode, whose wire
+ * values `page` and `observe` select extension execution behavior.
+ */
+export type SourceMode = ImportMode | "manual";
 
 export interface SourceDefinition {
-	source: string;
+	source: VisibleLibrarySource;
 	name: string;
 	host: string;
 	note: string;
@@ -14,48 +27,58 @@ export interface SourceDefinition {
 	requiresExtension: boolean;
 }
 
-export const SOURCE_CATALOG: readonly SourceDefinition[] = [
-	{
-		source: "x",
+type SourcePresentation = Omit<SourceDefinition, "source" | "mode">;
+
+/** Display metadata stays web-owned; membership comes from the shared view. */
+const SOURCE_PRESENTATION: Record<VisibleLibrarySource, SourcePresentation> = {
+	x: {
 		name: "X bookmarks",
 		host: "x.com",
 		note: "Bookmarks captured live and through a resumable history import.",
 		support: "supported",
-		mode: "page",
 		toggleable: true,
 		requiresExtension: true,
 	},
-	{
-		source: "reddit",
+	reddit: {
 		name: "Reddit saves",
 		host: "reddit.com",
 		note: "Saved posts and comments captured live and through history import.",
 		support: "supported",
-		mode: "page",
 		toggleable: true,
 		requiresExtension: true,
 	},
-	{
-		source: "web",
+	web: {
 		name: "Web pages & bookmarks",
 		host: "Any website",
 		note: "Pages, selections, and optional Chrome bookmark mirroring.",
 		support: "supported",
-		mode: "manual",
 		toggleable: false,
 		requiresExtension: true,
 	},
-	{
-		source: "github",
+	github: {
 		name: "GitHub stars",
 		host: "github.com",
 		note: "Starred repositories captured live and through a resumable history import.",
 		support: "supported",
-		mode: "page",
 		toggleable: true,
 		requiresExtension: true,
 	},
-] as const;
+};
+
+function productModeFor(source: VisibleLibrarySource): SourceMode {
+	const capability = sourceCapability(source);
+	if (!capability) throw new Error(`missing capabilities for visible source ${source}`);
+	if (capability.manualCapture) return "manual";
+	if (capability.importMode !== null) return capability.importMode;
+	throw new Error(`visible source ${source} has no product capture mode`);
+}
+
+export const SOURCE_CATALOG: readonly SourceDefinition[] =
+	VISIBLE_LIBRARY_SOURCES.map((source) => ({
+		source,
+		mode: productModeFor(source),
+		...SOURCE_PRESENTATION[source],
+	}));
 
 const EMPTY_HEALTH = {
 	items: 0,
@@ -87,16 +110,11 @@ export function sourceCatalogueResponse(
 			...EMPTY_HEALTH,
 			...bySource.get(definition.source),
 			enabled: definition.toggleable ? !off.has(definition.source) : true,
-			runtime:
-				extension.sources[
-					definition.source as keyof typeof extension.sources
-				] ?? null,
+			runtime: extension.sources[definition.source] ?? null,
 		})),
 	};
 }
 
-export function isToggleableSource(source: string): boolean {
-	return SOURCE_CATALOG.some(
-		(entry) => entry.source === source && entry.toggleable,
-	);
+export function isToggleableSource(source: string): source is ToggleableSource {
+	return isCapabilityToggleableSource(source);
 }

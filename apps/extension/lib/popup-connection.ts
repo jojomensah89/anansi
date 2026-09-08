@@ -1,20 +1,14 @@
-export const POPUP_SOURCES = ["x", "reddit", "github"] as const;
+import {
+	EXTENSION_PLATFORM_SOURCES,
+	parseExtensionConfig,
+	type ExtensionRemoteConfig,
+	type ExtensionSourceConfig,
+} from "@anansi/sources";
 
-export interface PopupSourceConfig {
-	source: string;
-	host: string;
-	mode: "page" | "observe";
-	operation?: string;
-	url?: string;
-	variables?: Record<string, unknown>;
-	cursorPrefix?: string;
-	cursorParam?: string;
-	cursorPath?: string;
-	entryPrefix?: string;
-	pageLimit?: number;
-	watchOperations?: string[];
-	watchUrls?: string[];
-}
+/** Sources with a shipped platform importer; Web is manual page capture. */
+export const POPUP_SOURCES = EXTENSION_PLATFORM_SOURCES;
+
+export type PopupSourceConfig = ExtensionSourceConfig;
 
 export type PopupSourceRow = PopupSourceConfig & {
 	enabled: boolean;
@@ -32,79 +26,11 @@ const FALLBACKS: Record<(typeof POPUP_SOURCES)[number], PopupSourceConfig> = {
 	},
 };
 
-const OPTIONAL_STRINGS = [
-	"operation",
-	"url",
-	"cursorPrefix",
-	"cursorParam",
-	"cursorPath",
-	"entryPrefix",
-] as const;
-
-function isStringArray(value: unknown): value is string[] {
-	return (
-		Array.isArray(value) && value.every((entry) => typeof entry === "string")
-	);
-}
-
-function isPopupSourceConfig(value: unknown): value is PopupSourceConfig {
-	if (typeof value !== "object" || value === null || Array.isArray(value))
-		return false;
-	const row = value as Record<string, unknown>;
-	if (!POPUP_SOURCES.includes(row.source as (typeof POPUP_SOURCES)[number]))
-		return false;
-	if (typeof row.host !== "string" || row.host.trim() === "") return false;
-	if (row.mode !== "page" && row.mode !== "observe") return false;
-	if (
-		OPTIONAL_STRINGS.some(
-			(key) => row[key] !== undefined && typeof row[key] !== "string",
-		)
-	)
-		return false;
-	if (
-		row.variables !== undefined &&
-		(typeof row.variables !== "object" ||
-			row.variables === null ||
-			Array.isArray(row.variables))
-	)
-		return false;
-	if (
-		row.pageLimit !== undefined &&
-		(!Number.isInteger(row.pageLimit) || Number(row.pageLimit) <= 0)
-	)
-		return false;
-	if (row.watchOperations !== undefined && !isStringArray(row.watchOperations))
-		return false;
-	if (row.watchUrls !== undefined && !isStringArray(row.watchUrls))
-		return false;
-	return true;
-}
-
 /** Reject the entire remote catalogue if one instruction is unsafe or ambiguous. */
-export function validatePopupRemoteConfig(value: unknown): value is {
-	readonly version: number;
-	readonly enabled: boolean;
-	readonly ingest: string;
-	readonly sources: PopupSourceConfig[];
-} {
-	if (typeof value !== "object" || value === null || Array.isArray(value))
-		return false;
-	const config = value as Record<string, unknown>;
-	if (!Number.isInteger(config.version) || Number(config.version) < 1)
-		return false;
-	if (typeof config.enabled !== "boolean") return false;
-	if (typeof config.ingest !== "string") return false;
-	try {
-		const ingest = new URL(config.ingest);
-		if (ingest.protocol !== "https:" && ingest.protocol !== "http:")
-			return false;
-	} catch {
-		return false;
-	}
-	const sources = config.sources;
-	if (!Array.isArray(sources) || !sources.every(isPopupSourceConfig))
-		return false;
-	return new Set(sources.map((row) => row.source)).size === sources.length;
+export function validatePopupRemoteConfig(
+	value: unknown,
+): value is ExtensionRemoteConfig {
+	return parseExtensionConfig(value).ok;
 }
 
 /** Keep the product catalogue visible even when remote instructions fail. */
