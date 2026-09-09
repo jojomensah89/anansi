@@ -342,19 +342,14 @@ export default function App() {
           padding: "14px 16px 0",
         }}
       >
-        <svg
+        <img
+          src="/icon/48.png"
+          width="18"
+          height="18"
+          alt=""
           aria-hidden="true"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={S.accent}
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        >
-          <circle cx="12" cy="12" r="3.2" />
-          <path d="M12 8.8V3M12 15.2V21M8.8 12H3M15.2 12H21M9.7 9.7 5.6 5.6M14.3 9.7l4.1-4.1M9.7 14.3l-4.1 4.1M14.3 14.3l4.1 4.1" />
-        </svg>
+          style={{ borderRadius: 5, objectFit: "cover" }}
+        />
         <strong style={{ fontSize: 14 }}>Anansi</strong>
       </div>
 

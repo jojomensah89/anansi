@@ -360,6 +360,35 @@ textarea::placeholder {
   display: flex;
 }
 
+.anansi-rail-social {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.anansi-rail-social-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  padding: 7px 8px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+  transition: background 120ms ease-out, color 120ms ease-out;
+}
+
+.anansi-rail-social-link:hover,
+.anansi-rail-social-link:focus-visible {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.anansi-rail-social-link > svg {
+  flex-shrink: 0;
+}
+
 .anansi-sidebar-trigger {
   flex-shrink: 0;
   color: var(--faint);
@@ -396,6 +425,13 @@ textarea::placeholder {
 
 .anansi-sidebar[data-state="collapsed"] .anansi-sidebar-footer {
   align-items: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.anansi-sidebar[data-state="collapsed"] .anansi-rail-social-link {
+  justify-content: center;
+  gap: 0;
   padding-left: 0;
   padding-right: 0;
 }

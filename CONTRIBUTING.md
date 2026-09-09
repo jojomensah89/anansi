@@ -73,13 +73,15 @@ access. The Cloudflare acceptance procedure is opt-in and documented in
 ## MCP
 
 The local HTTP endpoint is `http://127.0.0.1:3001/mcp` and requires
-`MCP_TOKEN`. The same four read-only tools are available over stdio:
+`MCP_TOKEN`. The same eight read-only tools are available over stdio:
 
 ```powershell
 $env:ANANSI_DB_PATH = ".\data\anansi.db"
 bun apps/cli/src/cli.ts serve --mcp
 ```
 
+The catalog is `search_saved`, `get_saved`, `get_saved_many`, `list_saved`,
+`list_recent_saves`, `list_author_saves`, `list_tags`, and `library_stats`.
 MCP search is intentionally keyword/BM25 today. The visible source filter
 accepts `x`, `reddit`, `github`, and `web`; paused TikTok rows remain hidden.
 

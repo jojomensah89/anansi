@@ -2,39 +2,35 @@
 
 # 🕸️ Anansi
 
-**Your personal web memory, all in one place.**
+**Open-source, local-first web memory for developers and AI agents.**
 
-Anansi captures the things you save online — bookmarks, saved posts, GitHub stars, web pages — into one searchable library your coding agent can query over MCP. Your browser supplies the platform session; your Cloudflare account (or a local SQLite file for dev) stores the capture.
+Anansi captures X bookmarks, Reddit saves, GitHub stars, and web pages or Chrome bookmarks from the browser sessions you already use, stores them in a searchable library you control, and lets compatible coding agents search and retrieve those saved references through eight read-focused MCP tools.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple)](https://modelcontextprotocol.io)
-[![Cloudflare](https://img.shields.io/badge/Cloudflare-Free--tier-orange?logo=cloudflare)](https://github.com/jojomensah89/anansi)
 [![Repo](https://img.shields.io/badge/GitHub-jojomensah89%2Fanansi-black?logo=github)](https://github.com/jojomensah89/anansi)
-<!-- PUBLIC LAUNCH: uncomment after repo goes public -->
-<!-- [![Stars](https://img.shields.io/github/stars/jojomensah89/anansi?style=social)](https://github.com/jojomensah89/anansi) -->
-<!-- [![Issues](https://img.shields.io/github/issues/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/issues) -->
-<!-- [![Last commit](https://img.shields.io/github/last-commit/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/commits) -->
-<!-- [![CI](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml/badge.svg)](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml) -->
+[![Stars](https://img.shields.io/github/stars/jojomensah89/anansi?style=social)](https://github.com/jojomensah89/anansi)
+[![Issues](https://img.shields.io/github/issues/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/issues)
+[![Last commit](https://img.shields.io/github/last-commit/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/commits)
+[![CI](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml/badge.svg)](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml)
 
-[Get Started](#-quickstart) · [Supported Sources](#-supported-sources) · [Ask it from your agent](#-ask-it-from-your-agent-mcp) · [Report a bug](https://github.com/jojomensah89/anansi/issues/new?template=bug_report.yml)
+[Follow the build](https://github.com/jojomensah89/anansi) · [Get Started](#-quickstart) · [Supported Sources](#-supported-sources) · [Ask it from your agent](#-ask-it-from-your-agent-mcp) · [Report a bug](https://github.com/jojomensah89/anansi/issues/new?template=bug_report.yml)
 
-<!-- TODO: add hero visual — docs/assets/demo.gif + library screenshot -->
+<img src="./docs/assets/anansi-logo.png" width="420" alt="Anansi logo showing a spider organizing saved web references" />
 
 </div>
 
-## ✨ Why Anansi?
+## ✨ What Anansi does
 
-Bookmarks rot across X, Reddit, GitHub, and 200 open tabs. Pocket-style tools own your data, and agents can't read them.
+Anansi does the following:
 
-Anansi fixes that:
-
-- 📥 **Capture where you browse** — extension uses your existing signed-in session, no scraping service
-- 💸 **~$0 hosting in your account** — one Worker, one D1, one R2. No server to babysit, no account controlled by anyone else, no paid Queues or Durable Objects by design
-- 🔍 **One searchable library** — full text, authors, recency, source filters
-- 🏷️ **Organize your way** — manual tags (bulk included), saved views, highlights, private notes, favorites
-- 🧠 **Agent-native** — Streamable HTTP MCP server with 8 read-focused tools
-- 🔒 **Conservative by design** — bearer-auth ingest, no `<all_urls>`, no `cookies` permission, no GitHub OAuth/PAT
-- 🔁 **Durable** — queued capture with retry + resume cursors, survives restarts and rate limits
+- 📥 **Captures supported saves** — X bookmarks, Reddit saves, GitHub stars, and Web pages
+- 🔖 **Mirrors Chrome bookmarks** — optional Chrome bookmark capture is stored as Web items
+- 🔍 **Searches the library** — saved text, authors, sources, tags, and recency
+- 💾 **Keeps the library under your control** — run locally with SQLite or use the repository's own-account Cloudflare deployment path
+- 🧠 **Exposes saved references to agents** — eight read-focused MCP tools search, retrieve, list, and summarize the library
+- 🔁 **Recovers from interruptions** — queued capture, retry, and resumable imports survive restarts and rate limits
+- 🔒 **Uses bounded access** — explicit capture, bearer-auth ingest, no `<all_urls>`, no `cookies` permission, and no GitHub OAuth or PAT
 
 ## 📥 Supported Sources
 
@@ -521,6 +517,8 @@ Have an idea? [Open a feature request](https://github.com/jojomensah89/anansi/is
 ## 🤝 Contributing
 
 PRs welcome — small and focused wins. Read [CONTRIBUTING.md](./CONTRIBUTING.md), follow the privacy rules, run the checks above. Report vulnerabilities privately per [SECURITY.md](./SECURITY.md). Be kind per [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+
+Useful early contributions include clearer setup docs, scrubbed source fixtures, parser and import fixes, MCP client examples, accessibility improvements, and focused library UX changes. If you are unsure where to begin, open a small issue describing the user problem before starting a large change.
 
 ## 📄 License
 
