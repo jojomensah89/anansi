@@ -18,6 +18,7 @@ import { SourceMark } from "./sourcemark.tsx";
 import { ExtensionIcon } from "./extension-icon.tsx";
 import { api, sourceLabel, type ExtensionHealth } from "../lib/api.ts";
 import { extensionLabel } from "../lib/source-state.ts";
+import { GITHUB_URL, X_URL } from "../lib/links.ts";
 
 /** The library rail. The shell owns counts so navigation and content agree. */
 export interface RailProps {
@@ -26,15 +27,6 @@ export interface RailProps {
 	archived?: number;
 	bySource: Record<string, number>;
 	ready?: boolean;
-}
-
-function Web() {
-	return (
-		<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
-			<circle cx="12" cy="12" r="3.2" />
-			<path d="M12 8.8V3M12 15.2V21M8.8 12H3M15.2 12H21M9.7 9.7 5.6 5.6M14.3 9.7l4.1-4.1M9.7 14.3l-4.1 4.1M14.3 14.3l4.1 4.1" />
-		</svg>
-	);
 }
 
 function NavIcon({ path, active }: { path: string; active: boolean }) {
@@ -54,6 +46,38 @@ function Item({ to, label, count, active, children }: { to: string; label: strin
 				{count !== undefined && <span className="anansi-sidebar-count mono">{count}</span>}
 			</SidebarMenuButton>
 		</SidebarMenuItem>
+	);
+}
+
+function XIcon() {
+	return (
+		<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+			<path d="M18.9 2H22l-6.8 7.8L23.2 22h-6.3l-4.9-6.4L6.4 22H3.2l7.3-8.3L1.6 2H8l4.4 5.9L18.9 2Zm-1.1 17.8h1.7L7 3.9H5.2l12.6 15.9Z" />
+		</svg>
+	);
+}
+
+function GitHubIcon() {
+	return (
+		<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+			<path d="M9 19c-4 1.5-4-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1-.6 2V21" />
+		</svg>
+	);
+}
+
+/** Pure so it renders without router/sidebar context and stays testable. */
+export function RailSocialLinks() {
+	return (
+		<div className="anansi-rail-social">
+			<a href={X_URL} target="_blank" rel="noopener noreferrer" aria-label="Follow on X" title="Follow on X" className="anansi-rail-social-link">
+				<XIcon />
+				<span className="anansi-sidebar-label">Follow on X</span>
+			</a>
+			<a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" aria-label="Anansi on GitHub" title="Anansi on GitHub" className="anansi-rail-social-link">
+				<GitHubIcon />
+				<span className="anansi-sidebar-label">GitHub</span>
+			</a>
+		</div>
 	);
 }
 
@@ -79,7 +103,7 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 		<Sidebar className="anansi-rail" collapsible="icon">
 			<SidebarHeader className="anansi-rail-brand">
 				<div className="anansi-rail-brand-name">
-					<Web />
+					<img src="/favicon.png" width="20" height="20" alt="" aria-hidden="true" style={{ borderRadius: 6, objectFit: "cover" }} />
 					<span className="anansi-sidebar-label">Anansi</span>
 				</div>
 				<SidebarTrigger />
@@ -156,6 +180,7 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 					<span className="anansi-rail-extension-dot" style={{ background: extensionColor }} />
 					<span className="mono anansi-sidebar-label" style={{ fontSize: 10.5, color: extensionColor }}>{extensionText}</span>
 				</div>
+				<RailSocialLinks />
 			</SidebarFooter>
 		</Sidebar>
 	);

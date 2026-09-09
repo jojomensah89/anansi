@@ -33,3 +33,7 @@ coverage/
 # .dc.html working files beside it
 design/*.html
 !design/*.dc.html
+
+.superpowers/
+
+/docs
