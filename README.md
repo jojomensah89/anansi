@@ -16,7 +16,7 @@ Anansi captures X bookmarks, Reddit saves, GitHub stars, and web pages or Chrome
 
 [Follow the build](https://github.com/jojomensah89/anansi) · [Get Started](#-quickstart) · [Supported Sources](#-supported-sources) · [Ask it from your agent](#-ask-it-from-your-agent-mcp) · [Report a bug](https://github.com/jojomensah89/anansi/issues/new?template=bug_report.yml)
 
-<img src="./docs/assets/anansi-logo.png" width="420" alt="Anansi logo showing a spider organizing saved web references" />
+<img src="./apps/web/public/anansi-logo.png" width="420" alt="Anansi logo showing a spider organizing saved web references" />
 
 </div>
 
