@@ -1,6 +1,6 @@
 # Local AI Batch Throughput Design
 
-**Status:** Approved design; implementation pending
+**Status:** Implemented and verified locally
 
 ## Goal
 
@@ -66,7 +66,7 @@ chat request:
 
 - Process queue rounds of up to 50 tagging jobs, but claim only enough jobs to
   fill currently available worker slots.
-- Run two tagging requests concurrently by default.
+- Run one tagging request by default on the current Ollama setup.
 - Permit a configurable maximum of four after measurement on the user's GPU.
 - Each task preserves the existing structured schema, canonical topic
   allowlist, retry policy, and final per-item validation.
@@ -97,7 +97,7 @@ Use conservative defaults rather than exposing a new product setting:
 - embedding queue chunk: 64;
 - Ollama embedding request batch: 16;
 - tagging queue chunk: 50; and
-- tagging concurrency: 2.
+- tagging concurrency: 1.
 
 Allow environment overrides for developer benchmarking. Reject non-positive,
 non-integer, and unsafe values, and cap tagging concurrency at 4.
@@ -131,3 +131,15 @@ non-integer, and unsafe values, and cap tagging concurrency at 4.
    stale result or cause a busy loop.
 6. Benchmarks demonstrate the selected defaults improve throughput on the
    current machine without new timeouts or out-of-memory failures.
+
+## Benchmark result
+
+The implementation benchmark on the current RTX 3060 Laptop GPU selected an
+embedding provider batch of 16: 64 inputs improved from 19.37 items/second at
+batch 1 to 89.22 at batch 16. Batch 32 reached 113.68 items/second, but 16
+remains the conservative default.
+
+Ollama tagging did not benefit from client concurrency on this setup. Across 16
+items, concurrency 1 reached 2.39 items/second, concurrency 2 reached 2.09, and
+concurrency 4 reached 2.33. The measured default is therefore 1; developers can
+benchmark 2 to 4 after changing the Ollama server's parallelism or hardware.

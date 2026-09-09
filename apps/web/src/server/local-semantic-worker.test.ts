@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { aiEnrichmentJobs, reconcileAiJobs, type AnansiDb, setAiSettings, upsertItems } from "@anansi/db";
+import {
+	aiEnrichmentJobs,
+	reconcileAiJobs,
+	type AnansiDb,
+	setAiSettings,
+	upsertItems,
+} from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { AiProviderError } from "./ai.ts";
 import { openLocalSemanticCache } from "./local-semantic-cache.ts";
@@ -75,6 +81,136 @@ describe("local semantic worker", () => {
 		}
 	});
 
+	test("drains multiple queued batches in one invocation", async () => {
+		const { db, cache, directory } = setup();
+		try {
+			await upsertItems(
+				db,
+				[1, 2, 3, 4, 5].map((index) => ({
+					source: "web" as const,
+					externalId: `drain-item-${index}`,
+					url: `https://example.com/drain-item-${index}`,
+					kind: "article" as const,
+					title: `Vector retrieval ${index}`,
+					body: "Similar documents",
+					savedAt: index,
+					savedAtIsExact: true,
+					metrics: {},
+					media: [],
+					links: [],
+					raw: {},
+				})),
+			);
+			await setAiSettings(db, { semanticSearchEnabled: true });
+			let calls = 0;
+			const worker = createLocalSemanticWorker(db, cache, {
+				model: "test-model",
+				dimensions: 2,
+				embed: async () => {
+					calls += 1;
+					return [1, 0];
+				},
+			});
+
+			await worker.runOnce();
+
+			expect(calls).toBe(5);
+			expect(cache.snapshot()).toMatchObject({
+				state: "ready",
+				indexed: 5,
+				pending: 0,
+			});
+		} finally {
+			cache.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	test("uses one ordered provider batch for multiple embeddings", async () => {
+		const { db, cache, directory } = setup();
+		try {
+			await upsertItems(
+				db,
+				[1, 2, 3].map((index) => ({
+					source: "web" as const,
+					externalId: `batched-item-${index}`,
+					url: `https://example.com/batched-item-${index}`,
+					kind: "article" as const,
+					body: `Batch body ${index}`,
+					savedAt: index,
+					savedAtIsExact: true,
+					metrics: {},
+					media: [],
+					links: [],
+					raw: {},
+				})),
+			);
+			await setAiSettings(db, { semanticSearchEnabled: true });
+			let batchCalls = 0;
+			const worker = createLocalSemanticWorker(db, cache, {
+				model: "test-model",
+				dimensions: 2,
+				embed: async () => {
+					throw new Error("single embedding path must not run");
+				},
+				embedBatch: async (texts) => {
+					batchCalls += 1;
+					expect(texts).toHaveLength(3);
+					return texts.map((_, index) => [index + 1, 0]);
+				},
+			});
+
+			await worker.runOnce();
+
+			expect(batchCalls).toBe(1);
+			expect(cache.snapshot()).toMatchObject({ indexed: 3, pending: 0 });
+		} finally {
+			cache.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	test("publishes nothing when a provider batch has the wrong result count", async () => {
+		const { db, cache, directory } = setup();
+		try {
+			await upsertItems(
+				db,
+				[1, 2].map((index) => ({
+					source: "web" as const,
+					externalId: `malformed-batch-${index}`,
+					url: `https://example.com/malformed-batch-${index}`,
+					kind: "article" as const,
+					body: `Malformed batch ${index}`,
+					savedAt: index,
+					savedAtIsExact: true,
+					metrics: {},
+					media: [],
+					links: [],
+					raw: {},
+				})),
+			);
+			await setAiSettings(db, { semanticSearchEnabled: true });
+			const worker = createLocalSemanticWorker(db, cache, {
+				model: "test-model",
+				dimensions: 2,
+				embed: async () => [1, 0],
+				embedBatch: async () => [[1, 0]],
+			});
+
+			await worker.runOnce();
+
+			expect(cache.snapshot().indexed).toBe(0);
+			expect(
+				(await db.select().from(aiEnrichmentJobs)).every(
+					(job) => job.status === "failed" && job.lastError === "ai:malformed",
+				),
+			).toBe(true);
+		} finally {
+			cache.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
 	test("keeps an Ollama alias as the durable identity across items and runs", async () => {
 		const { db, cache, directory } = setup();
 		try {
@@ -112,11 +248,15 @@ describe("local semantic worker", () => {
 			const provider = createOllamaEmbeddingProvider({
 				model: "embedding-alias",
 				fetch: async (_input, init) => {
-					const body = JSON.parse(String(init?.body)) as { model?: string };
+					const body = JSON.parse(String(init?.body)) as {
+						model?: string;
+						input?: string | string[];
+					};
 					requestedModels.push(body.model ?? "");
+					const count = Array.isArray(body.input) ? body.input.length : 1;
 					return Response.json({
 						model: "resolved-embedding",
-						embeddings: [[1, 0]],
+						embeddings: Array.from({ length: count }, () => [1, 0]),
 					});
 				},
 			});
@@ -127,7 +267,7 @@ describe("local semantic worker", () => {
 			expect(provider.observedModel).toBe("resolved-embedding");
 			expect(cache.model).toBe("embedding-alias");
 			expect(cache.snapshot().indexed).toBe(2);
-			expect(requestedModels).toEqual(["embedding-alias", "embedding-alias"]);
+			expect(requestedModels).toEqual(["embedding-alias"]);
 
 			await upsertItems(db, [{
 				source: "web",
@@ -144,11 +284,7 @@ describe("local semantic worker", () => {
 			}]);
 			await worker.runOnce();
 			expect(cache.snapshot().indexed).toBe(3);
-			expect(requestedModels).toEqual([
-			"embedding-alias",
-			"embedding-alias",
-			"embedding-alias",
-		]);
+			expect(requestedModels).toEqual(["embedding-alias", "embedding-alias"]);
 		} finally {
 			cache.close();
 			rmSync(directory, { recursive: true, force: true });

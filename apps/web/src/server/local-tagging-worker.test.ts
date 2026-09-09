@@ -60,6 +60,63 @@ describe("local tagging worker", () => {
 		expect((await worker.status()).complete).toBe(1);
 	});
 
+	test("drains multiple queued batches in one invocation", async () => {
+		const { db } = setup();
+		for (const externalId of [
+			"drain-one",
+			"drain-two",
+			"drain-three",
+			"drain-four",
+			"drain-five",
+		]) {
+			await addItem(db, externalId);
+		}
+		await setAiSettings(db, { autoTaggingEnabled: true });
+		let calls = 0;
+		const worker = createLocalTaggingWorker(db, {
+			model: "qwen-test",
+			generateTags: async () => {
+				calls += 1;
+				return ["web-dev"];
+			},
+		});
+
+		await worker.runOnce();
+
+		expect(calls).toBe(5);
+		expect((await worker.status()).complete).toBe(5);
+	});
+
+	test("runs tagging prompts concurrently within the configured ceiling", async () => {
+		const { db } = setup();
+		for (const externalId of ["concurrent-one", "concurrent-two", "concurrent-three"]) {
+			await addItem(db, externalId);
+		}
+		await setAiSettings(db, { autoTaggingEnabled: true });
+		let active = 0;
+		let peak = 0;
+		const worker = createLocalTaggingWorker(
+			db,
+			{
+				model: "qwen-test",
+				generateTags: async () => {
+				active += 1;
+				peak = Math.max(peak, active);
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				active -= 1;
+				return ["web-dev"];
+				},
+			},
+			50,
+			2,
+		);
+
+		await worker.runOnce();
+
+		expect(peak).toBe(2);
+		expect((await worker.status()).complete).toBe(3);
+	});
+
 	test("reconciles tagging jobs without creating duplicate embedding jobs", async () => {
 		const { db } = setup();
 		await addItem(db, "tagging-only-item");
@@ -103,14 +160,41 @@ describe("local tagging worker", () => {
 	test("keeps a failed job retryable and does not break the worker", async () => {
 		const { db } = setup();
 		await addItem(db, "failed-item");
+		await addItem(db, "failed-item-two");
+		await addItem(db, "failed-item-three");
 		await setAiSettings(db, { autoTaggingEnabled: true });
+		let calls = 0;
 		const worker = createLocalTaggingWorker(db, {
 			model: "qwen-test",
-			generateTags: async () => { throw new AiProviderError("unavailable", "Ollama is unavailable"); },
+			generateTags: async () => {
+				calls += 1;
+				throw new AiProviderError("unavailable", "Ollama is unavailable");
+			},
 		});
 		await worker.runOnce();
-		expect((await worker.status()).pending).toBe(1);
+		expect(calls).toBe(1);
+		expect((await worker.status()).pending).toBe(3);
 		expect((await worker.status()).failed).toBe(0);
+	});
+
+	test("stops when tagging is disabled during inference", async () => {
+		const { db } = setup();
+		await addItem(db, "disabled-during-inference");
+		await setAiSettings(db, { autoTaggingEnabled: true });
+		let calls = 0;
+		const worker = createLocalTaggingWorker(db, {
+			model: "qwen-test",
+			generateTags: async () => {
+				calls += 1;
+				await setAiSettings(db, { autoTaggingEnabled: false });
+				return ["web-dev"];
+			},
+		});
+
+		await worker.runOnce();
+
+		expect(calls).toBe(1);
+		expect((await worker.status()).pending).toBe(1);
 	});
 
 	test("does nothing while automatic tagging is disabled", async () => {
