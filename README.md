@@ -2,9 +2,9 @@
 
 # 🕸️ Anansi
 
-**Open-source, local-first web memory for developers and AI agents.**
+**Open-source, local-first web memory you control, for people and AI agents.**
 
-Anansi captures X bookmarks, Reddit saves, GitHub stars, and web pages or Chrome bookmarks from the browser sessions you already use, stores them in a searchable library you control, and lets compatible coding agents search and retrieve those saved references through eight read-focused MCP tools.
+Anansi captures X bookmarks, Reddit saves, GitHub stars, and web pages or Chrome bookmarks from the browser sessions you already use, stores them in a searchable library you control, and lets compatible AI agents search and retrieve those saved references through eight read-focused MCP tools.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple)](https://modelcontextprotocol.io)

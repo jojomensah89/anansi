@@ -1,11 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/avatar.tsx";
 import { Bone, CountBone, CreatorRowsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { FieldFilter } from "../components/filters.tsx";
 import { Rail } from "../components/rail.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
-import { api, sourceLabel, type Creator } from "../lib/api.ts";
+import { api, sourceLabel } from "../lib/api.ts";
+import { libraryKeys } from "../lib/library-query.ts";
+import { useCreatorsQuery } from "../lib/creators-query.ts";
 
 /** The same source vocabulary the library uses. */
 const PLATFORMS = [
@@ -29,39 +32,30 @@ export function formatAuthorShare(saves: number, libraryItems: number): string {
 }
 
 function Creators() {
-	const [creators, setCreators] = useState<Creator[]>([]);
-	const [stats, setStats] = useState<{ items: number; authors: number; archived: number; bySource: Record<string, number> }>({ items: 0, authors: 0, archived: 0, bySource: {} });
 	const [filter, setFilter] = useState("");
 	const [platforms, setPlatforms] = useState<string[]>([]);
-	const [loading, setLoading] = useState(true);
+	const statsQuery = useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000 });
+	const creatorQuery = useCreatorsQuery(filter, platforms);
+	const creators = creatorQuery.creators;
+	const stats = statsQuery.data ?? { items: 0, authors: 0, archived: 0, bySource: {}, media: { total: 0, stored: 0 } };
+	const loading = statsQuery.isPending || creatorQuery.isPending;
+	const slow = useSlowLoad(loading);
+	const once = creatorQuery.data?.pages[0]?.singleSaveCount ?? 0;
+	const topTenSaves = creatorQuery.data?.pages[0]?.topTenSaves ?? 0;
+	const topTenShare = stats.items ? Math.round((topTenSaves / stats.items) * 100) : 0;
+	const perAuthor = stats.authors ? (stats.items / stats.authors).toFixed(2) : "0";
+	const total = creatorQuery.total;
+	const sentinel = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
-		const controller = new AbortController();
-		Promise.all([api.stats(controller.signal), api.creators(1000, controller.signal)])
-			.then(([s, c]) => {
-				setStats({ items: s.items, authors: s.authors, archived: s.archived, bySource: s.bySource });
-				setCreators(c.creators);
-			})
-			.catch(() => {})
-			.finally(() => setLoading(false));
-		return () => controller.abort();
-	}, []);
-
-	const shown = useMemo(() => {
-		const query = filter.trim().toLowerCase();
-		return creators.filter((creator) => {
-			if (platforms.length > 0 && !platforms.includes(creator.source)) return false;
-			if (!query) return true;
-			return (creator.authorHandle ?? "").toLowerCase().includes(query) || (creator.authorName ?? "").toLowerCase().includes(query);
+		const node = sentinel.current;
+		if (!node) return;
+		const io = new IntersectionObserver((entries) => {
+			if (entries[0]?.isIntersecting && creatorQuery.hasNextPage && !creatorQuery.isFetchingNextPage) void creatorQuery.fetchNextPage();
 		});
-	}, [creators, filter, platforms]);
-
-	const slow = useSlowLoad(loading);
-	const once = creators.filter((creator) => creator.saves === 1).length;
-	const topTenShare = stats.items
-		? Math.round((creators.slice(0, 10).reduce((total, creator) => total + creator.saves, 0) / stats.items) * 100)
-		: 0;
-	const perAuthor = stats.authors ? (stats.items / stats.authors).toFixed(2) : "0";
+		io.observe(node);
+		return () => io.disconnect();
+	}, [creatorQuery.fetchNextPage, creatorQuery.hasNextPage, creatorQuery.isFetchingNextPage]);
 
 	return (
 		<div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
@@ -91,13 +85,13 @@ function Creators() {
 							onChange={setPlatforms}
 							options={PLATFORMS.filter((platform) => (stats.bySource[platform.value] ?? 0) > 0).map((platform) => ({
 								...platform,
-								count: creators.filter((creator) => creator.source === platform.value).length,
+								count: undefined,
 								icon: <SourceMark source={platform.value} size={13} />,
 							}))}
 						/>
 						{(platforms.length > 0 || filter.trim() !== "") && (
 							<span className="mono" style={{ fontSize: 10.5, color: "var(--faintest)" }}>
-								{shown.length.toLocaleString()} of {creators.length.toLocaleString()}
+								{creators.length.toLocaleString()} of {total.toLocaleString()}
 							</span>
 						)}
 					</span>
@@ -132,11 +126,11 @@ function Creators() {
 				<div className="scroll" style={{ flex: 1 }}>
 					{loading && slow && <CreatorRowsSkeleton />}
 					<div className="anansi-creator-grid" style={{ padding: "14px 22px 40px" }}>
-						{!loading && shown.length === 0 ? (
+						{!creatorQuery.isPending && creators.length === 0 ? (
 							<div style={{ gridColumn: "1 / -1", padding: "42px 12px", textAlign: "center", color: "var(--faint)", fontSize: 12.5 }}>
-								{creators.length === 0 ? "No authors yet" : "No authors match this filter"}
+								{total === 0 && !filter.trim() && platforms.length === 0 ? "No authors yet" : "No authors match this filter"}
 							</div>
-						) : shown.map((creator) => {
+						) : creators.map((creator) => {
 							if (!creator.authorHandle) return null;
 							const share = authorSharePercent(creator.saves, stats.items);
 							return (
@@ -177,6 +171,8 @@ function Creators() {
 							);
 						})}
 					</div>
+					{creatorQuery.isFetchingNextPage && <CreatorRowsSkeleton />}
+					<div ref={sentinel} style={{ height: 1 }} aria-hidden="true" />
 
 					<div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 30px 40px", fontSize: 11, color: "var(--fainter)" }}>
 						{loading ? slow ? <><CountBone digits={3} height={8} /> of <CountBone digits={3} height={8} /> saved exactly once</> : null : `${once} of ${stats.authors} saved exactly once`}

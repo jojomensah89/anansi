@@ -133,6 +133,7 @@ export type PopupCommandMessage = MessageBase &
 				anansi: "popup-command";
 				action:
 					| "queue-status"
+					| "import-all"
 					| "reschedule"
 					| "save-page"
 					| "mirror-status"
@@ -560,6 +561,7 @@ function validatePopupCommandShape(
 		return false;
 	if (
 		value.action === "queue-status" ||
+		value.action === "import-all" ||
 		value.action === "reschedule" ||
 		value.action === "save-page" ||
 		value.action === "mirror-status" ||

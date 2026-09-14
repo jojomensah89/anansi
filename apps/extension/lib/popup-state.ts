@@ -54,6 +54,37 @@ export function withoutStartingSource(sources: ReadonlySet<string>, source: stri
 	return next;
 }
 
+export interface InitialImportRun {
+	initialImportCompletedAt?: number;
+}
+
+export interface InitialImportSummary {
+	due: string[];
+	completed: number;
+}
+
+/** Summarize only configured sources whose durable run state is available. */
+export function initialImportSummary(
+	sources: ReadonlyArray<{
+		source: string;
+		configured: boolean;
+		enabled: boolean;
+	}>,
+	runs: Readonly<Record<string, InitialImportRun | undefined>> | null,
+): InitialImportSummary {
+	if (!runs) return { due: [], completed: 0 };
+	const due: string[] = [];
+	let completed = 0;
+	for (const source of sources) {
+		if (!source.configured || !source.enabled) continue;
+		const run = runs[source.source];
+		if (!run) continue;
+		if (run.initialImportCompletedAt === undefined) due.push(source.source);
+		else completed += 1;
+	}
+	return { due, completed };
+}
+
 export interface SourceView {
 	state: SourceStateName;
 	text: string;

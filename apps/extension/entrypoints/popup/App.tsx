@@ -22,6 +22,7 @@ import {
   type SourceSnapshot,
   type Tone,
   withoutStartingSource,
+  initialImportSummary,
 } from "../../lib/popup-state.ts";
 import type { Status } from "../background.ts";
 import "./App.css";
@@ -84,6 +85,7 @@ interface RunRecord {
   updatedAt?: number;
   paused?: boolean;
   lastErrorCode?: string;
+  initialImportCompletedAt?: number;
 }
 
 interface DurableSnapshot {
@@ -248,7 +250,13 @@ export default function App() {
     const settled = new Set(startingSources);
     for (const source of startingSources) {
       const run = snapshot.runs[source];
-      if (run?.phase === "running" || run?.lastErrorCode || run?.paused) settled.delete(source);
+      if (
+        run?.phase === "running" ||
+        run?.lastErrorCode ||
+        run?.paused ||
+        run?.initialImportCompletedAt !== undefined
+      )
+        settled.delete(source);
     }
     if (settled.size !== startingSources.size) setStartingSources(settled);
   }, [snapshot, startingSources]);
@@ -263,6 +271,9 @@ export default function App() {
    * appended back, marked off, and say so.
    */
   const rows = popupSourceRows(config?.sources ?? null);
+  const initialImport = initialImportSummary(rows, snapshot?.runs ?? null);
+  const showImportAll = config?.enabled === true && snapshot !== null && initialImport.due.length > 0;
+  const importAllStarting = initialImport.due.some((source) => startingSources.has(source));
 
   /** Everything one row needs, entirely from persisted state. */
   const viewOf = (s: ExtensionSourceConfig & { enabled: boolean; configured: boolean }) => {
@@ -299,6 +310,22 @@ export default function App() {
       () => setStartingSources((previous) => withoutStartingSource(previous, s.source)),
       () => setStartingSources((previous) => withoutStartingSource(previous, s.source)),
     );
+  };
+
+  const actImportAll = () => {
+    if (initialImport.due.length === 0) return;
+    const due = initialImport.due;
+    setStartingSources((previous) => new Set([...previous, ...due]));
+    void command({ action: "import-all" }).then((response) => {
+      if (!(response as { ok?: boolean } | undefined)?.ok) {
+        setStartingSources((previous) => {
+          const next = new Set(previous);
+          for (const source of due) next.delete(source);
+          return next;
+        });
+      }
+      refresh();
+    });
   };
 
   /**
@@ -425,6 +452,50 @@ export default function App() {
               Retry all
             </button>
           )}
+        </div>
+      )}
+
+      {showImportAll && (
+        <div
+          style={{
+            margin: "0 16px 12px",
+            padding: "10px 11px",
+            border: `1px solid ${S.edge}`,
+            borderRadius: 7,
+            background: S.raised,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+              <strong style={{ fontSize: 12.5 }}>
+                {initialImport.completed > 0 ? "Import remaining history" : "Import all history"}
+              </strong>
+              <span style={{ fontSize: 10.5, color: S.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {initialImport.due.map((source) => NAMES[source] ?? source).join(" · ")}
+              </span>
+            </span>
+            <button
+              type="button"
+              disabled={importAllStarting}
+              onClick={actImportAll}
+              aria-busy={importAllStarting}
+              style={{
+                ...button,
+                height: 28,
+                padding: "0 10px",
+                fontSize: 11,
+                opacity: importAllStarting ? 0.65 : 1,
+                cursor: importAllStarting ? "default" : "pointer",
+              }}
+            >
+              {importAllStarting && <span className="anansi-spinner" aria-hidden="true" />}
+              {importAllStarting
+                ? "Starting…"
+                : initialImport.completed > 0
+                  ? "Import remaining history"
+                  : "Import all history"}
+            </button>
+          </div>
         </div>
       )}
 

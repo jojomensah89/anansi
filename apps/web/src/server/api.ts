@@ -1,5 +1,5 @@
 import {
-	creators,
+	creatorPage,
 	extensionHealth,
 	findByAuthor,
 	getItem,
@@ -15,7 +15,7 @@ import {
 	recordExtensionHeartbeat,
 	searchItemsPage,
 	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
-	InvalidListCursorError, InvalidSearchCursorError,
+	InvalidListCursorError, InvalidSearchCursorError, InvalidCreatorCursorError,
   getAiSettings, setAiSettings, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
@@ -317,8 +317,19 @@ const extensionHeartbeatRoute: Route = {
 const creatorsRoute: Route = {
 	method: "GET",
 	path: "/api/creators",
-	handle: async ({ env, q }) =>
-		json({ creators: await creators(env.db, num(q.get("limit"), 100)) }),
+	handle: async ({ env, q }) => {
+		try {
+			return json(await creatorPage(env.db, {
+				query: q.get("q") ?? "",
+				source: q.getAll("source"),
+				cursor: q.get("cursor") ?? undefined,
+				limit: num(q.get("limit"), 40),
+			}));
+		} catch (error) {
+			if (error instanceof InvalidCreatorCursorError) return json({ error: error.message }, 400);
+			throw error;
+		}
+	},
 };
 
 const extensionStatsRoute: Route = {

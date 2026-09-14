@@ -249,33 +249,157 @@ export async function countItems(db: AnansiDb): Promise<number> {
 }
 
 /**
- * Creators is a group-by, not a table.
+ * Creators are a `(source, author_handle)` group-by, not a table.
  *
  * `max(author_name)` and `max(author_avatar)` are not aggregates anyone means
- * literally — they pick one non-null value per handle, which is what you want
+ * literally — they pick one non-null value per source and handle, which is what you want
  * when a display name changed between two saves.
  */
-export async function creators(db: AnansiDb, limit = 20) {
-  return db.all<{
-    authorHandle: string;
-    authorName: string | null;
-    authorAvatar: string | null;
-    source: string;
-    saves: number;
-    lastPosted: number | null;
-  }>(sql`
-    select author_handle as authorHandle,
-           max(author_name) as authorName,
-           max(author_avatar) as authorAvatar,
-           max(source) as source,
-           count(*) as saves,
-           max(posted_at) as lastPosted
-    from items
-    where author_handle is not null and ${visibleSourceClause(sql`source`)}
-    group by author_handle
-    order by saves desc
-    limit ${limit}
-  `);
+export interface Creator {
+	authorHandle: string;
+	authorName: string | null;
+	authorAvatar: string | null;
+	source: string;
+	saves: number;
+	lastPosted: number | null;
+}
+
+export interface CreatorPageOptions {
+	query?: string;
+	source?: string[];
+	cursor?: string;
+	limit?: number;
+}
+
+export interface CreatorPage {
+	creators: Creator[];
+	nextCursor: string | null;
+	total: number;
+	singleSaveCount: number;
+	topTenSaves: number;
+}
+
+export class InvalidCreatorCursorError extends Error {
+	constructor() {
+		super("invalid creator cursor");
+		this.name = "InvalidCreatorCursorError";
+	}
+}
+
+type CreatorCursor = {
+	key: string;
+	saves: number;
+	source: string;
+	authorHandle: string;
+};
+
+const creatorFilters = (options: CreatorPageOptions) => {
+	const query = options.query?.trim().toLowerCase() ?? "";
+	const source = [...new Set((options.source ?? []).map((value) => value.trim()).filter(Boolean))].sort();
+	return { query, source, key: JSON.stringify({ query, source }) };
+};
+
+const creatorSourceClause = (source: string[]) =>
+	source.length > 0
+		? sql`and source in (${sql.join(source.map((value) => sql`${value}`), sql`, `)})`
+		: sql``;
+
+/**
+ * Return creators as stable `(source, handle)` groups through a keyset page.
+ * The CTE makes filtering happen before aggregation, which keeps both the
+ * result rows and total count aligned with the user's active query.
+ */
+export async function creatorPage(db: AnansiDb, options: CreatorPageOptions = {}): Promise<CreatorPage> {
+	const { query, source, key } = creatorFilters(options);
+	const limit = Math.min(Math.max(Math.floor(options.limit ?? 40), 1), 100);
+	const sourceClause = creatorSourceClause(source);
+	const searchClause = query
+		? sql`and (lower(coalesce(author_handle, '')) like ${`%${query}%`} or lower(coalesce(author_name, '')) like ${`%${query}%`})`
+		: sql``;
+
+	let after: CreatorCursor | null = null;
+	if (options.cursor) {
+		try {
+			const parsed = JSON.parse(decodeURIComponent(options.cursor)) as Partial<CreatorCursor>;
+			if (
+				parsed.key !== key ||
+				typeof parsed.saves !== "number" ||
+				!Number.isFinite(parsed.saves) ||
+				typeof parsed.source !== "string" ||
+				!parsed.source ||
+				typeof parsed.authorHandle !== "string" ||
+				!parsed.authorHandle
+			) throw new Error();
+			after = parsed as CreatorCursor;
+		} catch {
+			throw new InvalidCreatorCursorError();
+		}
+	}
+
+	const afterClause = after
+		? sql`and (saves < ${after.saves} or (saves = ${after.saves} and source > ${after.source}) or (saves = ${after.saves} and source = ${after.source} and authorHandle > ${after.authorHandle}))`
+		: sql``;
+	const [totalRow] = await db.all<{ total: number; singleSaveCount: number; topTenSaves: number }>(sql`
+		with grouped as (
+			select source, author_handle as authorHandle, count(*) as saves
+			from items
+			where author_handle is not null and author_handle <> ''
+				and archived_at is null
+				and ${visibleSourceClause(sql`source`)}
+				${sourceClause}
+				${searchClause}
+			group by source, author_handle
+		), ranked as (
+			select grouped.*, row_number() over (order by saves desc, source asc, authorHandle asc) as rank
+			from grouped
+		)
+		select count(*) as total,
+		       sum(case when saves = 1 then 1 else 0 end) as singleSaveCount,
+		       coalesce(sum(case when rank <= 10 then saves else 0 end), 0) as topTenSaves
+		from ranked
+	`);
+
+	const rows = await db.all<Creator>(sql`
+		with grouped as (
+			select source,
+			       author_handle as authorHandle,
+			       max(author_name) as authorName,
+			       max(author_avatar) as authorAvatar,
+			       count(*) as saves,
+			       max(posted_at) as lastPosted
+			from items
+			where author_handle is not null and author_handle <> ''
+				and archived_at is null
+				and ${visibleSourceClause(sql`source`)}
+				${sourceClause}
+				${searchClause}
+			group by source, author_handle
+		)
+		select authorHandle, authorName, authorAvatar, source, saves, lastPosted
+		from grouped
+		where 1 = 1
+		${afterClause}
+		order by saves desc, source asc, authorHandle asc
+		limit ${limit + 1}
+	`);
+
+	const hasMore = rows.length > limit;
+	const page = rows.slice(0, limit);
+	const last = page.at(-1);
+	return {
+		creators: page,
+		nextCursor: hasMore && last
+			? encodeURIComponent(JSON.stringify({ key, saves: last.saves, source: last.source, authorHandle: last.authorHandle }))
+			: null,
+		total: totalRow?.total ?? 0,
+		singleSaveCount: totalRow?.singleSaveCount ?? 0,
+		topTenSaves: totalRow?.topTenSaves ?? 0,
+	};
+}
+
+/** Compatibility for the CLI and older callers that only need one page. */
+export async function creators(db: AnansiDb, limit = 20): Promise<Creator[]> {
+	return (await creatorPage(db, { limit })).creators;
 }
 
 /**

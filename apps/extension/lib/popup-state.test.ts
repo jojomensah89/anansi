@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	describeQueue,
 	describeSource,
+	initialImportSummary,
 	isSettled,
 	RUN_TIMEOUT_MS,
 	redactError,
@@ -17,6 +18,23 @@ test("a completed start command clears only its optimistic source marker", () =>
 
 	expect(withoutStartingSource(starting, "tiktok")).toEqual(new Set(["x"]));
 	expect(starting).toEqual(new Set(["x", "tiktok"]));
+});
+
+test("initial import summary hides completed, unconfigured, and unavailable sources", () => {
+	const sources = [
+		{ source: "x", configured: true, enabled: true },
+		{ source: "reddit", configured: true, enabled: true },
+		{ source: "github", configured: false, enabled: false },
+	];
+
+	expect(
+		initialImportSummary(sources, {
+			x: {},
+			reddit: { initialImportCompletedAt: NOW },
+			github: {},
+		}),
+	).toEqual({ due: ["x"], completed: 1 });
+	expect(initialImportSummary(sources, null)).toEqual({ due: [], completed: 0 });
 });
 
 const snapshot = (patch: Partial<SourceSnapshot> = {}): SourceSnapshot => ({

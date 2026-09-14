@@ -301,6 +301,19 @@ describe("handleApi", () => {
 		expect(body.creators[0].saves).toBeGreaterThanOrEqual(
 			body.creators[1].saves,
 		);
+		expect(body.total).toBe(body.creators.length);
+		expect(body.singleSaveCount).toBeGreaterThanOrEqual(0);
+	});
+
+	test("GET /api/creators searches and paginates on the server", async () => {
+		const first = await readJson(get("/api/creators?q=anansi&limit=1"));
+		expect(first.total).toBe(1);
+		expect(first.creators).toHaveLength(1);
+		expect(first.creators[0].authorHandle).toBe("anansi");
+		expect(first.nextCursor).toBeNull();
+
+		const invalid = await get("/api/creators?cursor=not-a-cursor");
+		expect(invalid.status).toBe(400);
 	});
 
 	test("POST /api/ingest refuses without the bearer token", async () => {
