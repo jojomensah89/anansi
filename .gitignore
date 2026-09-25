@@ -16,6 +16,10 @@ apps/web/.env.local
 # Alchemy state, logs, and staged migration files are generated locally.
 **/.alchemy/
 
+# Wrangler state and local Worker secrets are generated locally.
+.wrangler/
+.dev.vars
+
 # build outputs
 dist/
 apps/extension/.output/

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "build:cloudflare": "vite build --config vite.cloudflare.config.ts",
     "serve": "vite preview",
     "dev:bare": "vite dev",
     "serve:local": "bun run scripts/serve-local.ts"
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "@anansi/config": "workspace:*",
+    "@cloudflare/vite-plugin": "^1.60.1",
     "@tanstack/react-router-devtools": "^1.167.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",

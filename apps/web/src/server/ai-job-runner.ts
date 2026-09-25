@@ -238,7 +238,7 @@ export function createAiJobRunner<Prepared = unknown>({
 			const publishable: { item: DbItem; job: AiJob; prepared: Prepared }[] =
 				[];
 			for (let index = 0; index < entries.length; index += 1) {
-				const { job } = entries[index];
+				const { job } = entries[index]!;
 				try {
 					const latest = (await loadAiJobItems(db, [job.itemId]))[0];
 					const latestHash = latest
@@ -262,7 +262,7 @@ export function createAiJobRunner<Prepared = unknown>({
 						await acknowledgeSkipped(job);
 						continue;
 					}
-					publishable.push({ item: latest, job, prepared: prepared[index] });
+					publishable.push({ item: latest, job, prepared: prepared[index]! });
 				} catch (error) {
 					await recordFailure(job, error);
 				}

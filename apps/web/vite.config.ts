@@ -19,8 +19,7 @@ export default defineConfig({
   },
   ssr: {
     // The local runtime adapter is a reachable dynamic-import branch during
-    // Bun development, but it must stay out of Alchemy's workerd optimizer.
-    // The Worker takes the cloudflare:workers branch and never evaluates it.
+    // Bun development, but it must stay out of Vite's dependency optimizer.
     optimizeDeps: {
       exclude: ["@anansi/db/local", "bun:sqlite"],
     },
@@ -28,9 +27,8 @@ export default defineConfig({
   },
   server: {
     port: 3001,
-    // Alchemy's Cloudflare runtime owns /api and /mcp during hosted dev. The
-    // proxy is only for the standalone Vite UI paired with serve-local.
-    ...(process.env.ALCHEMY_CLOUDFLARE_VITE_INJECTED === "1" ? {} : { proxy: localProxy }),
+    // The proxy is only for the standalone Vite UI paired with serve-local.
+    proxy: localProxy,
   },
   build: {
     rollupOptions: {

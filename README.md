@@ -207,113 +207,113 @@ Common fixes:
   a warning because bookmark text will leave the machine. The default is
   loopback.
 
-### B. Cloudflare — your account, ~$0 (intended deployment path)
+### B. Cloudflare — one-click self-hosting
 
-> ⚠️ The hosted path is wired in the repository, but a clean-account Cloudflare deployment has not been verified in this checkout. Treat the procedure below as the intended path until that external acceptance gate is completed.
+Deploy Anansi into your own Cloudflare account and GitHub repository:
 
-The stack is managed by Alchemy (`packages/infra/alchemy.run.ts`): one Anansi Worker, one D1, one R2 bucket, one Workers AI binding, and one Vectorize index per Alchemy stage. D1 holds searchable metadata and text. Migrations live in `packages/db/drizzle`; never use `db:push` because the FTS5 virtual table and triggers require the migration path. R2 holds accepted image copies, and retry state lives in D1 in small batches via request `waitUntil` plus scheduled recovery, so there is nothing paid to provision. Both AI features start off; enable Semantic search or Automatic tags from `/settings` when you want to spend your own Cloudflare quota. Three separate secrets gate the three doors: `LIBRARY_TOKEN` (web UI session), `INGEST_TOKEN` (extension), and `MCP_TOKEN` (agents). Absent means closed, never open.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fjojomensah89%2Fanansi)
 
-#### First deploy versus later deploys
+Cloudflare clones the public repository, provisions the Worker, D1 database, R2
+bucket, Workers AI binding, and Vectorize index from [`wrangler.jsonc`](./wrangler.jsonc),
+then builds and deploys the app. The root build targets only the web Worker;
+the browser extension remains a separate local build. D1 migration files in
+`packages/db/drizzle` are the canonical schema history. Never use `db:push`:
+the FTS5 virtual table and triggers require the SQL migration path.
 
-`bun run deploy` is safe to run repeatedly. It is a desired-state update, not a command that creates a new Anansi Worker every time:
+The hosted library uses new D1 and R2 resources in your Cloudflare account.
+Deploying does not copy an existing local `data/anansi.db` or `data/media`
+directory; the first hosted library starts empty. Keep the local copy as a
+backup if you need those captures, because this deployment path does not
+include a local-to-cloud import.
 
-- **First deploy for a stage:** Alchemy creates the stage's D1, R2, Vectorize index, and Anansi Worker, then applies the complete migration history.
-- **Later deploy with no changes:** Alchemy plans no-ops and does not create another Worker or database.
-- **Later deploy after code changes:** Alchemy updates the existing Anansi Worker in that same stage.
-- **Later deploy after a migration is added:** Alchemy updates the D1 resource, applies only migrations that are not already recorded, and then reconciles the Worker if its bundle or bindings changed.
+In Cloudflare's deploy form, set the Vectorize index to **384 dimensions** and
+the **cosine** metric. Anansi's default hosted embedding model,
+`@cf/baai/bge-small-en-v1.5`, returns 384-dimensional vectors. The Deploy form
+does not infer these fixed index settings from Wrangler, so this is a required
+resource-setup value; using a different dimension or metric will break semantic
+search. The model and Vectorize index are only used after semantic search is
+enabled in Settings.
 
-This stack also uses `Cloudflare.state()`. On the first Alchemy run in a Cloudflare account, Alchemy may create its separate state-store Worker and supporting state resources. That state store is reused by later deploys and by other stacks and stages using the same account; it is not recreated for every `bun run deploy`.
+During setup, enter three independent secrets when Cloudflare prompts for them:
 
-Stages are isolated. Keep using the same stage when you intend to update the same installation. Alchemy defaults to a per-user development stage such as `dev_<user>`; use an explicit stable stage for a long-lived installation, for example:
+- `LIBRARY_TOKEN` — sign in to the hosted library.
+- `INGEST_TOKEN` — authenticate extension captures.
+- `MCP_TOKEN` — authenticate MCP clients at `/mcp`.
 
-```powershell
-# Default stage, from the repository root
-bun run deploy
+Generate each with `openssl rand -hex 32`. The app remains closed to each
+surface when its secret is absent. Both Cloudflare AI features start off; enable
+Semantic search or Automatic tags from `/settings` only when you want to use
+your account's AI quota.
 
-# Stable long-lived stage, from the repository root
-$env:STAGE = "prod"
-bun run deploy
-
-# The equivalent direct infra command
-bun run --cwd packages/infra deploy -- --stage prod
-```
-
-Changing the stage creates or updates a different isolated installation. Changing the logical resource IDs in `packages/infra/alchemy.run.ts`, destroying the stage, or deploying with a different Cloudflare account can also point the command at different infrastructure.
-
-#### Schema migrations after the first deploy
-
-The TypeScript schema and the SQL migration history are separate responsibilities. A change to `packages/db/src/schema.ts` does not change remote D1 by itself.
-
-When adding a table or changing the schema:
-
-1. Change `packages/db/src/schema.ts`.
-2. Run `bun run db:generate` and review the new numbered SQL file in `packages/db/drizzle`.
-3. Test the migration locally with `bun run dev:local` or the focused database tests.
-4. Commit the schema change, the generated SQL, and the generated Drizzle metadata.
-5. Pull the commit into the deployed clone and run `bun run deploy`.
-
-The deploy command first copies the canonical SQL files into the ignored Alchemy staging directory, then Alchemy compares them with the migration history in that D1 database. Already-applied migrations are skipped; new files are applied in numeric order. A fresh installation runs the complete history. Do not edit or delete an already-applied migration. Add a new migration instead. For renames, drops, or data transformations, use an expand/backfill/contract sequence so the running Worker remains compatible during the rollout.
-
-If only the application code changed, run `bun run deploy` to publish that Worker change. If neither the code nor infrastructure changed, there is normally no reason to deploy again. A `git pull` changes local files only; it does not update the Cloudflare installation until a deploy is run.
-
-These semantics are documented by [Alchemy's deploy command](https://alchemy.run/cli/deploy/), [Alchemy stages](https://alchemy.run/environments/stages/), and [Alchemy's Cloudflare D1 migration resource](https://alchemy.run/providers/cloudflare/d1/database/).
-
-Cloudflare credentials for deploy (unverified — least-privilege list to be confirmed on first successful deploy):
-
-```bash
-# Interactive login (recommended locally — no manual token):
-bunx alchemy login --configure   # run from packages/infra
-
-# CI / headless instead needs:
-# CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the environment.
-# The stack implies Workers Scripts, D1, and R2 scopes plus the
-# alchemy state-store worker. Create the token at
-# dash.cloudflare.com → Profile → API Tokens; prefer a scoped token
-# over a superuser token.
-```
-
-Server secrets (same `.env` keys as local):
-
-Generate three independent secrets. On Windows PowerShell:
-
-```powershell
-$library = (openssl rand -hex 32).Trim()
-$ingest = (openssl rand -hex 32).Trim()
-$mcp = (openssl rand -hex 32).Trim()
-"LIBRARY_TOKEN=$library"
-"INGEST_TOKEN=$ingest"
-"MCP_TOKEN=$mcp"
-```
-
-On macOS/Linux, run `openssl rand -hex 32` three times. Paste the three
-outputs into `.env`:
-
-```bash
-cp .env.example .env
-# LIBRARY_TOKEN=<first output>
-# INGEST_TOKEN=<second output>
-# MCP_TOKEN=<third output>
-# Never put them in VITE_* vars or commit them.
-bun run deploy   # turbo → @anansi/infra → alchemy deploy
-```
-
-Run the command again after pulling a later Anansi release when you want that
-release's Worker code, bindings, or database migrations in this stage. It does
-not create a second Worker: Alchemy plans an update or no-op against the
-existing stage. Do not run `bun run db:migrate:deploy` for the remote D1; that
-Drizzle command targets the local SQLite database configured for development.
+After the first successful deploy, open the Worker project’s **Settings → Build
+→ Build Variables and Secrets** and add `BUN_VERSION=1.3.1` for subsequent
+builds. The first button build uses Cloudflare's default Bun version and must
+pass the clean-account acceptance check before this button is announced as
+ready.
 
 After deployment returns `https://<worker>.workers.dev`:
 
-1. Set `ANANSI_EXTENSION_ORIGIN=https://<worker>.workers.dev` in your local `.env`.
-2. Set `ANANSI_EXTENSION_INGEST_TOKEN` to the same value deployed as `INGEST_TOKEN`.
-3. Run `bun run --cwd apps/extension build`.
-4. Load `apps/extension/.output/chrome-mv3` from `chrome://extensions`.
-5. Open the popup and confirm all sources appear and the library is connected.
-6. Use **Open library**, sign in with `LIBRARY_TOKEN`, and verify one page capture.
-7. Sign into each provider in the same Chrome profile before its first import.
+1. Open the URL and sign in with `LIBRARY_TOKEN`.
+2. Set `ANANSI_EXTENSION_ORIGIN` to the Worker URL and
+   `ANANSI_EXTENSION_INGEST_TOKEN` to the same value as `INGEST_TOKEN` in your
+   local `.env`.
+3. Build the extension separately with `bun run --cwd apps/extension build`
+   and load `apps/extension/.output/chrome-mv3` from `chrome://extensions`.
+4. Sign into each provider in the same Chrome profile before its first import.
+5. Add the Worker URL and `MCP_TOKEN` to any remote MCP client you want to use.
 
-The Worker is the only public origin: the library is `/`, the API is `/api/*`, and MCP is `/mcp`. There are no deployed ports to configure.
+The Worker is the only public origin: the library is `/`, the API is `/api/*`,
+and MCP is `/mcp`. New schema changes still start with `packages/db/src/schema.ts`
+and `bun run db:generate`; review and commit the new SQL migration, then push
+to the connected repository. Workers Builds applies only pending D1 migrations
+before publishing the Worker.
+
+#### Existing Alchemy installations
+
+Wrangler becomes the deploy and migration owner after a one-time handoff. Edit
+`wrangler.jsonc` to point at the existing Worker name, D1 database ID, R2
+bucket, and Vectorize index. Keep the bindings `DB`, `MEDIA`, `AI`, and
+`VECTORIZE` unchanged.
+
+Back up D1 and inspect the existing migration ledger before changing it. Compare
+the result of this query with the SQL filenames in `packages/db/drizzle`:
+
+```powershell
+bun run wrangler d1 export DB --remote --output anansi-before-wrangler.sql
+bun run wrangler d1 execute DB --remote --command "SELECT name FROM __alchemy_migrations ORDER BY id"
+```
+
+If every applied name matches a repository migration filename, copy those
+already-applied names into Wrangler's ledger. This baseline script does not
+run schema SQL or alter application data:
+
+```powershell
+bun run wrangler d1 execute DB --remote --file scripts/alchemy-to-wrangler-baseline.sql
+bun run wrangler d1 migrations list DB --remote
+```
+
+The migration list should show no already-applied migration pending. Then run
+`bun run build` and `bun run deploy`; Wrangler applies only future migrations
+and updates the existing Worker and bindings. If the names differ, stop and
+reconcile the migration history before deploying. Keep the backup until the app
+and saved data are verified. Do not run the old Alchemy `destroy` command
+during this handoff.
+
+#### Manual deploy and local development
+
+The one-click button is the easiest first install. For a manual deployment,
+configure the resources and secrets in your Cloudflare account, then run:
+
+```powershell
+bun run cf-typegen
+bun run build
+bun run deploy
+```
+
+`bun run deploy` applies remote D1 migrations and publishes the Worker output
+created by `bun run build`.
+Local development remains SQLite-backed through `bun run dev:local`; Wrangler's
+Cloudflare Vite build uses a separate config and does not change that workflow.
 
 ## 🧠 Ask it from your agent (MCP)
 
@@ -450,7 +450,7 @@ packages/db/       SQLite/D1 schema, migrations, search, and item operations
 packages/mcp/      Transport-independent MCP server and tool definitions
 packages/sources/  Shared capture contracts and source parsers
 packages/ui/       Shared UI components and styles
-packages/infra/    Cloudflare infrastructure and deployment resources
+wrangler.jsonc    Cloudflare Worker bindings and deployment resources
 packages/env/      Typed runtime environment bindings
 scripts/            Explicit local smoke and development entrypoints
 ```
