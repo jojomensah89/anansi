@@ -14,6 +14,8 @@ Anansi captures X bookmarks, Reddit saves, GitHub stars, and web pages or Chrome
 [![Last commit](https://img.shields.io/github/last-commit/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/commits)
 [![CI](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml/badge.svg)](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml)
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fjojomensah89%2Fanansi)
+
 [Follow the build](https://github.com/jojomensah89/anansi) · [Get Started](#-quickstart) · [Supported Sources](#-supported-sources) · [Ask it from your agent](#-ask-it-from-your-agent-mcp) · [Report a bug](https://github.com/jojomensah89/anansi/issues/new?template=bug_report.yml)
 
 <img src="./apps/web/public/anansi-logo.png" width="420" alt="Anansi logo showing a spider organizing saved web references" />
@@ -209,14 +211,18 @@ Common fixes:
 
 ### B. Cloudflare — one-click self-hosting
 
-Deploy Anansi into your own Cloudflare account and GitHub repository:
+Use the **Deploy to Cloudflare** button at the top of this README. Cloudflare
+copies this public GitHub repository into your account, provisions the Worker
+resources declared in [`wrangler.jsonc`](./wrangler.jsonc), and builds and
+deploys the app with Workers Builds. Future pushes to the connected repository
+can trigger builds and deployments. Cloudflare requires the source repository
+to be public for this button flow.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fjojomensah89%2Fanansi)
-
-Cloudflare clones the public repository, provisions the Worker, D1 database, R2
-bucket, Workers AI binding, and Vectorize index from [`wrangler.jsonc`](./wrangler.jsonc),
-then builds and deploys the app. The root build targets only the web Worker;
-the browser extension remains a separate local build. D1 migration files in
+The root build targets the web Worker; the browser extension remains a separate
+local build. Keep the project root at the repository root because the Worker
+build uses shared Bun workspace packages. See Cloudflare's [Deploy to Cloudflare
+button documentation](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
+for the button flow and its repository requirements. D1 migration files in
 `packages/db/drizzle` are the canonical schema history. Never use `db:push`:
 the FTS5 virtual table and triggers require the SQL migration path.
 
@@ -244,6 +250,30 @@ Generate each with `openssl rand -hex 32`. The app remains closed to each
 surface when its secret is absent. Both Cloudflare AI features start off; enable
 Semantic search or Automatic tags from `/settings` only when you want to use
 your account's AI quota.
+
+#### Hosted semantic search
+
+Hosted semantic search is off until you enable it in Settings. Before the first
+backfill, Anansi shows the number of saved items and chunks and asks you to
+confirm. Captures continue while indexing runs in the background. You can pause
+indexing without removing the vectors already in use, or turn semantic search
+off to remove hosted chunk text from D1 and queue its Vectorize vectors for
+retryable deletion.
+
+Long captures are split at paragraph and sentence boundaries into chunks of up
+to 1,800 characters, with 180 characters of overlap. D1 stores the normalized
+title/capture-text chunks, offsets, hashes, and model/chunker generation;
+Vectorize stores the corresponding vectors under stable IDs. Search combines
+keyword and vector candidates, applies the same library filters, collapses
+chunk matches to one saved item, and shows the best-matching chunk excerpt.
+MCP search remains keyword/BM25.
+
+Hosted indexing and query embeddings share a per-library monthly cap of 10,000
+app credits by default. One credit counts each started 1,000 characters sent in
+an embedding input. Credits track workload; they are not a provider-bill estimate.
+At the cap, Anansi sends no more embedding requests; captures still save, and
+search requests that cannot be embedded fall back to keyword results. You can
+change the cap in Settings. Local Ollama search does not use hosted credits.
 
 After the first successful deploy, open the Worker project’s **Settings → Build
 → Build Variables and Secrets** and add `BUN_VERSION=1.3.1` for subsequent

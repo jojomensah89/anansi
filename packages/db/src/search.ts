@@ -1,6 +1,8 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { AnansiDb } from "./types.ts";
 import { visibleSourceClause } from "./visibility.ts";
+import { contentHash, semanticText } from "./ai-jobs.ts";
+import { SEMANTIC_CHUNKER_VERSION } from "./semantic-chunks.ts";
 
 /**
  * FTS5 query syntax is a real grammar, not a search box.
@@ -290,6 +292,81 @@ export async function hydrateSearchItems(
     if (!rawRow) return [];
     return [hydrateCardRow(rawRow)];
   });
+}
+
+export interface SemanticChunkMatch {
+	id: string;
+	score: number;
+}
+
+function semanticExcerpt(text: string, query: string, limit = 300): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	if (normalized.length <= limit) return normalized;
+	const terms = query.toLocaleLowerCase().split(/\s+/).filter((term) => term.length > 1);
+	const lower = normalized.toLocaleLowerCase();
+	const firstMatch = terms.map((term) => lower.indexOf(term)).filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? 0;
+	const start = Math.max(0, Math.min(firstMatch - Math.floor(limit / 3), normalized.length - limit));
+	const end = Math.min(normalized.length, start + limit);
+	return `${start > 0 ? "…" : ""}${normalized.slice(start, end).trim()}${end < normalized.length ? "…" : ""}`;
+}
+
+/**
+ * Hydrate chunk vectors through the same D1 visibility/filter predicates as
+ * keyword search, verify the chunk still belongs to the current item text,
+ * then collapse matches to one parent using its best chunk score.
+ */
+export async function hydrateSemanticChunkMatches(
+	db: AnansiDb,
+	matches: SemanticChunkMatch[],
+	query: string,
+	model: string,
+	generation: number,
+	opts: Omit<SearchOptions, "query" | "cursor" | "mark">,
+): Promise<SearchHit[]> {
+	const unique = new Map<string, number>();
+	for (const match of matches) {
+		if (!match.id || !Number.isFinite(match.score)) continue;
+		if (!unique.has(match.id) || unique.get(match.id)! < match.score) unique.set(match.id, match.score);
+	}
+	const ids = [...unique.keys()].slice(0, 100);
+	if (ids.length === 0) return [];
+	const rows = await db.all<SearchPageRow & {
+		chunkId: string;
+		chunkText: string;
+		parentHash: string;
+		semanticBody: string | null;
+		semanticArticleText: string | null;
+	}>(sql`
+		select ${cardProjection()}, 0 as score,
+		       c.id as chunkId, c.chunk_text as chunkText, c.parent_hash as parentHash,
+		       i.body as semanticBody, i.article_text as semanticArticleText
+		from semantic_chunks c join items i on i.id = c.item_id
+		where c.id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+		  and c.model = ${model} and c.generation = ${generation} and c.chunker_version = ${SEMANTIC_CHUNKER_VERSION}
+		  and c.status = 'complete'
+		  and ${visibleSourceClause(sql`i.source`)}
+		  ${anyOf(sql`i.source`, opts.source)}
+		  ${anyOf(sql`i.author_handle`, opts.author)}
+		  ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+		  ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
+		  ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
+		  and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
+	`);
+	const scores = new Map(unique);
+	const bestByParent = new Map<string, { hit: SearchHit; score: number; chunkId: string }>();
+	for (const row of rows) {
+		const currentText = semanticText({ title: row.title, body: row.semanticBody, articleText: row.semanticArticleText });
+		if (await contentHash(currentText) !== row.parentHash) continue;
+		const score = scores.get(row.chunkId);
+		if (score === undefined) continue;
+		const previous = bestByParent.get(row.id);
+		if (previous && (previous.score > score || (previous.score === score && previous.chunkId <= row.chunkId))) continue;
+		const hit = hydrateCardRow({ ...row, excerpt: semanticExcerpt(row.chunkText, query), score });
+		bestByParent.set(row.id, { hit, score, chunkId: row.chunkId });
+	}
+	return [...bestByParent.values()]
+		.sort((a, b) => b.score - a.score || a.hit.id.localeCompare(b.hit.id))
+		.map(({ hit }) => hit);
 }
 
 /** "What did I save this week?" */

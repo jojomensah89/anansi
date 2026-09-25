@@ -110,9 +110,11 @@ export interface SessionState {
 }
 
 export interface AiSettingsResponse {
-  settings: { semanticSearchEnabled: number; autoTaggingEnabled: number; embeddingModel: string; embeddingDimensions: number; tagModel: string; quotaPauseReason: string | null; lastRunAt: number | null };
+	settings: { semanticSearchEnabled: number; semanticIndexPaused: number; semanticBudgetLimit: number; semanticBudgetUsed: number; semanticBudgetMonth: string; semanticGeneration: number; autoTaggingEnabled: number; embeddingModel: string; embeddingDimensions: number; tagModel: string; quotaPauseReason: string | null; lastRunAt: number | null };
   progress: { pending: number; failed: number; complete: number };
+  embeddingProgress: { pending: number; failed: number; complete: number };
   taggingProgress: { pending: number; failed: number; complete: number };
+	semanticIndex: { indexed: number; pending: number; total: number };
   available: boolean;
   capabilities?: { semanticSearch: boolean; autoTagging: boolean };
   runtime?: "ollama" | "cloudflare" | "none";
@@ -207,7 +209,8 @@ export interface SourcesResponse {
 
 export const api = {
 	ai: (signal?: AbortSignal) => get<AiSettingsResponse>("/api/ai", signal),
-  updateAi: (body: { semanticSearchEnabled?: boolean; autoTaggingEnabled?: boolean }) => send<AiSettingsResponse>("/api/ai", "PATCH", body),
+	semanticPreview: (signal?: AbortSignal) => get<{ estimate: { itemCount: number; totalChunks: number; newChunks: number; estimatedCredits: number }; credits: { used: number; limit: number; remaining: number; month: string }; runtime: "local" | "cloudflare" }>("/api/ai/semantic-preview", signal),
+  updateAi: (body: { semanticSearchEnabled?: boolean; semanticIndexPaused?: boolean; semanticBudgetLimit?: number; confirmSemanticBackfill?: boolean; autoTaggingEnabled?: boolean }) => send<AiSettingsResponse>("/api/ai", "PATCH", body),
   reclassifyAiTags: () => post<{ taxonomyVersion: string; progress: AiSettingsResponse["progress"]; taggingProgress: AiSettingsResponse["taggingProgress"] }>("/api/ai/reclassify", {}),
   stats: (signal?: AbortSignal) =>
     get<{

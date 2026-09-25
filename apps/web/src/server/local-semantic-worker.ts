@@ -1,19 +1,17 @@
 import {
-	type AiJob,
 	type AnansiDb,
 	aiProgress,
-	contentHash,
-	type DbItem,
 	getAiSettings,
 	items,
 	requeueEmbeddingJobs,
-	semanticText,
-	upsertItemEmbedding,
+	stageSemanticChunks,
 } from "@anansi/db";
 import { AiProviderError, type EmbeddingProvider } from "./ai.ts";
 import { createAiJobRunner } from "./ai-job-runner.ts";
 import type { LocalSemanticCache } from "./local-semantic-cache.ts";
 import type { SemanticRuntimeSnapshot } from "./semantic-search.ts";
+import { prepareSemanticItem, publishSemanticItem } from "./semantic-embedding.ts";
+import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
 
 export interface LocalSemanticWorker {
 	runOnce(): Promise<void>;
@@ -40,10 +38,11 @@ export function createLocalSemanticWorker(
 			}
 		};
 		try {
+			await drainSemanticVectorDeletes(db, cache, batchSize * 4);
 			const settings = await getAiSettings(db);
-			if (!settings.semanticSearchEnabled) {
+			if (!settings.semanticSearchEnabled || settings.semanticIndexPaused) {
 				cache.setStatus({
-					state: "warming",
+					state: settings.semanticSearchEnabled ? "paused" : "warming",
 					pending: 0,
 					indexed: cache.snapshot().indexed,
 				});
@@ -56,9 +55,8 @@ export function createLocalSemanticWorker(
 			const canonicalItems = await db.select().from(items);
 			const missingVectors: string[] = [];
 			for (const item of canonicalItems) {
-				const hash = await contentHash(semanticText(item));
-				if (!cache.hasRecord(item.id, hash)) {
-					if (cache.recordHash(item.id)) await cache.invalidate([item.id]);
+				const staged = await stageSemanticChunks(db, item, provider.model, settings.semanticGeneration);
+				if (staged.chunks.some((chunk) => !cache.hasRecord(chunk.id, chunk.contentHash))) {
 					missingVectors.push(item.id);
 				}
 			}
@@ -71,7 +69,6 @@ export function createLocalSemanticWorker(
 				indexed: cache.snapshot().indexed,
 				dimension: provider.dimensions || undefined,
 			});
-			const embedBatch = provider.embedBatch?.bind(provider);
 			const runner = createAiJobRunner({
 				db,
 				batchSize,
@@ -79,65 +76,20 @@ export function createLocalSemanticWorker(
 				executor: {
 					kind: "embedding",
 					model: provider.model,
-					onMissingItem: (job) => cache.invalidate([job.itemId]),
+					onMissingItem: async () => {
+						await drainSemanticVectorDeletes(db, cache, batchSize * 4);
+					},
 					prepare: async (item) => {
 						try {
-							return await provider.embed(semanticText(item));
+							return await prepareSemanticItem(db, item, provider, { localCache: cache });
 						} catch (error) {
 							observeProviderError(error);
 							throw error;
 						}
 					},
-					...(embedBatch
-						? {
-								prepareBatch: async (
-									entries: readonly { item: DbItem; job: AiJob }[],
-								) => {
-									try {
-										return await embedBatch(
-											entries.map(({ item }) => semanticText(item)),
-										);
-									} catch (error) {
-										observeProviderError(error);
-										throw error;
-									}
-								},
-								publishBatch: async (
-									entries: readonly {
-										item: DbItem;
-										job: AiJob;
-										prepared: number[];
-									}[],
-								) => {
-									await cache.upsertRecords(
-										entries.map(({ item, job, prepared }) => ({
-											id: item.id,
-											contentHash: job.contentHash,
-											values: prepared,
-										})),
-									);
-									for (const { item, job, prepared } of entries) {
-										await upsertItemEmbedding(db, {
-											itemId: item.id,
-											model: provider.model,
-											dimensions: prepared.length,
-											contentHash: job.contentHash,
-										});
-									}
-								},
-							}
-						: {}),
-					publish: async (item, job, values) => {
+					publish: async (item, _job, prepared) => {
 						try {
-							await cache.upsertRecords([
-								{ id: item.id, contentHash: job.contentHash, values },
-							]);
-							await upsertItemEmbedding(db, {
-								itemId: item.id,
-								model: provider.model,
-								dimensions: values.length,
-								contentHash: job.contentHash,
-							});
+							await publishSemanticItem(db, item.id, prepared, { localCache: cache });
 						} catch (error) {
 							observeProviderError(error);
 							throw error;
