@@ -17,6 +17,7 @@ import {
 	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
 	InvalidListCursorError, InvalidSearchCursorError, InvalidCreatorCursorError,
   getAiSettings, setAiSettings, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
+  clearSemanticIndex, consumeSemanticCredits, estimateSemanticBackfill, semanticIndexStats,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
 import { authorizeLibrary, sessionRoute, sameSecret, type LibraryAuthEnv } from "./library-auth.ts";
@@ -30,6 +31,7 @@ import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import type { AiBinding, TagGenerationProvider, VectorizeBinding } from "./ai.ts";
 import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
 import { hybridSearch, type SemanticRuntime } from "./semantic-search.ts";
+import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
 import { ingestCapture } from "./ingest.ts";
 import {
 	isToggleableSource,
@@ -186,13 +188,14 @@ const searchRoute: Route = {
           const runtime = env.semantic ?? (env.ai && env.vectorize ? {
             provider: createEmbeddingProvider(env.ai, aiSettings.embeddingModel, aiSettings.embeddingDimensions),
             index: createVectorIndex(env.vectorize, aiSettings.embeddingDimensions),
+            charge: async (text: string) => (await consumeSemanticCredits(env.db, text)).allowed,
           } : undefined);
           const hybrid = await hybridSearch(
             env.db,
             query,
             searchOptions,
             page,
-            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: env.semantic ? undefined : aiSettings.embeddingDimensions },
+            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: env.semantic ? undefined : aiSettings.embeddingDimensions, generation: aiSettings.semanticGeneration },
             runtime,
           );
           return json({ query, items: hybrid.items, results: hybrid.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
@@ -355,7 +358,9 @@ const aiSettingsRoute: Route = {
       settings,
       taxonomyVersion: TOPIC_TAXONOMY_VERSION,
       progress: await aiProgress(env.db),
+      embeddingProgress: await aiProgress(env.db, "embedding", settings.embeddingModel),
       taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
+      semanticIndex: await semanticIndexStats(env.db, settings.embeddingModel, settings.semanticGeneration),
       available: Boolean(env.semantic || env.tagger || env.ai),
       capabilities: {
         semanticSearch: Boolean(env.semantic || (env.ai && env.vectorize)),
@@ -364,6 +369,18 @@ const aiSettingsRoute: Route = {
       runtime: env.semantic || env.tagger ? "ollama" : env.ai ? "cloudflare" : "none",
     });
   },
+};
+
+const semanticPreviewRoute: Route = {
+	method: "GET",
+	path: "/api/ai/semantic-preview",
+	handle: async ({ env }) => {
+		if (!(env.semantic || (env.ai && env.vectorize))) return json({ error: "semantic search is unavailable in this environment" }, 503);
+		const settings = await getAiSettings(env.db);
+		const estimate = await estimateSemanticBackfill(env.db, settings.embeddingModel);
+		const remainingCredits = Math.max(0, settings.semanticBudgetLimit - settings.semanticBudgetUsed);
+		return json({ estimate, credits: { used: settings.semanticBudgetUsed, limit: settings.semanticBudgetLimit, remaining: remainingCredits, month: settings.semanticBudgetMonth }, runtime: env.semantic ? "local" : "cloudflare" });
+	},
 };
 
 const aiReclassifyRoute: Route = {
@@ -384,6 +401,7 @@ const aiReclassifyRoute: Route = {
     return json({
       taxonomyVersion: TOPIC_TAXONOMY_VERSION,
       progress: await aiProgress(env.db),
+      embeddingProgress: await aiProgress(env.db, "embedding", settings.embeddingModel),
       taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
     });
   },
@@ -393,19 +411,44 @@ const aiSettingsUpdateRoute: Route = {
   method: "PATCH",
   path: "/api/ai",
   handle: async ({ env, request }) => {
-    const body = await request.json().catch(() => null) as { semanticSearchEnabled?: unknown; autoTaggingEnabled?: unknown } | null;
-    if (!body || (body.semanticSearchEnabled !== undefined && typeof body.semanticSearchEnabled !== "boolean") || (body.autoTaggingEnabled !== undefined && typeof body.autoTaggingEnabled !== "boolean")) return json({ error: "invalid AI settings" }, 400);
+    const body = await request.json().catch(() => null) as { semanticSearchEnabled?: unknown; semanticIndexPaused?: unknown; semanticBudgetLimit?: unknown; confirmSemanticBackfill?: unknown; autoTaggingEnabled?: unknown } | null;
+    if (!body || (body.semanticSearchEnabled !== undefined && typeof body.semanticSearchEnabled !== "boolean") || (body.semanticIndexPaused !== undefined && typeof body.semanticIndexPaused !== "boolean") || (body.semanticBudgetLimit !== undefined && (!Number.isInteger(body.semanticBudgetLimit) || (body.semanticBudgetLimit as number) < 1 || (body.semanticBudgetLimit as number) > 1_000_000)) || (body.confirmSemanticBackfill !== undefined && typeof body.confirmSemanticBackfill !== "boolean") || (body.autoTaggingEnabled !== undefined && typeof body.autoTaggingEnabled !== "boolean")) return json({ error: "invalid AI settings" }, 400);
     if (env.semantic && body.autoTaggingEnabled === true && !env.tagger) return json({ error: "automatic tags require a local Ollama tag model" }, 400);
-    const settings = await setAiSettings(env.db, { semanticSearchEnabled: body.semanticSearchEnabled as boolean | undefined, autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined });
+    const current = await getAiSettings(env.db);
+    const enablingSemantic = body.semanticSearchEnabled === true && current.semanticSearchEnabled !== 1;
+    if (enablingSemantic) {
+      if (!(env.semantic || (env.ai && env.vectorize))) return json({ error: "semantic search is unavailable in this environment" }, 503);
+      if (body.confirmSemanticBackfill !== true) return json({ error: "review and confirm the semantic indexing estimate first" }, 409);
+      const estimate = await estimateSemanticBackfill(env.db, current.embeddingModel);
+			if (!env.semantic) {
+				const limit = (body.semanticBudgetLimit as number | undefined) ?? current.semanticBudgetLimit;
+				const remaining = Math.max(0, limit - current.semanticBudgetUsed);
+				if (estimate.estimatedCredits > remaining) return json({ error: `backfill needs ${estimate.estimatedCredits} app credits but only ${remaining} remain; raise the monthly limit or wait for the monthly reset`, estimate, remainingCredits: remaining }, 409);
+			}
+    }
+    const disablingSemantic = body.semanticSearchEnabled === false && current.semanticSearchEnabled === 1;
+    const settings = await setAiSettings(env.db, {
+      semanticSearchEnabled: body.semanticSearchEnabled as boolean | undefined,
+      semanticIndexPaused: body.semanticIndexPaused as boolean | undefined,
+      semanticBudgetLimit: body.semanticBudgetLimit as number | undefined,
+      autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined,
+    });
+    if (disablingSemantic) {
+      await clearSemanticIndex(env.db);
+      const index = env.semantic?.index ?? (env.vectorize ? createVectorIndex(env.vectorize, current.embeddingDimensions) : undefined);
+			await drainSemanticVectorDeletes(env.db, index, 100);
+    }
     // A local toggle should start reconciliation immediately; the periodic
     // worker remains the recovery path if this nudge is interrupted.
-    if (env.semanticKick && body.semanticSearchEnabled !== undefined) env.semanticKick();
+    if (env.semanticKick && (body.semanticSearchEnabled !== undefined || body.semanticIndexPaused !== undefined)) env.semanticKick();
     if (env.taggingKick && body.autoTaggingEnabled !== undefined) env.taggingKick();
     return json({
       settings,
       taxonomyVersion: TOPIC_TAXONOMY_VERSION,
       progress: await aiProgress(env.db),
+      embeddingProgress: await aiProgress(env.db, "embedding", settings.embeddingModel),
       taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
+      semanticIndex: await semanticIndexStats(env.db, settings.embeddingModel, settings.semanticGeneration),
     });
   },
 };
@@ -609,7 +652,7 @@ const ROUTES: Route[] = [
 	toggleSourceRoute,
 	creatorsRoute,
 	statsRoute, extensionStatsRoute,
-	aiSettingsRoute, aiSettingsUpdateRoute, aiReclassifyRoute,
+	aiSettingsRoute, semanticPreviewRoute, aiSettingsUpdateRoute, aiReclassifyRoute,
 	extensionConfigRoute,
 	extensionHeartbeatRoute,
 	ingestRoute,

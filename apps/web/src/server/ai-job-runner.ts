@@ -7,13 +7,13 @@ import {
 	completeAiJob,
 	contentHash,
 	type DbItem,
+	embeddingProjectionText,
 	failAiJob,
 	getAiSettings,
 	loadAiJobItems,
 	reconcileAiJobs,
 	releaseAiJob,
 	searchableText,
-	semanticText,
 	validateAiJobClaim,
 } from "@anansi/db";
 
@@ -86,8 +86,8 @@ export function classifyAiJobFailure(error: unknown): AiJobFailureCode {
 	return "unknown";
 }
 
-function textFor(kind: AiJobKind, item: DbItem): string {
-	return kind === "embedding" ? semanticText(item) : searchableText(item);
+function textFor(kind: AiJobKind, item: DbItem, semanticGeneration: number): string {
+	return kind === "embedding" ? embeddingProjectionText(item, semanticGeneration) : searchableText(item);
 }
 
 function currentModel(job: AiJob, kind: AiJobKind, model: string): boolean {
@@ -100,7 +100,7 @@ function activeGeneration(
 ): { enabled: boolean; model: string } {
 	return kind === "embedding"
 		? {
-				enabled: settings.semanticSearchEnabled === 1,
+			enabled: settings.semanticSearchEnabled === 1 && settings.semanticIndexPaused !== 1,
 				model: settings.embeddingModel,
 			}
 		: { enabled: settings.autoTaggingEnabled === 1, model: settings.tagModel };
@@ -241,10 +241,10 @@ export function createAiJobRunner<Prepared = unknown>({
 				const { job } = entries[index]!;
 				try {
 					const latest = (await loadAiJobItems(db, [job.itemId]))[0];
-					const latestHash = latest
-						? await contentHash(textFor(kind, latest))
-						: undefined;
 					const settings = await getAiSettings(db);
+					const latestHash = latest
+						? await contentHash(textFor(kind, latest, settings.semanticGeneration))
+						: undefined;
 					const generation = activeGeneration(settings, kind);
 					const claimLive = await validateAiJobClaim(db, job.id, job.token);
 					if (!generation.enabled || generation.model !== executor.model) {
@@ -329,12 +329,12 @@ export function createAiJobRunner<Prepared = unknown>({
 
 			try {
 				const latest = (await loadAiJobItems(db, [job.itemId]))[0];
-				const latestHash = latest
-					? await contentHash(textFor(kind, latest))
-					: undefined;
 				// Read settings before the final claim check. A model/toggle change
 				// during inference must be observed while the lease is still live.
 				const settings = await getAiSettings(db);
+			const latestHash = latest
+				? await contentHash(textFor(kind, latest, settings.semanticGeneration))
+				: undefined;
 				const generation = activeGeneration(settings, kind);
 				const claimLive = await validateAiJobClaim(db, job.id, job.token);
 				const settingsMismatch =

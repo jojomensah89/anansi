@@ -2,6 +2,11 @@ import { and, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { aiEnrichmentJobs, aiSettings, itemEmbeddings, itemTagOverrides, itemTags, items, tags } from "./schema.ts";
 import type { AnansiDb } from "./types.ts";
 import { canonicalizeTopicIds, topicDefinition } from "./topics.ts";
+import {
+	SEMANTIC_CHUNKER_VERSION,
+	SEMANTIC_CREDIT_CHARS,
+	normalizeSemanticProjection,
+} from "./semantic-chunks.ts";
 
 export type AiJobKind = "embedding" | "tagging";
 export type AiJob = typeof aiEnrichmentJobs.$inferSelect & { token: string };
@@ -42,14 +47,22 @@ export function searchableText(item: Pick<typeof items.$inferSelect, "title" | "
     .slice(0, 12_000);
 }
 
-/** Stable, bounded projection used for semantic vectors. */
-export function semanticText(item: Pick<typeof items.$inferSelect, "title" | "body" | "articleText" | "authorName" | "authorHandle" | "source" | "url">): string {
-  return [item.title, item.body, item.articleText, item.authorName, item.authorHandle, item.source, item.url]
-    .filter((v): v is string => Boolean(v && v.trim()))
-    .join("\n")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 12_000);
+/** Only normalized, user-visible capture text enters the embedding provider. */
+export function semanticText(item: Pick<typeof items.$inferSelect, "title" | "body" | "articleText">): string {
+	return normalizeSemanticProjection(item);
+}
+
+/** Include the chunker version so changing boundaries schedules a fresh projection. */
+export function embeddingProjectionText(item: Pick<typeof items.$inferSelect, "title" | "body" | "articleText">, generation = 1): string {
+	return `${semanticText(item)}\u0000${SEMANTIC_CHUNKER_VERSION}\u0000${generation}`;
+}
+
+export function semanticCreditsForText(value: string): number {
+	return Math.max(1, Math.ceil(value.length / SEMANTIC_CREDIT_CHARS));
+}
+
+function currentUtcMonth(nowSeconds: number): string {
+	return new Date(nowSeconds * 1000).toISOString().slice(0, 7);
 }
 
 export async function contentHash(value: string): Promise<string> {
@@ -59,14 +72,55 @@ export async function contentHash(value: string): Promise<string> {
 
 export async function getAiSettings(db: AnansiDb) {
   const [row] = await db.select().from(aiSettings).where(eq(aiSettings.id, 1));
-  return row ?? { id: 1, semanticSearchEnabled: 0, autoTaggingEnabled: 0, embeddingModel: "@cf/baai/bge-small-en-v1.5", embeddingDimensions: 384, tagModel: "@cf/meta/llama-3.1-8b-instruct", updatedAt: 0, quotaPauseReason: null, lastRunAt: null };
+  const now = Math.floor(Date.now() / 1000);
+  const month = currentUtcMonth(now);
+  if (!row) return { id: 1, semanticSearchEnabled: 0, semanticIndexPaused: 0, semanticBudgetLimit: 10000, semanticBudgetUsed: 0, semanticBudgetMonth: month, semanticOptedInAt: null, semanticGeneration: 1, autoTaggingEnabled: 0, embeddingModel: "@cf/baai/bge-small-en-v1.5", embeddingDimensions: 384, tagModel: "@cf/meta/llama-3.1-8b-instruct", updatedAt: 0, quotaPauseReason: null, lastRunAt: null };
+  return row.semanticBudgetMonth === month ? row : { ...row, semanticBudgetMonth: month, semanticBudgetUsed: 0 };
 }
 
-export async function setAiSettings(db: AnansiDb, patch: { semanticSearchEnabled?: boolean; autoTaggingEnabled?: boolean }) {
+export async function setAiSettings(db: AnansiDb, patch: { semanticSearchEnabled?: boolean; semanticIndexPaused?: boolean; semanticBudgetLimit?: number; autoTaggingEnabled?: boolean }) {
   const now = Math.floor(Date.now() / 1000);
-  await db.insert(aiSettings).values({ id: 1, semanticSearchEnabled: patch.semanticSearchEnabled ? 1 : 0, autoTaggingEnabled: patch.autoTaggingEnabled ? 1 : 0, updatedAt: now })
-    .onConflictDoUpdate({ target: aiSettings.id, set: { ...(patch.semanticSearchEnabled === undefined ? {} : { semanticSearchEnabled: patch.semanticSearchEnabled ? 1 : 0 }), ...(patch.autoTaggingEnabled === undefined ? {} : { autoTaggingEnabled: patch.autoTaggingEnabled ? 1 : 0 }), updatedAt: now } });
+  if (patch.semanticBudgetLimit !== undefined && (!Number.isInteger(patch.semanticBudgetLimit) || patch.semanticBudgetLimit < 1 || patch.semanticBudgetLimit > 1_000_000)) throw new Error("semantic credit limit must be between 1 and 1000000");
+  const current = await getAiSettings(db);
+  const becameEnabled = patch.semanticSearchEnabled === true && current.semanticSearchEnabled !== 1;
+  const becameDisabled = patch.semanticSearchEnabled === false && current.semanticSearchEnabled === 1;
+  const values = {
+    id: 1,
+    updatedAt: now,
+    ...(patch.semanticSearchEnabled === undefined ? {} : { semanticSearchEnabled: patch.semanticSearchEnabled ? 1 : 0, ...(patch.semanticSearchEnabled === false ? { semanticIndexPaused: 0 } : {}) }),
+    ...(patch.semanticIndexPaused === undefined ? {} : { semanticIndexPaused: patch.semanticIndexPaused ? 1 : 0 }),
+    ...(patch.semanticBudgetLimit === undefined ? {} : { semanticBudgetLimit: patch.semanticBudgetLimit }),
+    ...(patch.autoTaggingEnabled === undefined ? {} : { autoTaggingEnabled: patch.autoTaggingEnabled ? 1 : 0 }),
+    ...(becameEnabled ? { semanticOptedInAt: now } : patch.semanticSearchEnabled === false ? { semanticOptedInAt: null, ...(becameDisabled ? { semanticGeneration: current.semanticGeneration + 1 } : {}) } : {}),
+  };
+  await db.insert(aiSettings).values(values)
+    .onConflictDoUpdate({ target: aiSettings.id, set: {
+      ...(patch.semanticSearchEnabled === undefined ? {} : { semanticSearchEnabled: patch.semanticSearchEnabled ? 1 : 0, ...(patch.semanticSearchEnabled === false ? { semanticIndexPaused: 0 } : {}), ...(becameEnabled ? { semanticOptedInAt: now } : patch.semanticSearchEnabled === false ? { semanticOptedInAt: null, ...(becameDisabled ? { semanticGeneration: current.semanticGeneration + 1 } : {}) } : {}) }),
+      ...(patch.semanticIndexPaused === undefined ? {} : { semanticIndexPaused: patch.semanticIndexPaused ? 1 : 0 }),
+      ...(patch.semanticBudgetLimit === undefined ? {} : { semanticBudgetLimit: patch.semanticBudgetLimit }),
+      ...(patch.autoTaggingEnabled === undefined ? {} : { autoTaggingEnabled: patch.autoTaggingEnabled ? 1 : 0 }),
+      updatedAt: now,
+    } });
   return getAiSettings(db);
+}
+
+/** Atomically debit this library's monthly app-defined embedding credits. */
+export async function consumeSemanticCredits(db: AnansiDb, input: string | readonly string[], now = Math.floor(Date.now() / 1000)) {
+	const credits = (Array.isArray(input) ? input : [input]).reduce((sum, text) => sum + semanticCreditsForText(text), 0);
+	if (credits < 1) return { allowed: true, credits: 0 };
+	const month = currentUtcMonth(now);
+	await db.insert(aiSettings).values({ id: 1, semanticBudgetMonth: month, updatedAt: now }).onConflictDoNothing().run();
+	await db.update(aiSettings).set({ semanticBudgetMonth: month, semanticBudgetUsed: 0, updatedAt: now })
+		.where(and(eq(aiSettings.id, 1), sql`${aiSettings.semanticBudgetMonth} <> ${month}`)).run();
+	const result = await db.update(aiSettings).set({
+		semanticBudgetUsed: sql`${aiSettings.semanticBudgetUsed} + ${credits}`,
+		updatedAt: now,
+	}).where(and(
+		eq(aiSettings.id, 1),
+		eq(aiSettings.semanticSearchEnabled, 1),
+		sql`${aiSettings.semanticBudgetUsed} + ${credits} <= ${aiSettings.semanticBudgetLimit}`,
+	)).run();
+	return { allowed: mutationChanges(result) > 0, credits };
 }
 
 function legacyTaggingJobId(itemId: string, hash: string): string {
@@ -170,7 +224,7 @@ export async function reconcileAiJobs(db: AnansiDb, limit = 100, model?: string,
 	const jobs = await db.select().from(aiEnrichmentJobs);
 	const existing = new Set(jobs.map((job) => job.id));
 	await retireLegacyTaggingJobs(db, settings, jobs, existing, now);
-	if (!settings.semanticSearchEnabled && !settings.autoTaggingEnabled) return 0;
+	if ((!settings.semanticSearchEnabled || settings.semanticIndexPaused) && !settings.autoTaggingEnabled) return 0;
 	const wantedKinds = new Set(onlyKinds ?? ["embedding", "tagging"]);
 	// Scan the complete library when reconciling. The insertion cap below keeps
 	// each pass bounded, but limiting this read to the first 500 rows strands
@@ -180,10 +234,10 @@ export async function reconcileAiJobs(db: AnansiDb, limit = 100, model?: string,
 	const pendingRows: (typeof aiEnrichmentJobs.$inferInsert)[] = [];
 	for (const item of rows) {
 		const kinds: AiJobKind[] = [];
-		if (settings.semanticSearchEnabled && wantedKinds.has("embedding")) kinds.push("embedding");
+		if (settings.semanticSearchEnabled && !settings.semanticIndexPaused && wantedKinds.has("embedding")) kinds.push("embedding");
 		if (settings.autoTaggingEnabled && wantedKinds.has("tagging")) kinds.push("tagging");
 		for (const kind of kinds) {
-			const hash = await contentHash(kind === "embedding" ? semanticText(item) : searchableText(item));
+			const hash = await contentHash(kind === "embedding" ? embeddingProjectionText(item, settings.semanticGeneration) : searchableText(item));
 			// Both projections are model generations. Include the active model in
 			// the durable identity so changing either provider queues current work
 			// instead of reusing a terminal job from the previous model.
@@ -212,7 +266,7 @@ export async function reconcileAiJobs(db: AnansiDb, limit = 100, model?: string,
 
 export async function claimAiJobs(db: AnansiDb, kind: AiJobKind, limit = 4, now = Math.floor(Date.now() / 1000), model?: string): Promise<AiJob[]> {
   const settings = await getAiSettings(db);
-  if ((kind === "embedding" && !settings.semanticSearchEnabled) || (kind === "tagging" && !settings.autoTaggingEnabled)) return [];
+      if ((kind === "embedding" && (!settings.semanticSearchEnabled || settings.semanticIndexPaused)) || (kind === "tagging" && !settings.autoTaggingEnabled)) return [];
   // An expired running lease belongs to a worker that stopped before it could
   // complete the job. Reclaim it alongside pending/retrying work so a local
   // server restart cannot strand an AI projection forever.

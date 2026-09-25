@@ -178,6 +178,12 @@ export const itemTags = sqliteTable(
 export const aiSettings = sqliteTable("ai_settings", {
   id: integer("id").primaryKey().default(1),
   semanticSearchEnabled: integer("semantic_search_enabled").notNull().default(0),
+  semanticIndexPaused: integer("semantic_index_paused").notNull().default(0),
+  semanticBudgetLimit: integer("semantic_budget_limit").notNull().default(10000),
+  semanticBudgetUsed: integer("semantic_budget_used").notNull().default(0),
+  semanticBudgetMonth: text("semantic_budget_month").notNull().default(""),
+  semanticOptedInAt: integer("semantic_opted_in_at"),
+  semanticGeneration: integer("semantic_generation").notNull().default(1),
   autoTaggingEnabled: integer("auto_tagging_enabled").notNull().default(0),
   embeddingModel: text("embedding_model").notNull().default("@cf/baai/bge-small-en-v1.5"),
   embeddingDimensions: integer("embedding_dimensions").notNull().default(384),
@@ -217,6 +223,41 @@ export const itemEmbeddings = sqliteTable("item_embeddings", {
   updatedAt: integer("updated_at").notNull().default(0),
   lastError: text("last_error"),
 });
+
+/** D1 is authoritative for chunk text, offsets, ownership, and active model. */
+export const semanticChunks = sqliteTable(
+  "semantic_chunks",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    chunkIndex: integer("chunk_index").notNull(),
+    chunkText: text("chunk_text").notNull(),
+    contentHash: text("content_hash").notNull(),
+    parentHash: text("parent_hash").notNull(),
+    startOffset: integer("start_offset").notNull(),
+    endOffset: integer("end_offset").notNull(),
+    chunkerVersion: text("chunker_version").notNull(),
+    model: text("model").notNull(),
+    generation: integer("generation").notNull().default(1),
+    dimensions: integer("dimensions").notNull().default(0),
+    status: text("status").notNull().default("pending"),
+    createdAt: integer("created_at").notNull().default(0),
+    updatedAt: integer("updated_at").notNull().default(0),
+  },
+	(t) => [index("semantic_chunks_item_model").on(t.itemId, t.model), index("semantic_chunks_model_status").on(t.model, t.status), index("semantic_chunks_model_generation_status").on(t.model, t.generation, t.status)],
+);
+
+/** Durable tombstones let D1 hide retired vectors before Vectorize cleanup succeeds. */
+export const semanticVectorDeletions = sqliteTable(
+  "semantic_vector_deletions",
+  {
+    vectorId: text("vector_id").primaryKey(),
+    attempts: integer("attempts").notNull().default(0),
+    nextRunAt: integer("next_run_at").notNull().default(0),
+    createdAt: integer("created_at").notNull().default(0),
+  },
+  (t) => [index("semantic_vector_deletions_due").on(t.nextRunAt, t.createdAt)],
+);
 
 export const itemTagOverrides = sqliteTable(
   "item_tag_overrides",

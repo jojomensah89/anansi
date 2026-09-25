@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { aiEnrichmentJobs, applyAiTags, itemTags, reconcileAiJobs, searchItemsPage, setAiSettings, upsertItems, type AnansiDb } from "@anansi/db";
+import { aiEnrichmentJobs, applyAiTags, getAiSettings, itemTags, items, markSemanticChunksComplete, reconcileAiJobs, searchItemsPage, setAiSettings, stageSemanticChunks, upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
 import { LocalVectorIndex } from "./local-vector-index.ts";
@@ -171,13 +171,18 @@ describe("handleApi", () => {
 		]);
 		const semanticRow = (await searchItemsPage(db, { query: "neighbouring vector indexes", limit: 1 })).items[0];
 		if (!semanticRow) throw new Error("semantic fixture was not indexed");
+		const canonicalItem = (await db.select().from(items)).find((item) => item.id === semanticRow.id);
+		if (!canonicalItem) throw new Error("semantic fixture was not stored");
+		await setAiSettings(db, { semanticSearchEnabled: true });
+		const settings = await getAiSettings(db);
+		const staged = await stageSemanticChunks(db, canonicalItem, settings.embeddingModel, settings.semanticGeneration);
+		await markSemanticChunksComplete(db, staged.chunks.map((chunk) => chunk.id), 384);
 		const semanticVector = [1, ...Array.from({ length: 383 }, () => 0)];
 		const index = new LocalVectorIndex(384);
 		await index.upsert([
-			{ id: semanticRow.id, values: semanticVector },
+			...staged.chunks.map((chunk) => ({ id: chunk.id, values: semanticVector })),
 			{ id: "hidden-or-deleted", values: semanticVector },
 		]);
-		await setAiSettings(db, { semanticSearchEnabled: true });
 		const semanticEnv: ApiEnv = {
 			...env,
 			ai: { run: async () => ({ data: [semanticVector] }) },
@@ -259,7 +264,7 @@ describe("handleApi", () => {
 		const tags = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ autoTaggingEnabled: true }) }));
 		expect(tags.status).toBe(200);
 		expect(kicks).toBe(10);
-		const semantic = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ semanticSearchEnabled: true }) }));
+		const semantic = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ semanticSearchEnabled: true, confirmSemanticBackfill: true }) }));
 		expect(semantic.status).toBe(200);
 		expect(kicks).toBe(11);
 		const status = await readJson(handleApi(localEnv, new Request("https://anansi.test/api/ai", { headers })));
