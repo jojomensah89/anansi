@@ -1,14 +1,19 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/avatar.tsx";
-import { Bone, CountBone, CreatorRowsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { FieldFilter } from "../components/filters.tsx";
 import { Rail } from "../components/rail.tsx";
+import {
+	Bone,
+	CountBone,
+	CreatorRowsSkeleton,
+	useSlowLoad,
+} from "../components/skeleton.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
 import { api, sourceLabel } from "../lib/api.ts";
-import { libraryKeys } from "../lib/library-query.ts";
 import { useCreatorsQuery } from "../lib/creators-query.ts";
+import { libraryKeys } from "../lib/library-query.ts";
 
 /** The same source vocabulary the library uses. */
 const PLATFORMS = [
@@ -21,7 +26,10 @@ const PLATFORMS = [
 export const Route = createFileRoute("/creators")({ component: Creators });
 
 /** Keep the denominator explicit: an author's share is of the whole library. */
-export function authorSharePercent(saves: number, libraryItems: number): number {
+export function authorSharePercent(
+	saves: number,
+	libraryItems: number,
+): number {
 	if (libraryItems <= 0 || saves <= 0) return 0;
 	return (saves / libraryItems) * 100;
 }
@@ -34,16 +42,31 @@ export function formatAuthorShare(saves: number, libraryItems: number): string {
 function Creators() {
 	const [filter, setFilter] = useState("");
 	const [platforms, setPlatforms] = useState<string[]>([]);
-	const statsQuery = useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000 });
+	const statsQuery = useQuery({
+		queryKey: libraryKeys.stats(),
+		queryFn: ({ signal }) => api.stats(signal),
+		retry: 1,
+		staleTime: 15_000,
+	});
 	const creatorQuery = useCreatorsQuery(filter, platforms);
 	const creators = creatorQuery.creators;
-	const stats = statsQuery.data ?? { items: 0, authors: 0, archived: 0, bySource: {}, media: { total: 0, stored: 0 } };
+	const stats = statsQuery.data ?? {
+		items: 0,
+		authors: 0,
+		archived: 0,
+		bySource: {},
+		media: { total: 0, stored: 0 },
+	};
 	const loading = statsQuery.isPending || creatorQuery.isPending;
 	const slow = useSlowLoad(loading);
 	const once = creatorQuery.data?.pages[0]?.singleSaveCount ?? 0;
 	const topTenSaves = creatorQuery.data?.pages[0]?.topTenSaves ?? 0;
-	const topTenShare = stats.items ? Math.round((topTenSaves / stats.items) * 100) : 0;
-	const perAuthor = stats.authors ? (stats.items / stats.authors).toFixed(2) : "0";
+	const topTenShare = stats.items
+		? Math.round((topTenSaves / stats.items) * 100)
+		: 0;
+	const perAuthor = stats.authors
+		? (stats.items / stats.authors).toFixed(2)
+		: "0";
 	const total = creatorQuery.total;
 	const sentinel = useRef<HTMLDivElement>(null);
 
@@ -51,17 +74,41 @@ function Creators() {
 		const node = sentinel.current;
 		if (!node) return;
 		const io = new IntersectionObserver((entries) => {
-			if (entries[0]?.isIntersecting && creatorQuery.hasNextPage && !creatorQuery.isFetchingNextPage) void creatorQuery.fetchNextPage();
+			if (
+				entries[0]?.isIntersecting &&
+				creatorQuery.hasNextPage &&
+				!creatorQuery.isFetchingNextPage
+			)
+				void creatorQuery.fetchNextPage();
 		});
 		io.observe(node);
 		return () => io.disconnect();
-	}, [creatorQuery.fetchNextPage, creatorQuery.hasNextPage, creatorQuery.isFetchingNextPage]);
+	}, [
+		creatorQuery.fetchNextPage,
+		creatorQuery.hasNextPage,
+		creatorQuery.isFetchingNextPage,
+	]);
 
 	return (
-		<div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
-			<Rail total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} />
+		<div
+			className="anansi-shell"
+			style={{ display: "flex", height: "100svh", overflow: "hidden" }}
+		>
+			<Rail
+				total={stats.items}
+				authors={stats.authors}
+				archived={stats.archived}
+				bySource={stats.bySource}
+			/>
 
-			<div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+			<div
+				style={{
+					flex: 1,
+					display: "flex",
+					flexDirection: "column",
+					minWidth: 0,
+				}}
+			>
 				<header
 					style={{
 						minHeight: 52,
@@ -75,22 +122,46 @@ function Creators() {
 					}}
 				>
 					<span style={{ fontSize: 14, fontWeight: 600 }}>Authors</span>
-					<span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
-						{loading ? slow ? <><CountBone digits={3} height={8} /> authors · <CountBone digits={5} height={8} /> saved items</> : null : `${stats.authors} authors · ${stats.items.toLocaleString()} saved items`}
+					<span
+						className="mono"
+						style={{ fontSize: 11, color: "var(--faint)" }}
+					>
+						{loading ? (
+							slow ? (
+								<>
+									<CountBone digits={3} height={8} /> authors ·{" "}
+									<CountBone digits={5} height={8} /> saved items
+								</>
+							) : null
+						) : (
+							`${stats.authors} authors · ${stats.items.toLocaleString()} saved items`
+						)}
 					</span>
-					<span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+					<span
+						style={{
+							marginLeft: "auto",
+							display: "flex",
+							alignItems: "center",
+							gap: 10,
+						}}
+					>
 						<FieldFilter
 							label="Source"
 							values={platforms}
 							onChange={setPlatforms}
-							options={PLATFORMS.filter((platform) => (stats.bySource[platform.value] ?? 0) > 0).map((platform) => ({
+							options={PLATFORMS.filter(
+								(platform) => (stats.bySource[platform.value] ?? 0) > 0,
+							).map((platform) => ({
 								...platform,
 								count: undefined,
 								icon: <SourceMark source={platform.value} size={13} />,
 							}))}
 						/>
 						{(platforms.length > 0 || filter.trim() !== "") && (
-							<span className="mono" style={{ fontSize: 10.5, color: "var(--faintest)" }}>
+							<span
+								className="mono"
+								style={{ fontSize: 10.5, color: "var(--faintest)" }}
+							>
 								{creators.length.toLocaleString()} of {total.toLocaleString()}
 							</span>
 						)}
@@ -116,67 +187,218 @@ function Creators() {
 					/>
 				</header>
 
-				<div style={{ flexShrink: 0, borderBottom: "1px solid var(--line)", padding: "16px 22px", display: "flex", gap: 44, flexWrap: "wrap" }}>
-					<Stat n={String(stats.authors)} label="authors" pending={loading && slow} />
-					<Stat n={perAuthor} label="saved items per author" pending={loading && slow} />
-					<Stat n={`${topTenShare}%`} label="of saved items from top 10" accent pending={loading && slow} />
-					<Stat n={String(once)} label="saved exactly once" pending={loading && slow} />
+				<div
+					style={{
+						flexShrink: 0,
+						borderBottom: "1px solid var(--line)",
+						padding: "16px 22px",
+						display: "flex",
+						gap: 44,
+						flexWrap: "wrap",
+					}}
+				>
+					<Stat
+						n={String(stats.authors)}
+						label="authors"
+						pending={loading && slow}
+					/>
+					<Stat
+						n={perAuthor}
+						label="saved items per author"
+						pending={loading && slow}
+					/>
+					<Stat
+						n={`${topTenShare}%`}
+						label="of saved items from top 10"
+						accent
+						pending={loading && slow}
+					/>
+					<Stat
+						n={String(once)}
+						label="saved exactly once"
+						pending={loading && slow}
+					/>
 				</div>
 
 				<div className="scroll" style={{ flex: 1 }}>
 					{loading && slow && <CreatorRowsSkeleton />}
-					<div className="anansi-creator-grid" style={{ padding: "14px 22px 40px" }}>
-						{!creatorQuery.isPending && creators.length === 0 ? (
-							<div style={{ gridColumn: "1 / -1", padding: "42px 12px", textAlign: "center", color: "var(--faint)", fontSize: 12.5 }}>
-								{total === 0 && !filter.trim() && platforms.length === 0 ? "No authors yet" : "No authors match this filter"}
-							</div>
-						) : creators.map((creator) => {
-							if (!creator.authorHandle) return null;
-							const share = authorSharePercent(creator.saves, stats.items);
-							return (
-								<a
-									key={`${creator.source}:${creator.authorHandle}`}
-									href={`/?author=${encodeURIComponent(creator.authorHandle)}`}
-									aria-label={`Open ${creator.authorName ?? creator.authorHandle} in the library`}
+					<div
+						className="anansi-creator-grid"
+						style={{ padding: "14px 22px 40px" }}
+					>
+						{creatorQuery.isError ? (
+							<div
+								role="alert"
+								style={{
+									gridColumn: "1 / -1",
+									padding: "42px 12px",
+									textAlign: "center",
+									color: "var(--faint)",
+									fontSize: 12.5,
+								}}
+							>
+								Creators are unavailable right now.
+								<button
+									type="button"
+									onClick={() => void creatorQuery.refetch()}
 									style={{
-										display: "flex",
-										alignItems: "center",
-										gap: 11,
-										minWidth: 0,
-										minHeight: 68,
-										padding: "11px 12px",
-										border: "1px solid var(--line)",
-										borderRadius: 8,
+										marginLeft: 10,
+										border: "1px solid var(--edge)",
+										borderRadius: 5,
 										background: "var(--card)",
-										color: "inherit",
-										textDecoration: "none",
-										boxShadow: "0 6px 16px -12px #000",
+										color: "var(--text-dim)",
+										padding: "5px 9px",
+										cursor: "pointer",
 									}}
 								>
-										<Avatar src={creator.authorAvatar} seed={creator.authorHandle ?? creator.authorName} size={42} />
-									<span style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flex: 1 }}>
-										<span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-											<strong style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{creator.authorName ?? creator.authorHandle}</strong>
-											<SourceMark source={creator.source} size={12} />
+									Retry
+								</button>
+							</div>
+						) : !creatorQuery.isPending && creators.length === 0 ? (
+							<div
+								style={{
+									gridColumn: "1 / -1",
+									padding: "42px 12px",
+									textAlign: "center",
+									color: "var(--faint)",
+									fontSize: 12.5,
+								}}
+							>
+								{total === 0 && !filter.trim() && platforms.length === 0
+									? "No authors yet"
+									: "No authors match this filter"}
+							</div>
+						) : (
+							creators.map((creator) => {
+								if (!creator.authorHandle) return null;
+								const share = authorSharePercent(creator.saves, stats.items);
+								return (
+									<a
+										key={`${creator.source}:${creator.authorHandle}`}
+										href={`/?author=${encodeURIComponent(creator.authorHandle)}`}
+										aria-label={`Open ${creator.authorName ?? creator.authorHandle} in the library`}
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: 11,
+											minWidth: 0,
+											minHeight: 68,
+											padding: "11px 12px",
+											border: "1px solid var(--line)",
+											borderRadius: 8,
+											background: "var(--card)",
+											color: "inherit",
+											textDecoration: "none",
+											boxShadow: "0 6px 16px -12px #000",
+										}}
+									>
+										<Avatar
+											src={creator.authorAvatar}
+											seed={creator.authorHandle ?? creator.authorName}
+											size={42}
+										/>
+										<span
+											style={{
+												display: "flex",
+												flexDirection: "column",
+												gap: 3,
+												minWidth: 0,
+												flex: 1,
+											}}
+										>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: 7,
+													minWidth: 0,
+												}}
+											>
+												<strong
+													style={{
+														fontSize: 12.5,
+														overflow: "hidden",
+														textOverflow: "ellipsis",
+														whiteSpace: "nowrap",
+													}}
+												>
+													{creator.authorName ?? creator.authorHandle}
+												</strong>
+												<SourceMark source={creator.source} size={12} />
+											</span>
+											<span
+												className="mono"
+												style={{
+													fontSize: 10.5,
+													color: "var(--faint)",
+													overflow: "hidden",
+													textOverflow: "ellipsis",
+													whiteSpace: "nowrap",
+												}}
+											>
+												@{creator.authorHandle}
+											</span>
 										</span>
-										<span className="mono" style={{ fontSize: 10.5, color: "var(--faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{creator.authorHandle}</span>
-									</span>
-									<span className="mono" style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0, color: "var(--muted)" }}>
-										<span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 10.5 }}>
-											<strong style={{ fontSize: 13, color: "var(--text)" }}>{creator.saves}</strong>
+										<span
+											className="mono"
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: 9,
+												flexShrink: 0,
+												color: "var(--muted)",
+											}}
+										>
+											<span
+												style={{
+													display: "flex",
+													flexDirection: "column",
+													alignItems: "flex-end",
+													gap: 2,
+													fontSize: 10.5,
+												}}
+											>
+												<strong style={{ fontSize: 13, color: "var(--text)" }}>
+													{creator.saves}
+												</strong>
+											</span>
+											<ShareDonut
+												percent={share}
+												label={formatAuthorShare(creator.saves, stats.items)}
+											/>
 										</span>
-										<ShareDonut percent={share} label={formatAuthorShare(creator.saves, stats.items)} />
-									</span>
-								</a>
-							);
-						})}
+									</a>
+								);
+							})
+						)}
 					</div>
 					{creatorQuery.isFetchingNextPage && <CreatorRowsSkeleton />}
 					<div ref={sentinel} style={{ height: 1 }} aria-hidden="true" />
 
-					<div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 30px 40px", fontSize: 11, color: "var(--fainter)" }}>
-						{loading ? slow ? <><CountBone digits={3} height={8} /> of <CountBone digits={3} height={8} /> saved exactly once</> : null : `${once} of ${stats.authors} saved exactly once`}
-						<span style={{ flex: 1, height: 1, background: "var(--line-soft)" }} />
+					<div
+						className="mono"
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 10,
+							padding: "0 30px 40px",
+							fontSize: 11,
+							color: "var(--fainter)",
+						}}
+					>
+						{loading ? (
+							slow ? (
+								<>
+									<CountBone digits={3} height={8} /> of{" "}
+									<CountBone digits={3} height={8} /> saved exactly once
+								</>
+							) : null
+						) : (
+							`${once} of ${stats.authors} saved exactly once`
+						)}
+						<span
+							style={{ flex: 1, height: 1, background: "var(--line-soft)" }}
+						/>
 					</div>
 				</div>
 			</div>
@@ -184,14 +406,36 @@ function Creators() {
 	);
 }
 
-	function Stat({ n, label, accent, pending }: { n: string; label: string; accent?: boolean; pending?: boolean }) {
+function Stat({
+	n,
+	label,
+	accent,
+	pending,
+}: {
+	n: string;
+	label: string;
+	accent?: boolean;
+	pending?: boolean;
+}) {
 	return (
 		<div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-			{pending ? <Bone width={44} height={17} radius={4} style={{ marginBottom: 3 }} /> : <span className="mono" style={{ fontSize: 20, color: accent ? "var(--accent)" : "var(--text)" }}>{n}</span>}
+			{pending ? (
+				<Bone width={44} height={17} radius={4} style={{ marginBottom: 3 }} />
+			) : (
+				<span
+					className="mono"
+					style={{
+						fontSize: 20,
+						color: accent ? "var(--accent)" : "var(--text)",
+					}}
+				>
+					{n}
+				</span>
+			)}
 			<span style={{ fontSize: 11.5, color: "var(--faint)" }}>{label}</span>
 		</div>
 	);
-	}
+}
 
 function ShareDonut({ percent, label }: { percent: number; label: string }) {
 	const radius = 15;
@@ -202,13 +446,53 @@ function ShareDonut({ percent, label }: { percent: number; label: string }) {
 			role="img"
 			aria-label={`${label} of library saved items`}
 			title={`${label} of library saved items`}
-			style={{ width: 36, height: 36, position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+			style={{
+				width: 36,
+				height: 36,
+				position: "relative",
+				display: "inline-flex",
+				alignItems: "center",
+				justifyContent: "center",
+			}}
 		>
-			<svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true" style={{ transform: "rotate(-90deg)" }}>
-				<circle cx="18" cy="18" r={radius} fill="none" stroke="var(--edge)" strokeWidth="4" />
-				<circle cx="18" cy="18" r={radius} fill="none" stroke="var(--accent)" strokeWidth="4" strokeLinecap="round" strokeDasharray={`${dash} ${circumference - dash}`} />
+			<svg
+				width="36"
+				height="36"
+				viewBox="0 0 36 36"
+				aria-hidden="true"
+				style={{ transform: "rotate(-90deg)" }}
+			>
+				<circle
+					cx="18"
+					cy="18"
+					r={radius}
+					fill="none"
+					stroke="var(--edge)"
+					strokeWidth="4"
+				/>
+				<circle
+					cx="18"
+					cy="18"
+					r={radius}
+					fill="none"
+					stroke="var(--accent)"
+					strokeWidth="4"
+					strokeLinecap="round"
+					strokeDasharray={`${dash} ${circumference - dash}`}
+				/>
 			</svg>
-			<span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 8.5, color: "var(--text-dim)" }}>{percent < 0.1 && percent > 0 ? "<.1" : `${Math.round(percent)}%`}</span>
+			<span
+				style={{
+					position: "absolute",
+					inset: 0,
+					display: "grid",
+					placeItems: "center",
+					fontSize: 8.5,
+					color: "var(--text-dim)",
+				}}
+			>
+				{percent < 0.1 && percent > 0 ? "<.1" : `${Math.round(percent)}%`}
+			</span>
 		</span>
 	);
 }
