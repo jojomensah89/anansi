@@ -28,6 +28,7 @@ import { cachedForServer, type ServerCache } from "../lib/config-cache.ts";
 import { extensionConnection } from "../lib/connection.ts";
 import { createHeartbeatClient, type HeartbeatClient } from "../lib/heartbeat.ts";
 import { createIndexedDbOutbox, type IndexedDbOutbox } from "../lib/idb-outbox.ts";
+import { initialImportSources, runImportAll } from "../lib/import-all.ts";
 import { createIngestTransport, safeHttpErrorDetail } from "../lib/ingest-transport.ts";
 import {
   MESSAGE_PROTOCOL_VERSION,
@@ -1135,6 +1136,16 @@ async function startCapture(source: string, quiet = false, live = false): Promis
   }
 }
 
+/** Fan out the existing full-import path without creating an aggregate run. */
+async function startAllCaptures(): Promise<void> {
+  const config = await loadConfig(true);
+  const sources = await initialImportSources(
+    config,
+    (source) => persistentState().runs.initialImportDue(source),
+  );
+  void runImportAll(sources, (source) => startCapture(source, true));
+}
+
 async function importWithoutTab(
   source: SessionSource,
   runId: string,
@@ -1442,6 +1453,9 @@ async function handlePopupCommand(msg: PopupCommandMessage): Promise<BackgroundR
   switch (msg.action) {
     case "queue-status":
       return { ok: true, snapshot: await durableSnapshot() };
+    case "import-all":
+      await startAllCaptures();
+      return { ok: true };
     case "reschedule":
       await rescheduleAlarm();
       return { ok: true };

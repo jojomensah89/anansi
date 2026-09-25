@@ -1,15 +1,17 @@
 import {
+	type AiJob,
 	type AnansiDb,
 	aiProgress,
 	contentHash,
+	type DbItem,
 	getAiSettings,
 	items,
 	requeueEmbeddingJobs,
 	semanticText,
 	upsertItemEmbedding,
 } from "@anansi/db";
-import { createAiJobRunner } from "./ai-job-runner.ts";
 import { AiProviderError, type EmbeddingProvider } from "./ai.ts";
+import { createAiJobRunner } from "./ai-job-runner.ts";
 import type { LocalSemanticCache } from "./local-semantic-cache.ts";
 import type { SemanticRuntimeSnapshot } from "./semantic-search.ts";
 
@@ -22,7 +24,7 @@ export function createLocalSemanticWorker(
 	db: AnansiDb,
 	cache: LocalSemanticCache,
 	provider: EmbeddingProvider,
-	batchSize = 4,
+	batchSize = 64,
 ): LocalSemanticWorker {
 	let running = false;
 	let firstRun = true;
@@ -31,6 +33,12 @@ export function createLocalSemanticWorker(
 		running = true;
 		let providerUnavailable = false;
 		let providerFailed = false;
+		const observeProviderError = (error: unknown) => {
+			if (error instanceof AiProviderError) {
+				if (error.code === "unavailable") providerUnavailable = true;
+				else providerFailed = true;
+			}
+		};
 		try {
 			const settings = await getAiSettings(db);
 			if (!settings.semanticSearchEnabled) {
@@ -63,11 +71,12 @@ export function createLocalSemanticWorker(
 				indexed: cache.snapshot().indexed,
 				dimension: provider.dimensions || undefined,
 			});
+			const embedBatch = provider.embedBatch?.bind(provider);
 			const runner = createAiJobRunner({
 				db,
 				batchSize,
 				reconcile: { limit: Math.max(batchSize, 1) * 4, model: provider.model },
-					executor: {
+				executor: {
 					kind: "embedding",
 					model: provider.model,
 					onMissingItem: (job) => cache.invalidate([job.itemId]),
@@ -75,13 +84,49 @@ export function createLocalSemanticWorker(
 						try {
 							return await provider.embed(semanticText(item));
 						} catch (error) {
-							if (error instanceof AiProviderError) {
-								if (error.code === "unavailable") providerUnavailable = true;
-								else providerFailed = true;
-							}
+							observeProviderError(error);
 							throw error;
 						}
 					},
+					...(embedBatch
+						? {
+								prepareBatch: async (
+									entries: readonly { item: DbItem; job: AiJob }[],
+								) => {
+									try {
+										return await embedBatch(
+											entries.map(({ item }) => semanticText(item)),
+										);
+									} catch (error) {
+										observeProviderError(error);
+										throw error;
+									}
+								},
+								publishBatch: async (
+									entries: readonly {
+										item: DbItem;
+										job: AiJob;
+										prepared: number[];
+									}[],
+								) => {
+									await cache.upsertRecords(
+										entries.map(({ item, job, prepared }) => ({
+											id: item.id,
+											contentHash: job.contentHash,
+											values: prepared,
+										})),
+									);
+									for (const { item, job, prepared } of entries) {
+										await upsertItemEmbedding(db, {
+											itemId: item.id,
+											model: provider.model,
+											dimensions: prepared.length,
+											contentHash: job.contentHash,
+										});
+									}
+								},
+							}
+						: {}),
 					publish: async (item, job, values) => {
 						try {
 							await cache.upsertRecords([
@@ -94,16 +139,13 @@ export function createLocalSemanticWorker(
 								contentHash: job.contentHash,
 							});
 						} catch (error) {
-							if (error instanceof AiProviderError) {
-								if (error.code === "unavailable") providerUnavailable = true;
-								else providerFailed = true;
-							}
+							observeProviderError(error);
 							throw error;
 						}
 					},
 				},
 			});
-			await runner.runOnce();
+			await runner.runUntilIdle();
 			const progress = await aiProgress(db, "embedding", provider.model);
 			const snapshot = cache.snapshot();
 			cache.setStatus({

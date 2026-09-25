@@ -237,6 +237,17 @@ describe("parseExtensionMessage", () => {
 				tabRuntimeContext("https://www.reddit.com/user/example/saved"),
 			),
 		).toMatchObject({ ok: false, error: { code: "direction_mismatch" } });
+
+		expect(
+			parseExtensionMessage(
+				{
+					anansi: "popup-command",
+					messageVersion: MESSAGE_PROTOCOL_VERSION,
+					action: "import-all",
+				},
+				extensionRuntimeContext,
+			),
+		).toMatchObject({ ok: true, source: null });
 	});
 
 	test("rejects page events presented as extension popup messages", () => {

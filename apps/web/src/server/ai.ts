@@ -13,6 +13,7 @@ export interface EmbeddingProvider {
   readonly model: string;
   readonly dimensions: number;
   embed(text: string): Promise<number[]>;
+  embedBatch?(texts: readonly string[]): Promise<number[][]>;
 }
 
 /** Text-generation seam used by hosted and local automatic-tag workers. */

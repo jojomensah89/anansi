@@ -133,7 +133,22 @@ export interface Creator {
   authorAvatar: string | null;
   source: string;
   saves: number;
-  lastPosted: number | null;
+	lastPosted: number | null;
+}
+
+export interface CreatorQuery {
+	query?: string;
+	source?: string[];
+	cursor?: string | null;
+	limit?: number;
+}
+
+export interface CreatorPage {
+	creators: Creator[];
+	nextCursor: string | null;
+	total: number;
+	singleSaveCount: number;
+	topTenSaves: number;
 }
 
 export interface SourceRow {
@@ -242,8 +257,15 @@ export const api = {
 
   item: (id: string, signal?: AbortSignal) => get<ItemDetail>(`/api/items/${id}`, signal),
 
-  creators: (limit = 200, signal?: AbortSignal) =>
-    get<{ creators: Creator[] }>(`/api/creators?limit=${limit}`, signal),
+	creators: (options: CreatorQuery | number = {}, signal?: AbortSignal): Promise<CreatorPage> => {
+		const opts = typeof options === "number" ? { limit: options } : options;
+		const q = new URLSearchParams();
+		if (opts.query?.trim()) q.set("q", opts.query.trim());
+		for (const source of opts.source ?? []) q.append("source", source);
+		if (opts.cursor != null) q.set("cursor", opts.cursor);
+		q.set("limit", String(opts.limit ?? 40));
+		return get<CreatorPage>(`/api/creators?${q}`, signal);
+	},
 
   sources: (signal?: AbortSignal) => get<SourcesResponse>("/api/sources", signal),
 

@@ -31,6 +31,16 @@ const mcpToken = process.env.MCP_TOKEN;
 const libraryToken = process.env.LIBRARY_TOKEN;
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3001,http://127.0.0.1:3001").split(",").map(v=>v.trim()).filter(Boolean);
 
+function positiveIntegerSetting(name: string, fallback: number, maximum: number) {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > maximum) {
+    throw new Error(`${name} must be an integer between 1 and ${maximum}`);
+  }
+  return value;
+}
+
 /**
  * Migrate on open, rather than hoping someone remembered.
  *
@@ -51,6 +61,10 @@ const ollamaModel = process.env.OLLAMA_EMBEDDING_MODEL ?? "embeddinggemma";
 const ollamaTagModel = process.env.OLLAMA_TAG_MODEL ?? DEFAULT_OLLAMA_TAG_MODEL;
 syncLocalAiModels(db, { embeddingModel: ollamaModel, tagModel: ollamaTagModel });
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
+const embeddingQueueChunk = positiveIntegerSetting("ANANSI_EMBEDDING_QUEUE_CHUNK", 64, 100);
+const embeddingProviderBatch = positiveIntegerSetting("OLLAMA_EMBEDDING_BATCH_SIZE", 16, 64);
+const taggingQueueChunk = positiveIntegerSetting("ANANSI_TAGGING_QUEUE_CHUNK", 50, 100);
+const taggingConcurrency = positiveIntegerSetting("ANANSI_TAGGING_CONCURRENCY", 1, 4);
 try {
   const ollamaHost = new URL(ollamaBaseUrl).hostname.toLowerCase();
   if (!(ollamaHost === "127.0.0.1" || ollamaHost === "localhost" || ollamaHost === "[::1]" || ollamaHost === "::1")) {
@@ -60,11 +74,11 @@ try {
   // The provider emits the actionable configuration error below.
 }
 const semanticCachePath = process.env.ANANSI_SEMANTIC_DB_PATH ?? join(dirname(dbPath), "semantic", "ollama.sqlite");
-const ollamaProvider = createOllamaEmbeddingProvider({ model: ollamaModel, baseUrl: ollamaBaseUrl });
+const ollamaProvider = createOllamaEmbeddingProvider({ model: ollamaModel, baseUrl: ollamaBaseUrl, batchSize: embeddingProviderBatch });
 const ollamaTagger = createOllamaTaggingProvider({ model: ollamaTagModel, baseUrl: ollamaBaseUrl });
 const semanticCache = openLocalSemanticCache(semanticCachePath, ollamaModel);
-const semanticWorker = createLocalSemanticWorker(db, semanticCache, ollamaProvider);
-const taggingWorker = createLocalTaggingWorker(db, ollamaTagger);
+const semanticWorker = createLocalSemanticWorker(db, semanticCache, ollamaProvider, embeddingQueueChunk);
+const taggingWorker = createLocalTaggingWorker(db, ollamaTagger, taggingQueueChunk, taggingConcurrency);
 const recover = () => fetchPendingMedia(db, media).catch(error => console.error("Media recovery failed:", error));
 void recover();
 setInterval(() => { void recover(); }, 60_000).unref();
