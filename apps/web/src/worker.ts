@@ -3,7 +3,7 @@ import { openD1 } from "@anansi/db/d1";
 import { fetchPendingMedia } from "./server/media.ts";
 import { applyAiTags, getAiSettings, reconcileAiJobs, searchableText } from "@anansi/db";
 import { createAiJobRunner } from "./server/ai-job-runner.ts";
-import { createEmbeddingProvider, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
+import { createEmbeddingProvider, createVectorIndex, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
 import { prepareSemanticItem, publishSemanticItem } from "./server/semantic-embedding.ts";
 import { drainSemanticVectorDeletes } from "./server/semantic-vector-cleanup.ts";
 

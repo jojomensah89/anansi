@@ -1,5 +1,7 @@
 import {
+	type AiJob,
 	type AnansiDb,
+	type DbItem,
 	aiProgress,
 	getAiSettings,
 	items,
@@ -10,7 +12,11 @@ import { AiProviderError, type EmbeddingProvider } from "./ai.ts";
 import { createAiJobRunner } from "./ai-job-runner.ts";
 import type { LocalSemanticCache } from "./local-semantic-cache.ts";
 import type { SemanticRuntimeSnapshot } from "./semantic-search.ts";
-import { prepareSemanticItem, publishSemanticItem } from "./semantic-embedding.ts";
+import {
+	prepareSemanticItem,
+	prepareSemanticItems,
+	publishSemanticItem,
+} from "./semantic-embedding.ts";
 import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
 
 export interface LocalSemanticWorker {
@@ -87,6 +93,25 @@ export function createLocalSemanticWorker(
 							throw error;
 						}
 					},
+					...(provider.embedBatch
+						? {
+							prepareBatch: async (
+								entries: readonly { item: DbItem; job: AiJob }[],
+							) => {
+								try {
+									return await prepareSemanticItems(
+										db,
+										entries.map(({ item }) => item),
+										provider,
+										{ localCache: cache },
+									);
+								} catch (error) {
+									observeProviderError(error);
+									throw error;
+								}
+							},
+						}
+						: {}),
 					publish: async (item, _job, prepared) => {
 						try {
 							await publishSemanticItem(db, item.id, prepared, { localCache: cache });
