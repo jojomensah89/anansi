@@ -31,14 +31,6 @@
 		"db:generate": {
 			"cache": false,
 			"interactive": true
-		},
-		"deploy": {
-			"cache": false,
-			"interactive": true
-		},
-		"destroy": {
-			"cache": false,
-			"interactive": true
 		}
 	}
 }

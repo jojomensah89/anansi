@@ -43,11 +43,13 @@
     "test": "bun test",
     "dev:web": "turbo run dev -F web --",
     "dev:local": "bun run scripts/dev.ts",
-    "build": "turbo run build",
+    "build": "bun run --filter web build:cloudflare",
+    "build:workspace": "turbo run build",
     "db:generate": "turbo run db:generate -F @anansi/db --",
     "db:studio": "bun run --filter @anansi/db db:studio",
-    "deploy": "turbo run deploy -F @anansi/infra --",
-    "destroy": "turbo run destroy -F @anansi/infra --",
+    "deploy": "bun run db:migrate:remote && wrangler deploy --config apps/web/dist/server/wrangler.json",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "cf-typegen": "wrangler types",
     "dev": "turbo run dev",
     "semantic:local": "bun run scripts/semantic-local-smoke.ts",
     "semantic:ollama": "bun run scripts/semantic-ollama-smoke.ts",
@@ -63,13 +65,27 @@
   },
   "devDependencies": {
     "@anansi/config": "workspace:*",
+    "@biomejs/biome": "^2.5.11",
     "@cloudflare/workers-types": "^5.20260728.1",
     "@huggingface/transformers": "4.2.0",
     "@types/bun": "1.3.1",
     "@types/node": "catalog:",
     "bun-types": "1.3.1",
-    "typescript": "^5.9.3",
     "turbo": "^2.10.12",
-    "@biomejs/biome": "^2.5.11"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.140.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "LIBRARY_TOKEN": {
+        "description": "Required to sign in to the hosted Anansi library. Generate a unique value, for example with `openssl rand -hex 32`."
+      },
+      "INGEST_TOKEN": {
+        "description": "Required to authenticate extension captures. Generate a unique value with `openssl rand -hex 32`; the extension build is configured separately."
+      },
+      "MCP_TOKEN": {
+        "description": "Required to authenticate MCP clients at /mcp. Generate a unique value with `openssl rand -hex 32`."
+      }
+    }
   }
 }

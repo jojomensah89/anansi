@@ -29,7 +29,7 @@ const dbPath = process.env.ANANSI_DB_PATH ?? "data/anansi.db";
 const ingestToken = process.env.INGEST_TOKEN;
 const mcpToken = process.env.MCP_TOKEN;
 const libraryToken = process.env.LIBRARY_TOKEN;
-const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3001,http://127.0.0.1:3001").split(",").map(v=>v.trim()).filter(Boolean);
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3001,http://127.0.0.1:3001").split(",").map((v: string) => v.trim()).filter(Boolean);
 
 function positiveIntegerSetting(name: string, fallback: number, maximum: number) {
   const raw = process.env[name];

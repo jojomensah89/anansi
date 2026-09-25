@@ -5,15 +5,10 @@ import { applyAiTags, getAiSettings, reconcileAiJobs, searchableText, semanticTe
 import { createAiJobRunner } from "./server/ai-job-runner.ts";
 import { createEmbeddingProvider, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
 
-interface WorkerBindings {
-  DB: D1Database;
-  MEDIA: {
-    get(key: string): Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null>;
-    put(key: string, bytes: ArrayBuffer, options?: { httpMetadata: { contentType: string } }): Promise<unknown>;
-  };
+type WorkerBindings = Pick<Env, "DB" | "MEDIA"> & {
   AI?: AiBinding;
   VECTORIZE?: VectorizeBinding;
-}
+};
 
 export async function runMediaSchedule(env: WorkerBindings): Promise<void> {
   await fetchPendingMedia(openD1(env.DB), { bucket: env.MEDIA, runtime: "worker" });

@@ -20,7 +20,7 @@ export interface ServerEnv {
 /**
  * One env resolver, two runtimes.
  *
- * In a Worker this is the D1 binding declared in alchemy.run.ts. Everywhere
+ * In a Worker this is the D1 binding declared in the root Wrangler config. Everywhere
  * else — `bun run dev:web` on your laptop — it falls back to the same
  * data/anansi.db the CLI already filled. That is deliberate and not just a
  * convenience: the whole web app stays developable against the real 1,274
@@ -42,19 +42,16 @@ export async function serverEnv(): Promise<ServerEnv> {
     // imports before this Worker-only branch can fall through to SQLite.
     // The module is supplied by workerd at runtime, so keep it out of the
     // local dependency graph.
-    const { env, waitUntil } = (await import(/* @vite-ignore */ "cloudflare:workers")) as {
-      env: Record<string, unknown>;
-      waitUntil: (promise: Promise<unknown>) => void;
-    };
+    const { env, waitUntil } = await import(/* @vite-ignore */ "cloudflare:workers");
     if (env?.DB) {
       const { openD1 } = await import("@anansi/db/d1");
       cached = {
-        db: openD1(env.DB as D1Database),
-        media: { bucket: env.MEDIA as MediaSource["bucket"], runtime: "worker" },
-        libraryToken: env.LIBRARY_TOKEN as string | undefined,
+        db: openD1(env.DB),
+        media: { bucket: env.MEDIA, runtime: "worker" },
+        libraryToken: env.LIBRARY_TOKEN || undefined,
         waitUntil,
-        ingestToken: env.INGEST_TOKEN as string | undefined,
-        mcpToken: env.MCP_TOKEN as string | undefined,
+        ingestToken: env.INGEST_TOKEN || undefined,
+        mcpToken: env.MCP_TOKEN || undefined,
         ai: env.AI as AiBinding | undefined,
         vectorize: env.VECTORIZE as VectorizeBinding | undefined,
         source: "d1",
@@ -71,7 +68,7 @@ export async function serverEnv(): Promise<ServerEnv> {
     db: openLocalDb(path) as unknown as AnansiDb,
     media: { dir: process.env.ANANSI_MEDIA_DIR ?? "data/media" },
     libraryToken: process.env.LIBRARY_TOKEN,
-    allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "http://localhost:3001,http://127.0.0.1:3001").split(",").map(v=>v.trim()).filter(Boolean),
+    allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "http://localhost:3001,http://127.0.0.1:3001").split(",").map((v: string) => v.trim()).filter(Boolean),
     ingestToken: process.env.INGEST_TOKEN,
     mcpToken: process.env.MCP_TOKEN,
     source: "local",

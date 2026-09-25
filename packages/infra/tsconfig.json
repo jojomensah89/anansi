@@ -1,4 +1,0 @@
-{
-  "extends": "@anansi/config/tsconfig.base.json",
-  "include": ["alchemy.run.ts"]
-}

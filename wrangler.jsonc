@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "anansi",
+  "main": "apps/web/src/worker.ts",
+  "compatibility_date": "2026-09-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "anansi-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "packages/db/drizzle",
+      "migrations_table": "d1_migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "anansi-media"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  // The Deploy button asks for these index properties separately; enter
+  // 384 dimensions and cosine to match @cf/baai/bge-small-en-v1.5.
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "anansi-vectors"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}

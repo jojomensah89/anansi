@@ -14,7 +14,6 @@
   },
   "devDependencies": {
     "@anansi/config": "workspace:*",
-    "@anansi/infra": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:"
   }

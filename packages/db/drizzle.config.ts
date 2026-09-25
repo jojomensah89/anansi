@@ -2,9 +2,9 @@ import { defineConfig } from "drizzle-kit";
 
 /**
  * Local development only. The configured database path is SQLite. Hosted D1
- * migrations are applied by Alchemy during `bun run deploy` from the canonical
- * SQL files in this package's ./drizzle directory, after infra prepares them
- * for Alchemy. Do not run Wrangler or `db:push` for the hosted stack.
+ * hosted D1 migrations are applied by Wrangler from this canonical SQL
+ * directory. Do not use `db:push`: the FTS5 table and triggers require the
+ * migration path.
  *
  * `db:push` is deliberately not a script here. The FTS5 virtual table and its
  * three triggers live in a hand-written migration that push would not know

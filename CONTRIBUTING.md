@@ -95,7 +95,7 @@ packages/db/      SQLite/D1 schema, migrations, search, and item operations
 packages/mcp/     Transport-independent MCP server and tool definitions
 packages/sources/ Shared capture contracts and source parsers
 packages/ui/      Shared UI components and styles
-packages/infra/   Cloudflare infrastructure and deployment resources
+wrangler.jsonc   Cloudflare Worker bindings and deployment resources
 packages/env/     Typed runtime environment bindings
 scripts/          Explicit local smoke and development entrypoints
 ```
