@@ -42,6 +42,13 @@ const record: OutboxRecord = {
 };
 
 describe("ingest transport", () => {
+	test("a stalled fetch times out and aborts without losing the queued capture", async () => {
+		const observed: { signal?: AbortSignal } = {};
+		const transport = createIngestTransport(async () => ({ ingest: "https://example.com/api/ingest", token: "test" }),
+			async (_url, init) => { observed.signal = init?.signal as AbortSignal; return await new Promise<Response>(() => {}); }, Date.now, 10);
+		expect(await transport.send(record)).toEqual({ kind: "network" });
+		expect(observed.signal?.aborted).toBe(true);
+	});
 	test("sends the capture with bearer auth and a stable idempotency key", async () => {
 		let calledUrl = "";
 		let calledInit: RequestInit | undefined;

@@ -32,11 +32,11 @@ const fixture = (source: string, externalId: string, authorHandle: string): Inge
 });
 
 describe("source visibility boundary", () => {
-	test("derives the hidden set from capabilities and keeps TikTok rows retained", async () => {
-		expect(HIDDEN_SOURCES).toEqual(["tiktok"]);
-		expect(isHiddenSource("tiktok")).toBe(true);
+	test("makes retained TikTok rows visible when archive import is available", async () => {
+		expect(HIDDEN_SOURCES).toEqual([]);
+		expect(isHiddenSource("tiktok")).toBe(false);
 		expect(isVisibleSource("x")).toBe(true);
-		expect(isVisibleSource("tiktok")).toBe(false);
+		expect(isVisibleSource("tiktok")).toBe(true);
 
 		const db = openTestDb();
 		await upsertItems(db, [
@@ -44,24 +44,22 @@ describe("source visibility boundary", () => {
 			fixture("tiktok", "retained", "shared-author"),
 		]);
 		const rows = await db.select({ id: items.id, source: items.source }).from(items);
-		const hiddenId = rows.find((row) => row.source === "tiktok")?.id;
+		const tiktokId = rows.find((row) => row.source === "tiktok")?.id;
 		expect(rows).toHaveLength(2);
-		if (!hiddenId) throw new Error("expected retained TikTok row");
+		if (!tiktokId) throw new Error("expected retained TikTok row");
 
-		expect((await listItems(db)).items.map((item) => item.source)).toEqual(["x"]);
+		expect((await listItems(db)).items.map((item) => item.source).sort()).toEqual(["tiktok", "x"]);
 		expect(
 			(await searchItemsPage(db, { query: "visibility boundary" })).items.map(
 				(item) => item.source,
 			),
-		).toEqual(["x"]);
-		expect((await recentSaves(db)).map((item) => item.source)).toEqual(["x"]);
-		expect((await findByAuthor(db, "shared-author")).map((item) => item.source)).toEqual([
-			"x",
-		]);
-		expect(await getItem(db, hiddenId)).toBeNull();
-		expect(await countItems(db)).toBe(1);
-		expect((await creators(db)).map((creator) => creator.source)).toEqual(["x"]);
-		expect((await sourceHealth(db)).map((health) => health.source)).toEqual(["x"]);
-		expect((await libraryStats(db)).bySource).toEqual({ x: 1 });
+		).toEqual(expect.arrayContaining(["x", "tiktok"]));
+		expect((await recentSaves(db)).map((item) => item.source).sort()).toEqual(["tiktok", "x"]);
+		expect((await findByAuthor(db, "shared-author")).map((item) => item.source).sort()).toEqual(["tiktok", "x"]);
+		expect(await getItem(db, tiktokId)).not.toBeNull();
+		expect(await countItems(db)).toBe(2);
+		expect((await creators(db)).map((creator) => creator.source).sort()).toEqual(["tiktok", "x"]);
+		expect((await sourceHealth(db)).map((health) => health.source).sort()).toEqual(["tiktok", "x"]);
+		expect((await libraryStats(db)).bySource).toEqual({ x: 1, tiktok: 1 });
 	});
 });

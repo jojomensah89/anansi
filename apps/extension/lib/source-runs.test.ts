@@ -179,6 +179,9 @@ describe("source runs", () => {
 describe("import-route selection", () => {
 	test("selects only the expected X bookmarks route", () => {
 		expect(isExpectedImportTab("x", "https://x.com/i/bookmarks")).toBe(true);
+		expect(isExpectedImportTab("tiktok", "https://www.tiktok.com/@owner")).toBe(true);
+		expect(isExpectedImportTab("tiktok", "https://tiktok.com/")).toBe(true);
+		expect(isExpectedImportTab("tiktok", "https://tiktok.com.evil.test/")).toBe(false);
 		expect(isExpectedImportTab("x", "https://x.com/home")).toBe(false);
 		expect(isExpectedImportTab("x", "https://example.com/i/bookmarks")).toBe(
 			false,

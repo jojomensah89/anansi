@@ -55,6 +55,8 @@ export default defineConfig({
 			"https://old.reddit.com/*",
 			"https://reddit.com/*",
 			"https://github.com/*",
+			"https://www.tiktok.com/*",
+			"https://tiktok.com/*",
 			`${connection.origin}/*`,
 		],
 	},

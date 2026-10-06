@@ -8,7 +8,7 @@ import type {
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { atomicWrite, type AtomicStatement } from "./atomic.ts";
 import { prepareUpsertItems, type UpsertPlan } from "./queries.ts";
-import { captureEvents, itemSourceLinks, items } from "./schema.ts";
+import { captureEvents, itemSourceLinks, itemSourceStates, items } from "./schema.ts";
 import type { AnansiDb } from "./types.ts";
 
 export type CaptureApplicationErrorCode =
@@ -109,17 +109,35 @@ function plannedItemId(plan: UpsertPlan, capture: ItemEventCapture): string {
 	return id;
 }
 
+function sourceStateStatement(db: AnansiDb, capture: ItemEventCapture): AtomicStatement {
+	return db.insert(itemSourceStates).values({ source: capture.source, externalId: capture.externalId,
+		platformSaved: capture.action === "save" ? 1 : 0, observedAt: capture.observedAt })
+		.onConflictDoUpdate({ target: [itemSourceStates.source, itemSourceStates.externalId],
+			set: { platformSaved: capture.action === "save" ? 1 : 0, observedAt: capture.observedAt },
+			setWhere: lte(itemSourceStates.observedAt, capture.observedAt) });
+}
+
+function applyExplicitState(db: AnansiDb, source: string, externalId?: string | string[]): AtomicStatement {
+	const state = sql`(select platform_saved from item_source_states where source = ${items.source} and external_id = ${items.externalId})`;
+	const time = sql`(select observed_at from item_source_states where source = ${items.source} and external_id = ${items.externalId})`;
+	return db.update(items).set({ platformSaved: state, lastSourceEventAt: time,
+		removedFromSourceAt: sql`case when ${state} = 0 then ${time} else null end`,
+	}).where(and(eq(items.source, source), Array.isArray(externalId)
+		? sql`${items.externalId} in (select value from json_each(${JSON.stringify(externalId)}))`
+		: externalId === undefined ? undefined : eq(items.externalId, externalId),
+		sql`exists (select 1 from item_source_states where source = ${items.source} and external_id = ${items.externalId})`));
+}
+
 async function planPlatformEvent(
 	db: AnansiDb,
 	capture: ItemEventCapture,
 ): Promise<CapturePlan> {
 	const existing = await findItem(db, capture);
-	if (
-		existing?.lastSourceEventAt &&
-		existing.lastSourceEventAt > capture.observedAt
-	) {
+	const [state] = await db.select().from(itemSourceStates).where(and(
+		eq(itemSourceStates.source, capture.source), eq(itemSourceStates.externalId, capture.externalId))).limit(1);
+	if (Math.max(existing?.lastSourceEventAt ?? 0, state?.observedAt ?? 0) > capture.observedAt) {
 		return {
-			receipt: receipt(capture, existing.id, "ignored_stale"),
+			receipt: receipt(capture, existing?.id ?? null, "ignored_stale"),
 			statements: () => [],
 		};
 	}
@@ -133,7 +151,7 @@ async function planPlatformEvent(
 	if (capture.action === "unsave" && !existing) {
 		return {
 			receipt: receipt(capture, null, "ignored_stale"),
-			statements: () => [],
+			statements: (target) => [sourceStateStatement(target, capture)],
 		};
 	}
 
@@ -153,6 +171,7 @@ async function planPlatformEvent(
 	return {
 		receipt: receipt(capture, itemId, existing ? "updated" : "created"),
 		statements: (target) => [
+			sourceStateStatement(target, capture),
 			...(upsert?.statements(target) ?? []),
 			target
 				.update(items)
@@ -171,6 +190,7 @@ async function planPlatformEvent(
 						),
 					),
 				),
+			applyExplicitState(target, capture.source, capture.externalId),
 		],
 	};
 }
@@ -324,7 +344,10 @@ async function planCapture(
 				upsert.result.inserted > 0 ? "created" : "updated",
 				parsedItems.length,
 			),
-			statements: upsert.statements,
+			statements: (target) => [
+				...upsert.statements(target),
+				applyExplicitState(target, capture.source, parsedItems.map((item) => item.externalId)),
+			],
 		};
 	}
 	return capture.captureMethod === "chrome_bookmark"

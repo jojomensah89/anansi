@@ -15,6 +15,8 @@ export interface QueueError {
 }
 
 export interface OutboxRecord {
+	/** Persisted admission order; absent only on pre-upgrade records. */
+	sequence?: number;
 	eventId: string;
 	source: BookmarkCapture["source"];
 	capture: BookmarkCapture;
@@ -232,12 +234,41 @@ export function createCaptureQueue(
 		}
 	};
 
-	const ensureRecovered = () => {
-		if (!recovery) {
-			recovery = store.recoverUploading(clock.now()).then(async (count) => {
-				if (count > 0) await schedule(clock.now());
-			});
+	const order = (a: OutboxRecord, b: OutboxRecord) =>
+		(a.sequence ?? 0) - (b.sequence ?? 0) || a.createdAt - b.createdAt || a.eventId.localeCompare(b.eventId);
+	const legacyUpgradeOrder = (a: OutboxRecord, b: OutboxRecord) =>
+		a.createdAt - b.createdAt ||
+		// An interrupted upgrade leaves a numbered prefix. Keep it before
+		// untouched rows with the same millisecond timestamp on restart.
+		Number(b.sequence !== undefined) - Number(a.sequence !== undefined) ||
+		(a.sequence ?? 0) - (b.sequence ?? 0) || a.eventId.localeCompare(b.eventId);
+	const retireSupersededFailures = async (records: OutboxRecord[]) => {
+		const latest = new Map<string, number>();
+		for (const record of records) if (record.capture.payloadType === "item_event") {
+			const key = `${record.source}:${record.capture.externalId}`;
+			latest.set(key, Math.max(latest.get(key) ?? 0, record.sequence ?? 0));
 		}
+		for (const record of records) if (record.state === "failed" && record.capture.payloadType === "item_event" &&
+			(latest.get(`${record.source}:${record.capture.externalId}`) ?? 0) > (record.sequence ?? 0)) {
+			await store.delete(record.eventId);
+		}
+	};
+	const scheduleRemaining = async () => {
+		const records = await store.list();
+		const eligible = records.filter((r) => r.state === "queued" || r.state === "retry_wait");
+		if (eligible.length) await schedule(Math.max(clock.now(), Math.min(...eligible.map((r) => r.nextAttemptAt))));
+	};
+	const ensureRecovered = () => {
+		if (!recovery) recovery = (async () => {
+			await store.recoverUploading(clock.now());
+			const records = await store.list();
+			if (records.some((r) => r.sequence === undefined)) {
+				records.sort(legacyUpgradeOrder);
+				for (let index = 0; index < records.length; index++) await store.put({ ...records[index]!, sequence: index + 1 });
+			}
+			await retireSupersededFailures(await store.list());
+			await scheduleRemaining();
+		})();
 		return recovery;
 	};
 
@@ -316,44 +347,61 @@ export function createCaptureQueue(
 	};
 
 	const drainDue = async () => {
-		const due = (await store.list())
-			.filter(
-				(record) =>
-					record.state === "queued" ||
-					(record.state === "retry_wait" &&
-						record.nextAttemptAt <= clock.now()),
-			)
-			.sort(
-				(left, right) =>
-					left.nextAttemptAt - right.nextAttemptAt ||
-					left.createdAt - right.createdAt ||
-					left.eventId.localeCompare(right.eventId),
-			);
-		const bySource = new Map<string, OutboxRecord[]>();
-		for (const record of due) {
-			const records = bySource.get(record.source) ?? [];
-			records.push(record);
-			bySource.set(record.source, records);
-		}
-		const groups = [...bySource.values()];
-		let nextGroup = 0;
+		await retireSupersededFailures(await store.list());
+		const activeSources = new Set<string>();
+		let picking: Promise<unknown> = Promise.resolve();
+		const pick = (): Promise<OutboxRecord | undefined> => {
+			const task = picking.then(async () => {
+				// A preceding worker may have turned this item's save into a
+				// terminal failure since the last pick. Retire it while selection
+				// is serialized so a queued unsave can become the next item.
+				await retireSupersededFailures(await store.list());
+				const all = (await store.list()).sort(order);
+				const firstItems = new Set<string>();
+				const firstRaw = new Set<string>();
+				const due: OutboxRecord[] = [];
+				for (const record of all) {
+					const capture = record.capture;
+					if (capture.payloadType === "item_event") {
+						const key = `${capture.source}:${capture.externalId}`;
+						if (firstItems.has(key)) continue;
+						firstItems.add(key);
+						// Legacy id-only saves depend on their preceding raw page.
+						if (capture.action === "save" && !capture.normalizedItem && firstRaw.has(capture.source)) continue;
+					} else {
+						if (firstRaw.has(record.source)) continue;
+						firstRaw.add(record.source);
+					}
+					if (!activeSources.has(record.source) && (record.state === "queued" ||
+						(record.state === "retry_wait" && record.nextAttemptAt <= clock.now()))) due.push(record);
+				}
+				due.sort((a, b) => Number(b.capture.payloadType === "item_event") - Number(a.capture.payloadType === "item_event") || order(a, b));
+				const record = due[0];
+				if (record) activeSources.add(record.source);
+				return record;
+			});
+			picking = task.catch(() => {});
+			return task;
+		};
 		const worker = async () => {
-			while (nextGroup < groups.length) {
-				const group = groups[nextGroup++];
-				if (!group) continue;
-				for (const record of group) await processRecord(record);
+			while (true) {
+				const record = await pick();
+				if (!record) return;
+				try { await processRecord(record); }
+				finally { activeSources.delete(record.source); }
 			}
 		};
-		await Promise.all(
-			Array.from(
-				{ length: Math.min(Math.max(1, config.maxConcurrency), groups.length) },
-				worker,
-			),
-		);
+		await Promise.all(Array.from({ length: Math.max(1, config.maxConcurrency) }, worker));
+		// Only future retries require a new alarm. Blocked queued successors do
+		// not spin the worker while their earlier item waits or needs attention.
+		const remaining = await store.list();
+		const future = remaining.filter((r) => r.state === "retry_wait").map((r) => r.nextAttemptAt);
+		if (future.length) await schedule(Math.max(clock.now(), Math.min(...future)));
 	};
 
 	const retry = async (request?: RetryRequest): Promise<CaptureQueueStatus> => {
 		await ensureRecovered();
+		await retireSupersededFailures(await store.list());
 		if (request?.includeFailed) {
 			const failed = (await store.list()).filter(
 				(record) =>
@@ -408,6 +456,7 @@ export function createCaptureQueue(
 					if (existing.payloadHash !== hash) {
 						throw new EventCollisionError(prepared.capture.eventId);
 					}
+					await retireSupersededFailures(records);
 					return {
 						eventId: existing.eventId,
 						payloadHash: existing.payloadHash,
@@ -415,8 +464,12 @@ export function createCaptureQueue(
 						duplicate: true,
 					};
 				}
+				const incomingItem = prepared.capture.payloadType === "item_event" ? prepared.capture : null;
 				const totalBytes = records.reduce(
-					(total, record) => total + record.sizeBytes,
+					(total, record) => total + (
+						incomingItem && record.state === "failed" && record.capture.payloadType === "item_event" &&
+						record.source === incomingItem.source && record.capture.externalId === incomingItem.externalId
+							? 0 : record.sizeBytes),
 					0,
 				);
 				if (totalBytes + prepared.sizeBytes > config.maxTotalBytes) {
@@ -427,6 +480,7 @@ export function createCaptureQueue(
 				}
 				const now = clock.now();
 				const record: OutboxRecord = {
+					sequence: Math.max(0, ...records.map((r) => r.sequence ?? 0)) + 1,
 					eventId: prepared.capture.eventId,
 					source: prepared.capture.source,
 					capture: prepared.capture,
@@ -440,6 +494,7 @@ export function createCaptureQueue(
 				};
 				const added = await store.add(record);
 				if (!added) throw new EventCollisionError(record.eventId);
+				await retireSupersededFailures([...records, record]);
 				await schedule(now);
 				return {
 					eventId: record.eventId,

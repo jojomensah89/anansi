@@ -43,11 +43,11 @@ Anansi does the following:
 | <img src="./docs/assets/source-icons/github.svg" width="16" height="16" alt=""> GitHub stars | Full import + live star/unstar events | Supported |
 | <img src="./docs/assets/source-icons/web.svg" width="16" height="16" alt=""> Web pages & bookmarks | Save pages, selections, and Chrome bookmarks | Supported |
 | <img src="./docs/assets/source-icons/web.svg" width="16" height="16" alt=""> Chrome bookmarks (web submode) | Optional mirroring into Web pages & bookmarks | Supported |
-| <img src="./docs/assets/source-icons/tiktok.svg" width="16" height="16" alt=""> TikTok favorites | — | Paused for repair; existing rows retained but hidden |
+| <img src="./docs/assets/source-icons/tiktok.svg" width="16" height="16" alt=""> TikTok favorites | Signed-in browser import | Browser capture restored; authenticated acceptance pending |
 
 > GitHub capture is extension-only. It reads the signed-in GitHub stars pages in your browser, includes repositories visible to that account — including visible private repositories — and needs no GitHub OAuth or personal access token.
 
-Live saves are delivered immediately. Anansi also performs one daily incremental catch-up for sources that support history import, covering changes made while Chrome or the extension was inactive. GitHub and Reddit import via background session requests without opening tabs. Anansi closes only tabs it created. If a provider session is missing, the popup asks you to sign in — use the explicit **Sign in** button, then retry. Network and rate-limit failures keep the resume cursor. TikTok capture is paused in the shipped extension and web UI while its authenticated path is repaired; old rows are retained for a deliberate future re-enable.
+Live saves are delivered immediately for sources with extension capture. Anansi also performs one daily incremental catch-up for sources that support history import, covering changes made while Chrome or the extension was inactive. GitHub and Reddit import via background session requests without opening tabs. Anansi closes only tabs it created. If a provider session is missing, the popup asks you to sign in — use the explicit **Sign in** button, then retry. Network and rate-limit failures keep the resume cursor. TikTok's browser importer observes its signed-in Favorites responses; its authenticated behavior still needs an end-to-end browser check.
 
 ## 🚀 Quickstart
 
@@ -82,6 +82,10 @@ Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** �
 > The configured build contains your ingest credential. This is appropriate for your private, load-unpacked extension, but anyone with the artifact can extract it. Never upload this configured build to a public extension store or share it.
 
 GitHub first import: sign in to GitHub in the same browser profile → popup → **Import** beside GitHub. It walks your stars pages in the worker (no tabs open), persists the pagination cursor, and resumes after interruptions. Unstarring hides from current-star view without deleting history; re-starring restores it.
+
+TikTok favorites: sign in to TikTok in the same browser and press **Import** in the extension's TikTok row. Anansi opens your profile, selects Favorites, and observes TikTok's own list responses. The live path is enabled in this build but still needs an authenticated browser acceptance check. It keeps Favorites separate from Likes and does not store video files.
+
+Library data backup: use **Saved views → Download library data (no media files)**. On a new, empty Anansi installation, choose **Restore into an empty library** in the same menu and select that JSON file. Restore validates the file before starting and uploads records in resumable batches; choose the same file after an interruption. It restores item and collection data, tags and manual tag decisions, highlights, media metadata, and Chrome bookmark links. It does not contain R2 or local media bytes; those must be fetched again where their origin is still available. A permanently rejected chunk after partial progress requires a fresh empty installation for recovery. Browser restore accepts files up to 100 MB.
 
 ### Developer-only local AI search and tagging
 
@@ -360,8 +364,8 @@ Streamable HTTP MCP server at `http://127.0.0.1:3001/mcp` locally (or `https://<
 | `list_tags` | Visible tag vocabulary and usage counts |
 | `library_stats` | Visible library and media statistics |
 
-The optional `source` filter accepts visible `x`, `reddit`, `github`, and `web`
-items. TikTok rows remain hidden while that source is paused. MCP search is
+The optional `source` filter accepts visible `x`, `reddit`, `github`, `web`, and `tiktok`
+items. MCP search is
 keyword/BM25 today; it does not claim the web UI's optional semantic ranking.
 
 Claude Code:
@@ -540,7 +544,7 @@ Covers queue recovery, retries, parser fixtures, authenticated ingest, GitHub im
 - [ ] Measured free-tier usage + media-host allowlist published here
 - [ ] Synthetic demo library
 - [ ] Pinterest capture — add a browser-session importer and live-save path
-- [ ] TikTok favorites — restore capture after the authenticated path is repaired
+- [ ] TikTok live favorites — complete authenticated browser acceptance for import and native bookmark events
 
 Have an idea? [Open a feature request](https://github.com/jojomensah89/anansi/issues/new?template=feature_request.yml).
 

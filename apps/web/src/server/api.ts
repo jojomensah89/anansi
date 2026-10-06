@@ -16,6 +16,7 @@ import {
 	searchItemsPage,
 	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
 	InvalidListCursorError, InvalidSearchCursorError, InvalidCreatorCursorError,
+	getLibraryRestore,
   getAiSettings, setAiSettings, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
   clearSemanticIndex, consumeSemanticCredits, estimateSemanticBackfill, semanticIndexStats,
 } from "@anansi/db";
@@ -33,6 +34,7 @@ import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
 import { hybridSearch, type SemanticRuntime } from "./semantic-search.ts";
 import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
 import { ingestCapture } from "./ingest.ts";
+import { handleRestoreRequest } from "./restore.ts";
 import {
 	isToggleableSource,
 	sourceCatalogueResponse,
@@ -499,6 +501,16 @@ const EXTENSION_SOURCE_DETAILS: Record<
 		pageLimit: 40,
 		watchUrls: ["/star", "/unstar"],
 	},
+	tiktok: {
+		mode: "observe",
+		host: "tiktok.com",
+		watchUrls: ["/api/user/collect/item_list"],
+		mutationUrl: "/api/item/collect/",
+		idField: "itemId",
+		actionField: "action",
+		savedValue: "1",
+		unsavedValue: "2",
+	},
 };
 
 const EXTENSION_SOURCES: readonly ExtensionSourceConfig[] =
@@ -549,6 +561,7 @@ const extensionConfigRoute: Route = {
 					x: true,
 					reddit: true,
 					github: true,
+					tiktok: true,
 					// Web capture has no legacy path to conflict with — the durable
 					// queue is the only way a saved page ever reaches here — so there is
 					// nothing to stage.
@@ -638,6 +651,8 @@ const collectionRoutes: Route[] = [
  * because the second is a pattern; everything else is disjoint.
  */
 const ROUTES: Route[] = [
+	...(["/api/restore/start", "/api/restore/chunk", "/api/restore/finish", "/api/restore/abort"] as const).map((path): Route => ({ method: "POST", path, handle: ({ env, request }) => handleRestoreRequest(env, request) })),
+	{ method: "GET", path: "/api/restore", handle: ({ env, request }) => handleRestoreRequest(env, request) },
 	itemUpdateRoute, itemTagsRoute("POST"), itemTagsRoute("DELETE"), ...collectionRoutes,
 	mediaRoute,
 	itemsRoute,
@@ -676,6 +691,10 @@ export async function handleApi(
   const isExtension = path === "/api/ingest" || path.startsWith("/api/extension/");
   const denied = isExtension ? authorizeExtension(env, request) : authorizeLibrary(env, request);
   if (denied) return denied;
+	if (request.method !== "GET" && !path.startsWith("/api/restore/")) {
+		const restore = await getLibraryRestore(env.db);
+		if (restore?.status === "active") return json({ error: "Library restore is in progress" }, 409);
+	}
 
 	for (const route of ROUTES) {
 		if (route.method !== request.method) continue;

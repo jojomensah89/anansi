@@ -129,6 +129,19 @@ export const itemSourceLinks = sqliteTable(
   ],
 );
 
+/** Latest explicit save state survives events that arrive before item content. */
+export const itemSourceStates = sqliteTable(
+  "item_source_states",
+  {
+    source: text("source").notNull(),
+    externalId: text("external_id").notNull(),
+    platformSaved: integer("platform_saved").notNull(),
+    /** Unix seconds from the source event; equal-second arrivals retain FIFO order. */
+    observedAt: integer("observed_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.source, t.externalId] })],
+);
+
 export const media = sqliteTable(
   "media",
   {
@@ -310,6 +323,27 @@ export const collections = sqliteTable("collections", {
   filters: text("filters").notNull(),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
+});
+
+/** An interrupted logical restore can resume safely across Worker invocations. */
+export const restoreRuns = sqliteTable("restore_runs", {
+  id: integer("id").primaryKey(),
+  backupId: text("backup_id").notNull(),
+  counts: text("counts").notNull(),
+  progress: text("progress").notNull(),
+  status: text("status").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+/** One receipt per chunk prevents concurrent retries from inserting different rows. */
+export const restoreChunks = sqliteTable("restore_chunks", {
+  id: text("id").primaryKey(),
+  backupId: text("backup_id").notNull(),
+  tableName: text("table_name").notNull(),
+  offset: integer("offset").notNull(),
+  rowCount: integer("row_count").notNull(),
+  digest: text("digest").notNull(),
 });
 
 /** Last operational snapshot from each browser extension installation. */

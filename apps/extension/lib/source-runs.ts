@@ -796,6 +796,9 @@ export function isExpectedImportTab(
 				validatedGitHubStarsPageUrl(value, value) !== null
 			);
 		}
+		if (source === "tiktok") {
+			return host === "tiktok.com" || host === "www.tiktok.com";
+		}
 		return false;
 	} catch {
 		return false;

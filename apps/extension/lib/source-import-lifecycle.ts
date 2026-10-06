@@ -502,6 +502,9 @@ export function createSourceImportLifecycle(
 				}
 				if (!(await runs.finishForRun(input.source, input.runId)))
 					return stale(input.source, input.runId);
+				// A completed backfill has no next page. The next import starts at
+				// the top so newly saved items are not skipped by an old cursor.
+				if (run.runMode === "full") await runs.setCursor(input.source, null);
 				const effects: SourceImportEffect[] = [
 					{
 						kind: "clear-recovery",

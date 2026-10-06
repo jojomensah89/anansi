@@ -12,6 +12,7 @@ describe("popup connection truth", () => {
 				"x",
 				"reddit",
 				"github",
+				"tiktok",
 			]);
 		}
 	});

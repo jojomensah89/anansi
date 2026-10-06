@@ -122,6 +122,12 @@ describe("sourcePresentation", () => {
 		expect(presentation).toEqual({ state: "ready", text: "Ready", tone: "ok" });
 	});
 
+	test("TikTok ready state points to the extension import", () => {
+		expect(sourcePresentation(row({ source: "tiktok", name: "TikTok favorites" }), extension())).toEqual({
+			state: "ready", text: "Ready to import through the extension", tone: "ok",
+		});
+	});
+
 	test("labels extension connection without inventing a version", () => {
 		expect(extensionLabel(extension())).toBe("Connected · v0.1.0");
 		expect(extensionLabel(extension("never_connected"))).toBe(

@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { aiEnrichmentJobs, applyAiTags, getAiSettings, itemTags, items, markSemanticChunksComplete, reconcileAiJobs, searchItemsPage, setAiSettings, stageSemanticChunks, upsertItems, type AnansiDb } from "@anansi/db";
+import { aiEnrichmentJobs, applyAiTags, getAiSettings, itemTags, items, markSemanticChunksComplete, reconcileAiJobs, searchItemsPage, setAiSettings, stageSemanticChunks, startLibraryRestore, upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
 import { LocalVectorIndex } from "./local-vector-index.ts";
@@ -52,6 +52,17 @@ const readJson = async (res: Response | Promise<Response>): Promise<any> =>
 	(await (await res).json()) as any;
 
 describe("handleApi", () => {
+	test("active library restore blocks concurrent extension writes", async () => {
+		const fresh = openLocalDb(":memory:");
+		migrateLocalDb(fresh);
+		const empty = fresh as unknown as AnansiDb;
+		await startLibraryRestore(empty, "f".repeat(64), { items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 });
+		const isolated = { ...env, db: empty };
+		const ingest = await dispatchApi(isolated, new Request("https://anansi.test/api/ingest", {
+			method: "POST", headers: { authorization: "Bearer test-token" }, body: "{}",
+		}));
+		expect(ingest.status).toBe(409);
+	});
 	test("GET /api/stats reports the library size", async () => {
 		const body = await readJson(get("/api/stats"));
 		expect(body.items).toBeGreaterThan(0);
@@ -200,6 +211,18 @@ describe("handleApi", () => {
 			expect(body.nextCursor).toBeNull();
 			expect(body.results.map((item: { id: string }) => item.id)).toContain(semanticRow.id);
 			expect(body.results.map((item: { id: string }) => item.id)).not.toContain("hidden-or-deleted");
+			const first = await readJson(handleApi(semanticEnv, new Request("https://anansi.test/api/search?q=seed&limit=1", {
+				headers: { authorization: "Bearer library-test-token" },
+			})));
+			expect(first.semantic.applied).toBe(true);
+			expect(first.nextCursor).toBeString();
+			const lexicalFirst = (await searchItemsPage(db, { query: "seed", limit: 1 })).items[0];
+			expect(first.results.map((item: { id: string }) => item.id)).toContain(lexicalFirst?.id);
+			const continued = await readJson(handleApi(semanticEnv, new Request(`https://anansi.test/api/search?q=seed&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`, {
+				headers: { authorization: "Bearer library-test-token" },
+			})));
+			expect(continued.semantic.degradedReason).toBe("pagination-boundary");
+			expect(continued.results.some((item: { id: string }) => item.id === lexicalFirst?.id)).toBe(false);
 			const filtered = await readJson(handleApi(semanticEnv, new Request("https://anansi.test/api/search?q=unmatched+phrase&author=someone-else", {
 				headers: { authorization: "Bearer library-test-token" },
 			})));
@@ -403,6 +426,10 @@ describe("handleApi", () => {
 		expect(body.enabled).toBe(true);
 		expect(body.ingest).toEndWith("/api/ingest");
 		expect(body.sources[0].operation).toBe("Bookmarks");
+		expect(body.sources.find((source: { source: string }) => source.source === "tiktok")).toMatchObject({
+			mode: "observe", watchUrls: ["/api/user/collect/item_list"],
+			mutationUrl: "/api/item/collect/", idField: "itemId", actionField: "action", savedValue: "1", unsavedValue: "2",
+		});
 		expect(body.ingestProtocolVersion).toBe(2);
 		// Web is on because it has no legacy path to conflict with. X is on for
 		// acceptance testing; GitHub and Reddit remain staged until each has been
@@ -412,6 +439,7 @@ describe("handleApi", () => {
 			reddit: true,
 			web: true,
 			github: true,
+				tiktok: true,
 		});
 		expect(body.features.chromeBookmarks).toBe(true);
 		const github = body.sources.find(
@@ -465,7 +493,7 @@ describe("handleApi", () => {
 			extensionVersion: "0.1.0",
 			activeClients: 1,
 		});
-		expect(sources.sources).toHaveLength(4);
+		expect(sources.sources).toHaveLength(5);
 		expect(
 			sources.sources.map((source: { source: string; mode: string }) => [
 				source.source,
@@ -476,6 +504,7 @@ describe("handleApi", () => {
 			["reddit", "session"],
 			["web", "manual"],
 			["github", "session"],
+			["tiktok", "page"],
 		]);
 		expect(
 			sources.sources.find(

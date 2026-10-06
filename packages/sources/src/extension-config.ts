@@ -25,6 +25,11 @@ export interface ExtensionSourceConfig {
 	pageLimit?: number;
 	watchOperations?: string[];
 	watchUrls?: string[];
+	mutationUrl?: string;
+	idField?: string;
+	actionField?: string;
+	savedValue?: string;
+	unsavedValue?: string;
 }
 
 export interface ExtensionConfigFeatures {
@@ -84,6 +89,11 @@ const SOURCE_KEYS = new Set([
 	"pageLimit",
 	"watchOperations",
 	"watchUrls",
+	"mutationUrl",
+	"idField",
+	"actionField",
+	"savedValue",
+	"unsavedValue",
 ]);
 const OPTIONAL_STRINGS = [
 	"operation",
@@ -92,6 +102,11 @@ const OPTIONAL_STRINGS = [
 	"cursorParam",
 	"cursorPath",
 	"entryPrefix",
+	"mutationUrl",
+	"idField",
+	"actionField",
+	"savedValue",
+	"unsavedValue",
 ] as const;
 const CAPTURE_SOURCES = new Set<ShippedCaptureSource>(
 	SHIPPED_CAPTURE_SOURCES,
@@ -212,8 +227,7 @@ export function parseExtensionConfig(value: unknown): ExtensionConfigParseResult
 		seen.add(source.source);
 	}
 	// A source feature can only be enabled for a capture source known to this
-	// contract. TikTok is deliberately absent even though retained parsing knows
-	// how to read its old payloads.
+	// contract, including the restored TikTok browser adapter.
 	return {
 		ok: true,
 		config: value as unknown as ExtensionRemoteConfig,

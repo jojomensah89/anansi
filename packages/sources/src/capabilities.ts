@@ -44,7 +44,7 @@ const MANUAL_CAPTURE_METHODS = [
 
 /**
  * One row per source. The order is intentional: it preserves the current
- * visible catalogue order, with the retained-but-hidden TikTok identity last.
+ * visible catalogue order, with TikTok last.
  */
 export const SOURCE_CAPABILITIES = [
 	{
@@ -98,15 +98,13 @@ export const SOURCE_CAPABILITIES = [
 	{
 		source: "tiktok",
 		retainedParsing: true,
-		productVisible: false,
-		extensionPlatform: false,
-		importMode: null,
-		liveCapture: false,
+		productVisible: true,
+		extensionPlatform: true,
+		importMode: "page",
+		liveCapture: true,
 		manualCapture: false,
-		toggleable: false,
-		// TikTok remains parseable/storable, but is not shipped or currently
-		// permitted to capture. Its old platform payloads stay accepted below.
-		captureMethods: [],
+		toggleable: true,
+		captureMethods: PLATFORM_CAPTURE_METHODS,
 		retainedCaptureMethods: PLATFORM_CAPTURE_METHODS,
 	},
 ] as const satisfies readonly SourceCapabilityRecord[];
@@ -224,7 +222,7 @@ export function isToggleableSource(value: unknown): value is ToggleableSource {
 	return sourceCapability(value)?.toggleable === true;
 }
 
-/** Current capture methods, intentionally empty for paused/retained TikTok. */
+/** Current capture methods permitted by the shipped product. */
 export function captureMethodsForSource(
 	value: unknown,
 ): readonly CaptureMethod[] {
@@ -378,7 +376,7 @@ export function validateSourceCapabilityFacts(
 			(manualCapture !== hasManualMethod) ||
 			(manualCapture && (extensionPlatform || importMode !== null)) ||
 			(manualCapture && liveCapture) ||
-			(hasPlatformImport !== (importMode !== null)) ||
+			(hasPlatformImport !== (importMode === "page" || importMode === "session")) ||
 			(hasPlatformMethod && hasManualMethod) ||
 			(extensionPlatform && !hasPlatformMethod) ||
 			(toggleable && (!productVisible || !extensionPlatform)) ||

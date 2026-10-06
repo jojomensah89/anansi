@@ -949,12 +949,18 @@ export async function libraryStats(db: AnansiDb) {
     from media m join items i on i.id = m.item_id
     where ${visibleSourceClause(sql`i.source`)}
   `);
+  // Counts can stay identical across a save and unsave. The latest durable
+  // capture receipt gives visible libraries a cheap change marker even then.
+  const [captureRevision] = await db.all<{ revision: number }>(sql`
+    select coalesce(max(rowid), 0) as revision from capture_events
+  `);
   return {
     items: totals?.items ?? 0,
     authors: totals?.authors ?? 0,
     archived: totals?.archived ?? 0,
     today: totals?.today ?? 0,
     bySource: Object.fromEntries(bySource.map((r) => [r.source, r.n])) as Record<string, number>,
+    captureRevision: captureRevision?.revision ?? 0,
     media: media[0] ?? { total: 0, stored: 0 },
   };
 }

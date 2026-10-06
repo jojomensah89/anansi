@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { collections, highlights, itemTagOverrides, items, itemTags, media, tags } from "./schema.ts";
+import { collections, highlights, itemSourceLinks, itemTagOverrides, items, itemTags, media, tags } from "./schema.ts";
 import type { AnansiDb } from "./types.ts";
-import { atomicWrite } from "./atomic.ts";
+import { atomicStatementLimit, atomicWrite } from "./atomic.ts";
 import type { ListOptions } from "./search.ts";
 import { isHiddenSource } from "./visibility.ts";
 import { canonicalTopicId, topicDefinition } from "./topics.ts";
@@ -63,6 +63,9 @@ export interface LibraryExport {
   tags: (typeof tags.$inferSelect)[];
   itemTags: (typeof itemTags.$inferSelect)[];
   collections: (typeof collections.$inferSelect)[];
+  /** Optional so existing version-1 exports remain restoreable. */
+  itemTagOverrides?: (typeof itemTagOverrides.$inferSelect)[];
+  itemSourceLinks?: (typeof itemSourceLinks.$inferSelect)[];
 }
 
 export async function exportLibrary(db: AnansiDb): Promise<LibraryExport> {
@@ -76,12 +79,16 @@ export async function exportLibrary(db: AnansiDb): Promise<LibraryExport> {
     tags: await db.select().from(tags),
     itemTags: (await db.select().from(itemTags)).filter((row) => ids.has(row.itemId)),
     collections: await db.select().from(collections),
+    itemTagOverrides: (await db.select().from(itemTagOverrides)).filter((row) => ids.has(row.itemId)),
+    itemSourceLinks: (await db.select().from(itemSourceLinks)).filter((row) => ids.has(row.itemId)),
   };
 }
 
 /** Restore into an empty library only; never overwrite a user's existing work. */
 export async function restoreLibrary(db: AnansiDb, backup: LibraryExport): Promise<void> {
   if (backup?.format !== "anansi-library" || backup.version !== 1) throw new Error("Unsupported Anansi backup");
+  const statementCount = backup.items.length + backup.tags.length + backup.itemTags.length + backup.highlights.length + backup.media.length + backup.collections.length + (backup.itemTagOverrides?.length ?? 0) + (backup.itemSourceLinks?.length ?? 0);
+  if (statementCount > atomicStatementLimit(db)) throw new Error("Large backups require the resumable restore API on D1");
   const [count] = await db.select({ n: sql<number>`count(*)` }).from(items);
   if (Number(count?.n ?? 0) !== 0) throw new Error("Restore requires an empty library");
   await atomicWrite(db, (tx) => [
@@ -89,6 +96,8 @@ export async function restoreLibrary(db: AnansiDb, backup: LibraryExport): Promi
     ...backup.items.map((row) => tx.insert(items).values(row)),
     ...backup.tags.map((row) => tx.insert(tags).values(row).onConflictDoNothing()),
     ...backup.itemTags.map((row) => tx.insert(itemTags).values(row)),
+    ...(backup.itemTagOverrides ?? []).map((row) => tx.insert(itemTagOverrides).values(row)),
+    ...(backup.itemSourceLinks ?? []).map((row) => tx.insert(itemSourceLinks).values(row)),
     ...backup.highlights.map((row) => tx.insert(highlights).values(row)),
     // Exported keys refer to a separate binary backup. Clearing them queues a
     // fresh download, rather than promising bytes this installation does not have.

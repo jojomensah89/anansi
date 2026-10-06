@@ -49,9 +49,10 @@ function reasonFor(error: unknown): SemanticDegradedReason {
 }
 
 /**
- * First-page hybrid retrieval. Lexical keyset cursors remain authoritative;
- * once semantic ranking is enabled we stop at the first page because a fused
- * relevance order does not have a safe BM25 cursor boundary yet.
+ * First-page hybrid retrieval. Lexical keyset cursors remain authoritative.
+ * Semantic matches lead the first page; subsequent pages continue in keyword
+ * order. Preserve every lexical row from the first page so the transition
+ * cannot silently skip one that fusion pushed below the display limit.
  */
 export async function hybridSearch(
   db: AnansiDb,
@@ -109,7 +110,11 @@ export async function hybridSearch(
       if (item) items.push({ ...item, score });
       if (items.length >= limit) break;
     }
-    return { items, nextCursor: null, semantic: withSnapshot({ enabled: true, applied: true }) };
+    const included = new Set(items.map((item) => item.id));
+    for (const item of lexical.items) {
+      if (!included.has(item.id)) items.push(item);
+    }
+    return { items, nextCursor: lexical.nextCursor, semantic: withSnapshot({ enabled: true, applied: true }) };
   } catch (error) {
     const degradedReason = reasonFor(error);
     const degraded: SemanticSearchStatus = { enabled: true, applied: false, degradedReason };

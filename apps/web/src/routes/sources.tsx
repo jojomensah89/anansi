@@ -166,7 +166,7 @@ function Sources() {
 						className="mono"
 						style={{ fontSize: 11, color: "var(--faint)" }}
 					>
-						capture status reported by your extension
+						capture and import status
 					</span>
 					<Tabs value={tab} onChange={setTab} />
 				</header>
@@ -417,6 +417,11 @@ function SourceCard({
 					{row.note}
 				</p>
 				<Status text={status.text} tone={status.tone} />
+				{row.source === "tiktok" && (
+					<p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--accent-text)" }}>
+						Sign in to TikTok, then open the Anansi extension and press Import.
+					</p>
+				)}
 
 				<div style={{ marginTop: 14 }}>
 					<div

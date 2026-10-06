@@ -63,6 +63,14 @@ const SOURCE_PRESENTATION: Record<VisibleLibrarySource, SourcePresentation> = {
 		toggleable: true,
 		requiresExtension: true,
 	},
+	tiktok: {
+		name: "TikTok favorites",
+		host: "tiktok.com",
+		note: "Import favorites from your signed-in TikTok browser tab through the extension.",
+		support: "supported",
+		toggleable: true,
+		requiresExtension: true,
+	},
 };
 
 function productModeFor(source: VisibleLibrarySource): SourceMode {

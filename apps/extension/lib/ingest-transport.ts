@@ -16,7 +16,7 @@ export interface IngestTarget {
 	token: string;
 }
 
-type ResolveTarget = () => Promise<IngestTarget | null>;
+type ResolveTarget = (record: OutboxRecord) => Promise<IngestTarget | null>;
 type Fetcher = (
 	input: RequestInfo | URL,
 	init?: RequestInit,
@@ -99,12 +99,19 @@ export function createIngestTransport(
 	resolveTarget: ResolveTarget,
 	fetcher: Fetcher = fetch,
 	now: () => number = Date.now,
+	timeoutMs = 15_000,
 ): CaptureTransport {
 	return {
 		async send(record) {
+			const controller = new AbortController();
+			let timer: ReturnType<typeof setTimeout>;
+			const timeout = new Promise<TransportResult>((resolve) => {
+				timer = setTimeout(() => { controller.abort(); resolve({ kind: "network" }); }, timeoutMs);
+			});
+			const attempt = async (): Promise<TransportResult> => {
 			let target: IngestTarget | null;
 			try {
-				target = await resolveTarget();
+				target = await resolveTarget(record);
 			} catch {
 				return { kind: "network" };
 			}
@@ -114,6 +121,7 @@ export function createIngestTransport(
 			try {
 				response = await fetcher(target.ingest, {
 					method: "POST",
+					signal: controller.signal,
 					headers: {
 						accept: "application/json",
 						authorization: `Bearer ${target.token}`,
@@ -154,6 +162,9 @@ export function createIngestTransport(
 			} catch {
 				return { kind: "invalid_receipt" };
 			}
+			};
+			try { return await Promise.race([attempt(), timeout]); }
+			finally { clearTimeout(timer!); }
 		},
 	};
 }

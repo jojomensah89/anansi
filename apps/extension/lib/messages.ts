@@ -1,8 +1,11 @@
 import {
+	parseBookmarkCapture,
+	type NormalizedItem,
 	EXTENSION_PLATFORM_SOURCES,
 	isExtensionPlatformSource,
 	type ExtensionPlatformSource,
 } from "@anansi/sources";
+import { completeNativeItem } from "./native-snapshot.ts";
 
 /**
  * Pure validation for the extension's three message directions.
@@ -74,7 +77,7 @@ interface PageTrafficBase extends MessageBase {
 
 export type PageEventMessage = PageTrafficBase &
 	(
-		| { anansi: "page-event"; action: "ready"; queryId: string | null }
+		| { anansi: "page-event"; action: "ready"; queryId: string | null; relay?: true }
 		| { anansi: "page-event"; action: "saved" }
 		| {
 				anansi: "page-event";
@@ -89,6 +92,7 @@ export type PageEventMessage = PageTrafficBase &
 		| {
 				anansi: "page-event";
 				action: "observed";
+				runId: string;
 				operation: string;
 				raw: unknown;
 				items: number;
@@ -102,6 +106,9 @@ export type PageEventMessage = PageTrafficBase &
 				canonicalUrl?: string;
 				/** The object itself, when the page could look it up. */
 				raw?: unknown;
+			normalizedItem?: NormalizedItem;
+			mutationId?: string;
+			observedAt?: number;
 		  }
 		| {
 				anansi: "page-event";
@@ -111,8 +118,8 @@ export type PageEventMessage = PageTrafficBase &
 				items: number;
 				state?: "complete" | "limited" | "cancelled";
 			}
-		| { anansi: "page-event"; action: "scanned" }
-		| { anansi: "page-event"; action: "identified"; handle: string }
+		| { anansi: "page-event"; action: "scanned"; runId: string }
+		| { anansi: "page-event"; action: "identified"; handle: string; runId: string }
 		| {
 				anansi: "page-event";
 				action: "error";
@@ -200,18 +207,21 @@ const SOURCE_HOSTS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["x.com", "twitter.com"]),
 	reddit: new Set(["www.reddit.com", "old.reddit.com", "reddit.com"]),
 	github: new Set(["github.com"]),
+	tiktok: new Set(["www.tiktok.com", "tiktok.com"]),
 };
 
 const PAGE_EVENT_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
-	reddit: new Set(["saved", "bookmark", "page", "done", "error"]),
-	github: new Set(["page", "done", "bookmark", "error"]),
+	reddit: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
+	github: new Set(["ready", "saved", "page", "done", "bookmark", "error"]),
+	tiktok: new Set(["ready", "saved", "observed", "identified", "scanned", "bookmark", "error"]),
 };
 
 const PAGE_COMMAND_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
 	x: new Set(["configure", "backfill"]),
-	reddit: new Set(["configure", "backfill"]),
-	github: new Set(["configure", "backfill"]),
+	reddit: new Set(["ready", "configure", "backfill"]),
+	github: new Set(["ready", "configure", "backfill"]),
+	tiktok: new Set(["ready", "configure", "identify", "scan"]),
 };
 
 const ERROR_CODES = new Set([
@@ -430,13 +440,15 @@ function validatePageEventShape(
 	switch (value.action) {
 		case "ready":
 			return (
-				source === "x" &&
-				hasOnlyKeys(value, [...base, "queryId"]) &&
-				(value.queryId === null || typeof value.queryId === "string")
+				(source === "x" || value.relay === true && value.queryId === null) &&
+				hasOnlyKeys(value, [...base, "queryId", "relay"]) &&
+				(value.queryId === null || typeof value.queryId === "string") &&
+				(value.relay === undefined || value.relay === true)
 			);
 		case "saved":
-		case "scanned":
 			return hasOnlyKeys(value, base);
+		case "scanned":
+			return source === "tiktok" && hasOnlyKeys(value, [...base, "runId"]) && isRunId(value.runId);
 		case "bookmark":
 			return (
 				hasOnlyKeys(value, [
@@ -444,11 +456,21 @@ function validatePageEventShape(
 					"bookmarkAction",
 					"externalId",
 					"canonicalUrl",
-					"raw",
+					"raw", "normalizedItem", "mutationId", "observedAt",
 				]) &&
 				(value.bookmarkAction === "save" ||
 					value.bookmarkAction === "unsave") &&
 				isExternalId(value.externalId, source) &&
+				(value.mutationId === undefined || isRunId(value.mutationId)) &&
+				(value.observedAt === undefined || isPositiveInteger(value.observedAt) && Number(value.observedAt) <= 10_000_000_000) &&
+				(value.normalizedItem === undefined || isRecord(value.normalizedItem) &&
+					(value.canonicalUrl === undefined || value.canonicalUrl === value.normalizedItem.url) &&
+					isSourceUrl(value.normalizedItem.url, source) && parseBookmarkCapture({
+						schemaVersion: 1, payloadType: "item_event", eventId: "message-validation", source,
+						action: value.bookmarkAction, externalId: value.externalId,
+						canonicalUrl: value.canonicalUrl ?? value.normalizedItem.url,
+						observedAt: value.observedAt ?? 1, captureMethod: "platform_event", normalizedItem: value.normalizedItem,
+					}).ok && completeNativeItem(value.normalizedItem as unknown as NormalizedItem)) &&
 				(value.canonicalUrl === undefined ||
 					isSourceUrl(value.canonicalUrl, source))
 			);
@@ -466,7 +488,7 @@ function validatePageEventShape(
 			);
 		case "observed":
 			return (
-				hasOnlyKeys(value, [...base, "operation", "raw", "items"]) &&
+				source === "tiktok" && hasOnlyKeys(value, [...base, "runId", "operation", "raw", "items"]) && isRunId(value.runId) &&
 				typeof value.operation === "string" &&
 				value.operation.length > 0 &&
 				value.operation.length <= 1_000 &&
@@ -474,7 +496,7 @@ function validatePageEventShape(
 				isNonNegativeInteger(value.items)
 			);
 		case "identified":
-			return hasOnlyKeys(value, [...base, "handle"]) && isHandle(value.handle);
+			return source === "tiktok" && hasOnlyKeys(value, [...base, "runId", "handle"]) && isRunId(value.runId) && isHandle(value.handle);
 		case "done":
 			return (
 				hasOnlyKeys(value, [...base, "runId", "pages", "items", "state"]) &&
@@ -489,7 +511,7 @@ function validatePageEventShape(
 		case "error":
 			return (
 				hasOnlyKeys(value, [...base, "runId", "errorCode"]) &&
-				(source !== "x" || isRunId(value.runId)) &&
+				(source !== "x" && source !== "tiktok" || isRunId(value.runId)) &&
 				typeof value.errorCode === "string" &&
 				ERROR_CODES.has(value.errorCode)
 			);

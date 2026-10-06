@@ -67,3 +67,4 @@ if (first) {
 }
 
 console.log(process.exitCode ? "http smoke FAILED" : "http smoke ok");
+export {};

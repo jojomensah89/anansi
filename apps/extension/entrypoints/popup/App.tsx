@@ -105,6 +105,7 @@ const NAMES: Record<string, string> = {
   x: "X bookmarks",
   reddit: "Reddit saves",
   github: "GitHub stars",
+  tiktok: "TikTok favorites",
 };
 
 const command = (message: Record<string, unknown>) =>

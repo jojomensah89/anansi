@@ -25,7 +25,7 @@ const extensionRuntimeContext: MessageContext = {
 };
 
 const pageEvent = (
-	source: "x" | "reddit" | "github",
+	source: "x" | "reddit" | "github" | "tiktok",
 	action: string,
 ) => ({
 	anansi: "page-event",
@@ -36,12 +36,37 @@ const pageEvent = (
 });
 
 describe("parseExtensionMessage", () => {
+	test("accepts an X relay handshake from its own tab", () => {
+		const result = parseExtensionMessage(
+			{ ...pageEvent("x", "ready"), queryId: null, relay: true },
+			tabRuntimeContext("https://x.com/home"),
+		);
+		expect(result.ok).toBe(true);
+	});
+	test.each([
+		["github", "https://github.com/stars"],
+		["reddit", "https://www.reddit.com/user/example/saved"],
+		["tiktok", "https://www.tiktok.com/@example"],
+	] as const)("accepts a %s relay handshake from its own tab", (source, url) => {
+		const result = parseExtensionMessage(
+			{ ...pageEvent(source, "ready"), queryId: null, relay: true },
+			tabRuntimeContext(url),
+		);
+
+		expect(result).toMatchObject({
+			ok: true,
+			path: "runtime-to-background",
+			source,
+		});
+	});
 	test.each([
 		["https://x.com/i/bookmarks", pageEvent("x", "saved")],
 		["https://twitter.com/i/bookmarks", pageEvent("x", "saved")],
 		["https://www.reddit.com/user/example/saved", pageEvent("reddit", "saved")],
 		["https://old.reddit.com/user/example/saved", pageEvent("reddit", "saved")],
 		["https://reddit.com/user/example/saved", pageEvent("reddit", "saved")],
+		["https://github.com/example/repo", pageEvent("github", "saved")],
+		["https://www.tiktok.com/", pageEvent("tiktok", "saved")],
 		[
 			"https://github.com/stars",
 			{
@@ -103,6 +128,15 @@ describe("parseExtensionMessage", () => {
 				pageContext("https://x.com/i/bookmarks"),
 			),
 		).toMatchObject({ ok: false, error: { code: "invalid_message" } });
+	});
+
+	test("TikTok Favorites observations require a run and a TikTok tab", () => {
+		const message = { ...pageEvent("tiktok", "observed"), runId: "tiktok-run-1", operation: "/api/user/collect/item_list", items: 1, raw: { itemList: [{ id: "7400000000000000001" }] } };
+		expect(parseExtensionMessage(message, pageContext("https://www.tiktok.com/@owner"))).toMatchObject({ ok: true, source: "tiktok" });
+		expect(parseExtensionMessage({ ...message, runId: undefined }, pageContext("https://www.tiktok.com/@owner"))).toMatchObject({ ok: false });
+		expect(parseExtensionMessage(message, pageContext("https://example.com/@owner"))).toMatchObject({ ok: false });
+		expect(parseExtensionMessage({ ...pageEvent("tiktok", "scanned"), runId: "tiktok-run-1" }, tabRuntimeContext("https://www.tiktok.com/@owner"))).toMatchObject({ ok: true });
+		expect(parseExtensionMessage({ ...pageEvent("tiktok", "bookmark"), bookmarkAction: "save", externalId: "7400000000000000001", canonicalUrl: "https://www.tiktok.com/video/7400000000000000001" }, pageContext("https://www.tiktok.com/@owner"))).toMatchObject({ ok: true, source: "tiktok" });
 	});
 
 	test.each([
@@ -345,6 +379,19 @@ describe("parseExtensionMessage", () => {
 			externalId: "1900000000000000001",
 			...patch,
 		});
+		const normalizedItem = {
+			source: "x",
+			externalId: "1900000000000000001",
+			url: "https://x.com/anansi/status/1900000000000000001",
+			kind: "post",
+			body: "A useful post",
+			savedAt: 1_788_390_000,
+			savedAtIsExact: true,
+			metrics: {},
+			media: [],
+			links: [],
+			raw: { restId: "1900000000000000001" },
+		};
 
 		test("accepts an explicit save and an explicit unsave", () => {
 			for (const action of ["save", "unsave"]) {
@@ -354,6 +401,110 @@ describe("parseExtensionMessage", () => {
 				);
 				expect(result.ok).toBe(true);
 			}
+		});
+
+		test("accepts normalized native content whose identity matches the event", () => {
+			const message = bookmark({
+				canonicalUrl: normalizedItem.url,
+				normalizedItem,
+				mutationId: "native-save-1",
+				observedAt: 1_788_390_000,
+			});
+			const result = parseExtensionMessage(
+				message,
+				pageContext("https://x.com/i/bookmarks"),
+			);
+
+			expect(result).toMatchObject({
+				ok: true,
+				path: "page-to-relay",
+				source: "x",
+				message: {
+					nonce: NONCE,
+					source: "x",
+					canonicalUrl: normalizedItem.url,
+					normalizedItem,
+				},
+			});
+		});
+
+		test("rejects normalized native content with a mismatched source, id, or URL", () => {
+			const invalidMessages = [
+				bookmark({
+					canonicalUrl: normalizedItem.url,
+					normalizedItem: { ...normalizedItem, source: "reddit" },
+				}),
+				bookmark({
+					canonicalUrl: normalizedItem.url,
+					normalizedItem: { ...normalizedItem, externalId: "another-post" },
+				}),
+				bookmark({
+					canonicalUrl: "https://x.com/anansi/status/1900000000000000002",
+					normalizedItem,
+				}),
+				bookmark({
+					canonicalUrl: "https://x.com/anansi/status/1900000000000000002",
+					normalizedItem: { ...normalizedItem, url: "https://x.com/anansi/status/1900000000000000002" },
+				}),
+			];
+
+			for (const message of invalidMessages) {
+				expect(
+					parseExtensionMessage(
+						message,
+						pageContext("https://x.com/i/bookmarks"),
+					),
+				).toMatchObject({ ok: false, error: { code: "invalid_message" } });
+			}
+		});
+
+		test("reports nested credential fields in normalized content as sensitive", () => {
+			const secret = "Bearer native-capture-secret";
+			const result = parseExtensionMessage(
+				bookmark({
+					canonicalUrl: normalizedItem.url,
+					normalizedItem: {
+						...normalizedItem,
+						raw: { headers: { Authorization: secret } },
+					},
+				}),
+				pageContext("https://x.com/i/bookmarks"),
+			);
+
+			expect(result).toMatchObject({
+				ok: false,
+				error: { code: "sensitive_field" },
+			});
+			expect(JSON.stringify(result)).not.toContain(secret);
+		});
+
+		test("preserves the tab nonce and binds the message source to page origin", () => {
+			const message = bookmark({
+				canonicalUrl: normalizedItem.url,
+				normalizedItem,
+			});
+			const accepted = parseExtensionMessage(
+				message,
+				pageContext("https://x.com/i/bookmarks"),
+			);
+
+			expect(accepted).toMatchObject({
+				ok: true,
+				source: "x",
+				message: { nonce: NONCE, source: "x" },
+			});
+			expect(
+				parseExtensionMessage(
+					{ ...message, nonce: "spoofed_nonce_0123456789" },
+					pageContext("https://x.com/i/bookmarks"),
+				),
+			).toMatchObject({ ok: false, error: { code: "nonce_mismatch" } });
+			expect(
+				parseExtensionMessage(
+					message,
+					pageContext("https://github.com/stars"),
+				),
+			).toMatchObject({ ok: false, error: { code: "source_mismatch" } });
 		});
 
 		test("rejects an unknown action, a bad id and unknown fields", () => {

@@ -8,6 +8,7 @@ import { canonicalTopicId, topicDefinition } from "./topics.ts";
 export type CaptureOrigin =
   | "platform_event"
   | "platform_import"
+  | "archive_import"
   | "toolbar"
   | "context_menu"
   | "chrome_bookmark"

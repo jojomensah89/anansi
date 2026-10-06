@@ -10,6 +10,7 @@ type AtomicExecutor = (
 ) => Promise<void>;
 
 const executors = new WeakMap<object, AtomicExecutor>();
+const statementLimits = new WeakMap<object, number>();
 
 /**
  * Register the transaction primitive supplied by a concrete database driver.
@@ -19,8 +20,14 @@ const executors = new WeakMap<object, AtomicExecutor>();
 export function registerAtomicExecutor(
   db: AnansiDb,
   execute: AtomicExecutor,
+  statementLimit = Number.POSITIVE_INFINITY,
 ): void {
   executors.set(db as object, execute);
+  statementLimits.set(db as object, statementLimit);
+}
+
+export function atomicStatementLimit(db: AnansiDb): number {
+  return statementLimits.get(db as object) ?? 0;
 }
 
 /** Execute one predeclared group of writes atomically on either adapter. */

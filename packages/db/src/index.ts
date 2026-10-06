@@ -23,6 +23,8 @@ export {
 
 export { setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary, restoreLibrary } from "./organization.ts";
 export type { Collection, CollectionFilters, LibraryExport } from "./organization.ts";
+export { RESTORE_CHUNK_SIZE, RESTORE_TABLES, restoreCounts, getLibraryRestore, startLibraryRestore, writeLibraryRestoreChunk, finishLibraryRestore, abortLibraryRestore } from "./restore.ts";
+export type { RestoreCounts, RestoreState, RestoreTable } from "./restore.ts";
 export { claimMediaJobs, completeMediaJob, failMediaJob } from "./media-jobs.ts";
 export { aiEnrichmentJobs, aiSettings, itemEmbeddings, aiProgress, applyAiTags, claimAiJobs, completeAiJob, consumeSemanticCredits, contentHash, embeddingProjectionText, failAiJob, getAiSettings, loadAiJobItems, reconcileAiJobs, reclassifyAiTopics, requeueEmbeddingJobs, releaseAiJob, searchableText, semanticCreditsForText, semanticText, setAiSettings, upsertItemEmbedding, validateAiJobClaim } from "./ai-jobs.ts";
 export type { AiJob, AiJobFailureCode, AiJobKind } from "./ai-jobs.ts";

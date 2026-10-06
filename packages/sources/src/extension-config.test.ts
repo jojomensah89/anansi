@@ -35,6 +35,7 @@ describe("extension config contract", () => {
 			"x",
 			"reddit",
 			"github",
+			"tiktok",
 		]);
 		expect(validateExtensionConfig(valid())).toBe(true);
 	});
@@ -46,7 +47,7 @@ describe("extension config contract", () => {
 		expect(result.ok).toBe(true);
 	});
 
-	test("rejects unknown, duplicate, malformed, and hidden source instructions", () => {
+	test("rejects unknown, duplicate, and malformed source instructions", () => {
 		const unknown = {
 			...valid(),
 			sources: [source("x"), { ...source("reddit"), source: "instagram" }],
@@ -72,17 +73,7 @@ describe("extension config contract", () => {
 			error: { code: "inconsistent_source" },
 		});
 
-		const hidden = {
-			...valid(),
-			features: {
-				...valid().features,
-				captureV2: { tiktok: true },
-			},
-		};
-		expect(parseExtensionConfig(hidden as unknown)).toMatchObject({
-			ok: false,
-			error: { code: "invalid_config" },
-		});
+		expect(parseExtensionConfig({ ...valid(), features: { captureV2: { tiktok: true } } }).ok).toBe(true);
 	});
 
 	test("rejects credentials in URLs and extra keys at the config seam", () => {

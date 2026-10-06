@@ -36,32 +36,33 @@ describe("source capability views", () => {
 			"github",
 			"tiktok",
 		]);
-		expect(VISIBLE_LIBRARY_SOURCES).toEqual(["x", "reddit", "web", "github"]);
-		expect(EXTENSION_PLATFORM_SOURCES).toEqual(["x", "reddit", "github"]);
-		expect(PAGE_IMPORT_SOURCES).toEqual(["x"]);
+		expect(VISIBLE_LIBRARY_SOURCES).toEqual(["x", "reddit", "web", "github", "tiktok"]);
+		expect(EXTENSION_PLATFORM_SOURCES).toEqual(["x", "reddit", "github", "tiktok"]);
+		expect(PAGE_IMPORT_SOURCES).toEqual(["x", "tiktok"]);
 		expect(SESSION_IMPORT_SOURCES).toEqual(["reddit", "github"]);
-		expect(LIVE_CAPTURE_SOURCES).toEqual(["x", "reddit", "github"]);
+		expect(LIVE_CAPTURE_SOURCES).toEqual(["x", "reddit", "github", "tiktok"]);
 		expect(MANUAL_CAPTURE_SOURCES).toEqual(["web"]);
-		expect(TOGGLEABLE_SOURCES).toEqual(["x", "reddit", "github"]);
+		expect(TOGGLEABLE_SOURCES).toEqual(["x", "reddit", "github", "tiktok"]);
 		expect(SHIPPED_CAPTURE_SOURCES).toEqual([
 			"x",
 			"reddit",
 			"github",
+			"tiktok",
 			"web",
 		]);
 	});
 
-	test("preserves paused TikTok parsing without shipping its capture", () => {
+	test("ships TikTok page capture", () => {
 		expect(isRetainedParsingSource("tiktok")).toBe(true);
-		expect(isExtensionPlatformSource("tiktok")).toBe(false);
+		expect(isExtensionPlatformSource("tiktok")).toBe(true);
 		expect(isManualCaptureSource("tiktok")).toBe(false);
-		expect(isToggleableSource("tiktok")).toBe(false);
-		expect(captureMethodsForSource("tiktok")).toEqual([]);
+		expect(isToggleableSource("tiktok")).toBe(true);
+		expect(captureMethodsForSource("tiktok")).toEqual(["platform_event", "platform_import"]);
 		expect(retainedCaptureMethodsForSource("tiktok")).toEqual([
 			"platform_event",
 			"platform_import",
 		]);
-		expect(supportsCaptureMethod("tiktok", "platform_event")).toBe(false);
+		expect(supportsCaptureMethod("tiktok", "platform_event")).toBe(true);
 		expect(
 			supportsRetainedCaptureMethod("tiktok", "platform_event"),
 		).toBe(true);

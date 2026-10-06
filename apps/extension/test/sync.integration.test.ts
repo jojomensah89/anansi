@@ -275,7 +275,9 @@ describe("the worker stops existing", () => {
     await r.restart().retry();
 
     expect(await r.store.list()).toEqual([]);
-    const delivered = r.server.seen.slice(3).map((s) => s.eventId).sort();
+    // The failed first page now blocks later pages until restart/retry.
+    expect(r.server.seen[0]?.eventId).toBe("run-1:page:1");
+    const delivered = r.server.seen.slice(1).map((s) => s.eventId).sort();
     expect(delivered).toEqual(["run-1:page:1", "run-1:page:2", "run-1:page:3"]);
   });
 });

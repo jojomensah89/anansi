@@ -24,6 +24,7 @@ const FALLBACKS: Record<(typeof POPUP_SOURCES)[number], PopupSourceConfig> = {
 		mode: "page",
 		url: "https://github.com/stars",
 	},
+	tiktok: { source: "tiktok", host: "tiktok.com", mode: "observe" },
 };
 
 /** Reject the entire remote catalogue if one instruction is unsafe or ambiguous. */
