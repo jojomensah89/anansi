@@ -35,6 +35,7 @@ export interface LibrarySearch {
   media?: string;
   archived?: boolean;
   favorite?: boolean;
+  nsfw?: boolean;
   /** "exclude" is only what is still saved; "only" is only what has gone. */
   removed?: string;
   view?: ViewMode;
@@ -93,6 +94,7 @@ export function validateLibrarySearch(search: Record<string, unknown>): LibraryS
         : undefined,
     archived: search.archived === true || search.archived === "true" ? true : undefined,
     favorite: search.favorite === true || search.favorite === "true" ? true : undefined,
+    nsfw: search.nsfw === true || search.nsfw === "true" || search.nsfw === "1" ? true : undefined,
     view: VIEWS.find((v) => v === search.view),
     q: q || undefined,
     item: item || undefined,
@@ -119,6 +121,7 @@ export function toLibrarySearch(
     removed: filters.removed,
     archived: filters.archived ? true : undefined,
     favorite: filters.favorite ? true : undefined,
+    nsfw: filters.nsfw ? true : undefined,
     // The default view is the absence of the param, so a plain "/" stays plain.
     view: view === "grid" ? undefined : view,
     q: state.q?.trim() || undefined,

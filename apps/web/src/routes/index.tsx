@@ -19,7 +19,7 @@ import {
 } from "../components/skeleton.tsx";
 import { api, type Collection, type ItemRow, type SemanticSearchStatus } from "../lib/api.ts";
 import { libraryFreshnessOptions, libraryKeys, libraryStatsChanged, libraryStatsFingerprint, useLibraryQuery } from "../lib/library-query.ts";
-import { useHideRemoved } from "../lib/settings.ts";
+import { useHideRemoved, useShowNsfw } from "../lib/settings.ts";
 import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
 
 export const Route = createFileRoute("/")({
@@ -86,6 +86,7 @@ function Library() {
       removed: search.removed as Filters["removed"],
       archived: search.archived,
       favorite: search.favorite,
+      nsfw: search.nsfw,
     }),
     [search],
   );
@@ -115,9 +116,10 @@ function Library() {
    * neither deserves one for a load too fast to notice.
    */
   const [hideRemoved] = useHideRemoved();
+  const [showNsfw] = useShowNsfw();
 
   const ordering = view === "timeline" ? "posted" : "saved";
-  const library = useLibraryQuery({ filters, query: search.q ?? "", order: ordering, hideRemoved });
+  const library = useLibraryQuery({ filters, query: search.q ?? "", order: ordering, hideRemoved, showNsfw });
   const items = library.items;
   const masonry = useMasonry(items);
   const stats = useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000, ...libraryFreshnessOptions });

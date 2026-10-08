@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { MCP_TOOL_CATALOG } from "@anansi/mcp/catalog";
 import { Rail } from "./rail.tsx";
 import { clientSnippet, MCP_CLIENTS, MCP_TOKEN_PLACEHOLDER, type McpClientId } from "./mcp-config.ts";
@@ -66,17 +66,15 @@ function ClientGlyph({ glyph }: { glyph: string }) {
   );
 }
 
+const emptySubscribe = () => () => {};
+const getClientOrigin = () => (typeof window !== "undefined" ? window.location.origin : "");
+const getServerOrigin = () => "";
+
 export function McpServerPage() {
-  const [origin, setOrigin] = useState("");
+  const origin = useSyncExternalStore(emptySubscribe, getClientOrigin, getServerOrigin);
   const [selectedClient, setSelectedClient] = useState<McpClientId>("claude-code");
   const [copied, setCopied] = useState<CopyTarget | null>(null);
   const [stats, setStats] = useState({ items: 0, authors: 0, archived: 0, bySource: {} as Record<string, number> });
-
-  // Keep the first render stable for SSR. The browser origin is public, but it
-  // does not exist while the server is rendering the route.
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
 
   useEffect(() => {
     const controller = new AbortController();

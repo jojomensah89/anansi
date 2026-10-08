@@ -33,7 +33,7 @@ import {
 	toBookmarkCapture,
 } from "../lib/chrome-bookmarks.ts";
 import { cachedForServer, createPersistedConfigCache, type ServerCache } from "../lib/config-cache.ts";
-import { extensionConnection } from "../lib/connection.ts";
+import { getExtensionConnection } from "../lib/connection.ts";
 import {
 	createHeartbeatClient,
 	type HeartbeatClient,
@@ -166,8 +166,9 @@ function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
 }
 
 async function settings(): Promise<Settings | null> {
-	const { origin, token } = extensionConnection();
-	return { server: origin, token };
+	const conn = await getExtensionConnection();
+	if (!conn) return null;
+	return { server: conn.origin, token: conn.token };
 }
 
 async function patchStatus(
@@ -367,7 +368,9 @@ async function wakeDurableQueue(
 	source?: CaptureSource,
 ): Promise<CaptureQueueStatus> {
 	await recoverNativeHandoffs();
-	for (const platform of EXTENSION_PLATFORM_SOURCES) await flushPendingSaves(platform);
+	await Promise.all(
+		EXTENSION_PLATFORM_SOURCES.map((platform) => flushPendingSaves(platform)),
+	);
 	const status = await queue().retry(
 		includeFailed
 			? { includeFailed: true, ...(source ? { source } : {}) }
@@ -1669,6 +1672,12 @@ async function handlePopupCommand(
 			return await setMirroring(true);
 		case "mirror-off":
 			return await setMirroring(false);
+		case "connection-updated": {
+			cached = null;
+			cachedToken = null;
+			await loadConfig(true);
+			return { ok: true };
+		}
 		case "save-page": {
 			const [tab] = await browser.tabs.query({
 				active: true,

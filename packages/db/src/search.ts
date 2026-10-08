@@ -105,11 +105,13 @@ export interface SearchHit {
   /** Lightweight organization metadata for library cards. */
   hasNote?: boolean;
   tags?: TagSummary[];
+  nsfw?: boolean;
 }
 
 /** Raw row for the card fields shared by lexical, semantic, and list results. */
-type CardProjectionRow = Omit<SearchHit, "favorite" | "hasNote" | "tags" | "media" | "metrics"> & {
+type CardProjectionRow = Omit<SearchHit, "favorite" | "hasNote" | "tags" | "media" | "metrics" | "nsfw"> & {
 	favorite: number;
+	nsfw: number;
 	mediaJson: string | null;
 	metricsJson: string | null;
 	tagsJson: string | null;
@@ -123,17 +125,30 @@ type ListPageRow = CardProjectionRow & {
 	quotedJson: string | null;
 };
 
+function hasNsfwColumn(db: AnansiDb): boolean {
+  try {
+    const client = (db as unknown as { $client?: { prepare: (s: string) => { all: () => Array<{ name: string }> } } }).$client;
+    if (client) {
+      const cols = client.prepare("PRAGMA table_info(items)").all();
+      return cols.some((col) => col.name === "nsfw");
+    }
+  } catch {
+    // D1 or environment without raw synchronous client
+  }
+  return true;
+}
+
 /**
  * The stable card projection. Excerpts, scores, ordering keys, and quoted
  * media stay outside this fragment because each retrieval mode owns them.
  */
-function cardProjection(): SQL {
+function cardProjection(hasNsfw = true): SQL {
 	return sql`
       i.id, i.url, i.author_handle as author, i.author_name as authorName,
       i.author_avatar as authorAvatar, i.title, i.posted_at as postedAt,
       i.saved_at as savedAt, i.saved_at_exact as savedAtExact, i.source,
       i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
-      i.favorite, i.metrics as metricsJson,
+      i.favorite, ${hasNsfw ? sql`i.nsfw` : sql`0 as nsfw`}, i.metrics as metricsJson,
       json_extract(i.raw, '$.language') as language,
       json_extract(i.raw, '$.visibility') as visibility,
       (select count(*) from media m where m.item_id=i.id) as mediaCount,
@@ -171,6 +186,7 @@ function hydrateCardRow(rawRow: CardProjectionRow): SearchHit {
 		platformSaved: rawRow.platformSaved,
 		removedFromSourceAt: rawRow.removedFromSourceAt,
 		favorite: rawRow.favorite === 1,
+		nsfw: rawRow.nsfw === 1,
 		mediaCount: rawRow.mediaCount,
 		excerpt: rawRow.excerpt,
 		score: rawRow.score,
@@ -233,8 +249,9 @@ export async function searchItemsPage(db: AnansiDb, opts: SearchOptions): Promis
       afterScore = cursor.score; afterId = cursor.id;
     } catch { throw new InvalidSearchCursorError(); }
   }
+  const hasNsfw = hasNsfwColumn(db);
   const rows = await db.all<SearchPageRow>(sql`
-    select ${cardProjection()},
+    select ${cardProjection(hasNsfw)},
       snippet(items_fts, -1, ${open}, ${close}, '…', 28) as excerpt,
       bm25(items_fts, 1.0, 2.0, 0.4, 1.0, 1.5) as score
     from items_fts join items i on i.rowid = items_fts.rowid
@@ -245,6 +262,7 @@ export async function searchItemsPage(db: AnansiDb, opts: SearchOptions): Promis
       ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
       ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
       ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
+      ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
       and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
       ${opts.cursor ? sql`and (bm25(items_fts,1.0,2.0,0.4,1.0,1.5) > ${afterScore} or (bm25(items_fts,1.0,2.0,0.4,1.0,1.5) = ${afterScore} and i.id > ${afterId}))` : sql``}
     order by score asc, i.id asc limit ${limit + 1}
@@ -272,8 +290,9 @@ export async function hydrateSearchItems(
 ): Promise<SearchHit[]> {
   const uniqueIds = [...new Set(ids)].filter(Boolean).slice(0, 100);
   if (uniqueIds.length === 0) return [];
+  const hasNsfw = hasNsfwColumn(db);
   const rows = await db.all<SearchPageRow>(sql`
-    select ${cardProjection()},
+    select ${cardProjection(hasNsfw)},
       substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
       0 as score
     from items i
@@ -284,6 +303,7 @@ export async function hydrateSearchItems(
       ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
       ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
       ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
+      ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
       and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
   `);
   const byId = new Map(rows.map((row) => [row.id, row]));
@@ -807,6 +827,8 @@ export interface ListOptions {
   /** Bookmark order by default; "posted" is chronological by the post's date. */
   order?: ListOrder;
   favorite?: boolean;
+  /** Whether to include NSFW items. Default false (excluded). */
+  nsfw?: boolean;
   /** Saved-time boundaries; since is inclusive and until is exclusive. */
   since?: number;
   until?: number;
@@ -866,8 +888,9 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
     ? sql`order by coalesce(i.posted_at, 0) desc, i.id asc`
     : sql`order by i.saved_at desc, coalesce(i.save_order, 0) desc, i.id asc`;
 
+  const hasNsfw = hasNsfwColumn(db);
   const rows = await db.all<ListPageRow>(sql`
-    select ${cardProjection()}, i.save_order as saveOrder,
+    select ${cardProjection(hasNsfw)}, i.save_order as saveOrder,
            substr(coalesce(json_extract(i.raw, '$.ownText'), i.body, ''), 1, 300) as excerpt,
            0 as score,
            -- Every stored image, not one representative. A card that shows
@@ -888,6 +911,7 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
       ${opts.since === undefined ? sql`` : sql`and i.saved_at >= ${opts.since}`}
       ${opts.until === undefined ? sql`` : sql`and i.saved_at < ${opts.until}`}
       ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
+      ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
     ${ordering}
     limit ${limit + 1}
   `);

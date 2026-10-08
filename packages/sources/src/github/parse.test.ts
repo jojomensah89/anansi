@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseStarredPage } from "./parse.ts";
 
-const raw = await Bun.file("apps/cli/fixtures/github/starred-page.json").json();
+const raw = await Bun.file("packages/sources/fixtures/github/starred-page.json").json();
 const ctx = { importedAt: 1_800_000_000 };
 
 describe("parseStarredPage", () => {

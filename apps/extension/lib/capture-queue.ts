@@ -248,10 +248,12 @@ export function createCaptureQueue(
 			const key = `${record.source}:${record.capture.externalId}`;
 			latest.set(key, Math.max(latest.get(key) ?? 0, record.sequence ?? 0));
 		}
+		const toDelete: Promise<void>[] = [];
 		for (const record of records) if (record.state === "failed" && record.capture.payloadType === "item_event" &&
 			(latest.get(`${record.source}:${record.capture.externalId}`) ?? 0) > (record.sequence ?? 0)) {
-			await store.delete(record.eventId);
+			toDelete.push(store.delete(record.eventId));
 		}
+		if (toDelete.length) await Promise.all(toDelete);
 	};
 	const scheduleRemaining = async () => {
 		const records = await store.list();
@@ -264,7 +266,11 @@ export function createCaptureQueue(
 			const records = await store.list();
 			if (records.some((r) => r.sequence === undefined)) {
 				records.sort(legacyUpgradeOrder);
-				for (let index = 0; index < records.length; index++) await store.put({ ...records[index]!, sequence: index + 1 });
+				await Promise.all(
+					records.map((record, index) =>
+						store.put({ ...record, sequence: index + 1 }),
+					),
+				);
 			}
 			await retireSupersededFailures(await store.list());
 			await scheduleRemaining();

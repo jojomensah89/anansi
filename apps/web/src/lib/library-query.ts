@@ -104,12 +104,14 @@ export function useLibraryQuery({
   query,
   order,
   hideRemoved,
+  showNsfw = false,
   loader = defaultLoader,
 }: {
   filters: ItemQuery;
   query: string;
   order: "saved" | "posted";
   hideRemoved: boolean;
+  showNsfw?: boolean;
   loader?: LibraryPageLoader;
 }) {
   const normalizedQuery = query.trim();
@@ -117,10 +119,11 @@ export function useLibraryQuery({
     () => ({
       ...filters,
       removed: filters.removed ?? (hideRemoved ? "exclude" : "include"),
+      ...(filters.nsfw !== undefined ? { nsfw: filters.nsfw } : showNsfw ? { nsfw: true } : {}),
       order,
       limit: 60,
     }),
-    [filters, hideRemoved, order],
+    [filters, hideRemoved, showNsfw, order],
   );
   const key = useMemo(() => libraryKeys.page(normalizedQuery, options), [normalizedQuery, options]);
 

@@ -56,7 +56,8 @@ export type PopupConnectionKind =
 	| "connected"
 	| "unreachable"
 	| "unauthorized"
-	| "incompatible";
+	| "incompatible"
+	| "unconfigured";
 
 export interface PopupConnectionState {
 	kind: PopupConnectionKind;
@@ -95,4 +96,9 @@ export const CONNECTED_CONNECTION: PopupConnectionState = {
 export const UNREACHABLE_CONNECTION: PopupConnectionState = {
 	kind: "unreachable",
 	message: "Server unreachable",
+};
+
+export const UNCONFIGURED_CONNECTION: PopupConnectionState = {
+	kind: "unconfigured",
+	message: "Not connected",
 };

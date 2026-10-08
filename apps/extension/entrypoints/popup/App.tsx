@@ -4,7 +4,13 @@ import type {
 } from "@anansi/sources";
 import { SourceMark } from "@anansi/ui/components/source-mark";
 import { useCallback, useEffect, useState } from "react";
-import { extensionConnection } from "../../lib/connection.ts";
+import {
+  clearExtensionConnection,
+  type ExtensionConnection,
+  getExtensionConnection,
+  saveExtensionConnection,
+  validateExtensionConnection,
+} from "../../lib/connection.ts";
 import { MESSAGE_PROTOCOL_VERSION } from "../../lib/messages.ts";
 import {
   CONNECTED_CONNECTION,
@@ -12,6 +18,7 @@ import {
   LOADING_CONNECTION,
   type PopupConnectionState,
   popupSourceRows,
+  UNCONFIGURED_CONNECTION,
   UNREACHABLE_CONNECTION,
   validatePopupRemoteConfig,
 } from "../../lib/popup-connection.ts";
@@ -161,7 +168,26 @@ export default function App() {
     return () => browser.storage.local.onChanged.removeListener(onChange);
   }, []);
 
-  const { origin: base, token } = extensionConnection();
+  const [connection, setConnection] = useState<ExtensionConnection | null>(null);
+  const [connectionLoaded, setConnectionLoaded] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const [tokenInput, setTokenInput] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getExtensionConnection().then((conn) => {
+      setConnectionLoaded(true);
+      if (conn) {
+        setConnection(conn);
+        setUrlInput(conn.origin);
+        setTokenInput(conn.token);
+      } else {
+        setConnectionState(UNCONFIGURED_CONNECTION);
+      }
+    });
+  }, []);
 
   /**
    * Ask the worker what is actually persisted.
@@ -179,6 +205,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!connection) {
+      if (connectionLoaded) {
+        setConnectionState((prev) =>
+          prev.kind !== "unconfigured" ? UNCONFIGURED_CONNECTION : prev,
+        );
+      }
+      return;
+    }
+    const { origin: base, token } = connection;
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let requestController: AbortController | undefined;
@@ -241,7 +276,79 @@ export default function App() {
       if (timer !== undefined) clearTimeout(timer);
       requestController?.abort();
     };
-  }, [base, token, refresh]);
+  }, [connection, connectionLoaded, refresh]);
+
+  const handleConnect = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsConnecting(true);
+    setConnectError(null);
+    try {
+      const validated = validateExtensionConnection(urlInput, tokenInput);
+      if (typeof browser !== "undefined" && browser.permissions?.request) {
+        try {
+          const granted = await browser.permissions.request({
+            origins: [`${validated.origin}/*`],
+          });
+          if (!granted) {
+            setConnectError("Permission to access the Worker URL was denied.");
+            setIsConnecting(false);
+            return;
+          }
+        } catch {
+          // Ignore if permission request not supported in test env
+        }
+      }
+      const res = await fetch(`${validated.origin}/api/extension/config`, {
+        headers: { Authorization: `Bearer ${validated.token}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.status === 401 || res.status === 403) {
+        setConnectError("Invalid secret key. Check your ANANSI_SECRET.");
+        setIsConnecting(false);
+        return;
+      }
+      if (res.status === 404) {
+        setConnectError("Worker endpoint not found. Make sure this is an Anansi deployment.");
+        setIsConnecting(false);
+        return;
+      }
+      if (!res.ok) {
+        setConnectError(`Worker returned HTTP ${res.status}.`);
+        setIsConnecting(false);
+        return;
+      }
+      const data = await res.json();
+      if (!validatePopupRemoteConfig(data)) {
+        setConnectError("Incompatible server version. Update or redeploy Anansi.");
+        setIsConnecting(false);
+        return;
+      }
+      await saveExtensionConnection(validated.origin, validated.token);
+      setConnection(validated);
+      setConfig(data);
+      setConnectionState(CONNECTED_CONNECTION);
+      setShowSettings(false);
+      void command({ action: "connection-updated" });
+      refresh();
+    } catch (err) {
+      setConnectError((err as Error).message || "Could not connect to Worker.");
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    await clearExtensionConnection();
+    setConnection(null);
+    setConfig(null);
+    setStats(null);
+    setConnectionState(UNCONFIGURED_CONNECTION);
+    setShowSettings(false);
+    setUrlInput("");
+    setTokenInput("");
+    void command({ action: "connection-updated" });
+  };
 
   // The worker's durable run record is authoritative once it exists. Until
   // then, keep an optimistic per-source label so a click has immediate proof
@@ -379,17 +486,182 @@ export default function App() {
           style={{ borderRadius: 5, objectFit: "cover" }}
         />
         <strong style={{ fontSize: 14 }}>Anansi</strong>
+        {connection && (
+          <button
+            type="button"
+            onClick={() => {
+              setConnectError(null);
+              setShowSettings((prev) => !prev);
+            }}
+            title={showSettings ? "Back to library" : "Connection settings"}
+            aria-label={showSettings ? "Back to library" : "Connection settings"}
+            style={{
+              marginLeft: "auto",
+              background: "transparent",
+              border: "none",
+              color: showSettings ? S.accent : S.muted,
+              cursor: "pointer",
+              padding: "4px 6px",
+              display: "flex",
+              alignItems: "center",
+              fontSize: 11,
+              borderRadius: 4,
+            }}
+          >
+            {showSettings ? (
+              "← Back"
+            ) : (
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
 
-      <div
-        style={{
-          padding: "12px 16px 14px",
-          display: "flex",
-          alignItems: "baseline",
-          gap: 9,
-        }}
-      >
-        <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.02em" }}>
+      {!connectionLoaded ? (
+        <div style={{ padding: "32px 16px", textAlign: "center", color: S.muted, fontSize: 12 }}>
+          Connecting…
+        </div>
+      ) : !connection || showSettings ? (
+        <form
+          onSubmit={handleConnect}
+          style={{
+            padding: "16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+              {connection ? "Connection Settings" : "Connect to Anansi"}
+            </div>
+            <div style={{ fontSize: 11, color: S.muted, lineHeight: 1.4 }}>
+              Enter your deployed Cloudflare Worker URL and secret key to sync bookmarks.
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <label htmlFor="anansi-worker-url" style={{ fontSize: 11, color: S.muted, fontWeight: 500 }}>
+              Worker URL
+            </label>
+            <input
+              id="anansi-worker-url"
+              type="url"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="https://anansi.yourname.workers.dev"
+              required
+              style={{
+                background: S.card,
+                border: `1px solid ${S.edge}`,
+                borderRadius: 6,
+                color: S.text,
+                padding: "7px 10px",
+                fontSize: 11.5,
+                fontFamily: S.mono,
+                outline: "none",
+              }}
+            />
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <label htmlFor="anansi-worker-token" style={{ fontSize: 11, color: S.muted, fontWeight: 500 }}>
+              Secret Key (ANANSI_SECRET)
+            </label>
+            <input
+              id="anansi-worker-token"
+              type="password"
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              placeholder="At least 16 characters"
+              required
+              style={{
+                background: S.card,
+                border: `1px solid ${S.edge}`,
+                borderRadius: 6,
+                color: S.text,
+                padding: "7px 10px",
+                fontSize: 11.5,
+                fontFamily: S.mono,
+                outline: "none",
+              }}
+            />
+          </div>
+
+          {connectError && (
+            <div
+              style={{
+                padding: "8px 10px",
+                background: "rgba(224, 113, 79, 0.1)",
+                border: `1px solid ${S.warn}`,
+                borderRadius: 6,
+                color: S.warn,
+                fontSize: 11,
+                lineHeight: 1.4,
+              }}
+            >
+              {connectError}
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+            <button
+              type="submit"
+              disabled={isConnecting}
+              style={{
+                ...button,
+                flex: 1,
+                background: S.accent,
+                color: S.ink,
+                fontWeight: 600,
+                border: "none",
+                opacity: isConnecting ? 0.7 : 1,
+              }}
+            >
+              {isConnecting ? "Connecting…" : connection ? "Save & Reconnect" : "Connect"}
+            </button>
+            {connection && (
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                style={{
+                  ...button,
+                  background: S.raised,
+                  color: S.warn,
+                  borderColor: S.edge,
+                  fontSize: 11,
+                  padding: "0 10px",
+                }}
+              >
+                Disconnect
+              </button>
+            )}
+          </div>
+        </form>
+      ) : (
+        <>
+          <div
+            style={{
+              padding: "12px 16px 14px",
+              display: "flex",
+              alignItems: "baseline",
+              gap: 9,
+            }}
+          >
+            <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.02em" }}>
           {stats ? stats.items.toLocaleString() : "—"}
         </span>
         <span style={{ fontSize: 12.5, color: S.muted }}>saved items</span>
@@ -798,7 +1070,7 @@ export default function App() {
         </span>
         <button
           type="button"
-          onClick={() => void browser.tabs.create({ url: new URL("/", base).toString() })}
+          onClick={() => void browser.tabs.create({ url: new URL("/", connection?.origin ?? "http://127.0.0.1:3001").toString() })}
           style={{
             marginLeft: "auto",
             background: "none",
@@ -840,6 +1112,8 @@ export default function App() {
             ))}
           </div>
         </details>
+      )}
+        </>
       )}
     </div>
   );

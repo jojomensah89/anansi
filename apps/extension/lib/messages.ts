@@ -145,7 +145,8 @@ export type PopupCommandMessage = MessageBase &
 					| "save-page"
 					| "mirror-status"
 					| "mirror-on"
-					| "mirror-off";
+					| "mirror-off"
+					| "connection-updated";
 		  }
 		| {
 				anansi: "popup-command";
@@ -588,7 +589,8 @@ function validatePopupCommandShape(
 		value.action === "save-page" ||
 		value.action === "mirror-status" ||
 		value.action === "mirror-on" ||
-		value.action === "mirror-off"
+		value.action === "mirror-off" ||
+		value.action === "connection-updated"
 	) {
 		return hasOnlyKeys(value, ["anansi", "messageVersion", "action"]);
 	}

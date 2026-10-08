@@ -80,6 +80,7 @@ export interface ItemQuery {
   tag?: string[];
   archived?: boolean;
   favorite?: boolean;
+  nsfw?: boolean;
   /** Items the platform no longer has saved. Kept by default. */
   removed?: "include" | "exclude" | "only";
   order?: "saved" | "posted";
@@ -232,6 +233,7 @@ export const api = {
     for (const t of opts.tag ?? []) q.append("tag", t);
     if (opts.archived) q.set("archived", "1");
     if (opts.favorite) q.set("favorite", "1");
+    if (opts.nsfw) q.set("nsfw", "1");
     if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
     if (opts.order === "posted") q.set("order", "posted");
     q.set("limit", String(opts.limit ?? 60));
@@ -309,6 +311,7 @@ function itemParams(opts: ItemQuery): URLSearchParams {
   for (const t of opts.tag ?? []) q.append("tag", t);
   if (opts.archived) q.set("archived", "1");
   if (opts.favorite) q.set("favorite", "1");
+  if (opts.nsfw) q.set("nsfw", "1");
   if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
   if (opts.order === "posted") q.set("order", "posted");
   q.set("limit", String(opts.limit ?? 60));

@@ -33,12 +33,68 @@ export function validateExtensionConnection(
 	return Object.freeze({ origin, token });
 }
 
-/** Immutable connection compiled into this private extension artifact. */
+export async function getExtensionConnection(): Promise<ExtensionConnection | null> {
+	try {
+		if (typeof browser !== "undefined" && browser.storage?.local) {
+			const stored = await browser.storage.local.get("anansiConnection");
+			const conn = (stored as { anansiConnection?: unknown })?.anansiConnection as { origin?: unknown; token?: unknown } | undefined;
+			if (conn && typeof conn.origin === "string" && typeof conn.token === "string") {
+				return validateExtensionConnection(conn.origin, conn.token);
+			}
+		}
+	} catch {
+		// Storage unavailable or unparseable
+	}
+
+	try {
+		if (
+			typeof __ANANSI_EXTENSION_ORIGIN__ !== "undefined" &&
+			typeof __ANANSI_EXTENSION_INGEST_TOKEN__ !== "undefined" &&
+			__ANANSI_EXTENSION_ORIGIN__ &&
+			__ANANSI_EXTENSION_INGEST_TOKEN__
+		) {
+			return validateExtensionConnection(
+				__ANANSI_EXTENSION_ORIGIN__,
+				__ANANSI_EXTENSION_INGEST_TOKEN__,
+			);
+		}
+	} catch {
+		// Build-time placeholders
+	}
+
+	return null;
+}
+
+export async function saveExtensionConnection(
+	originValue: string,
+	tokenValue: string,
+): Promise<ExtensionConnection> {
+	const conn = validateExtensionConnection(originValue, tokenValue);
+	if (typeof browser !== "undefined" && browser.storage?.local) {
+		await browser.storage.local.set({ anansiConnection: conn });
+	}
+	return conn;
+}
+
+export async function clearExtensionConnection(): Promise<void> {
+	if (typeof browser !== "undefined" && browser.storage?.local) {
+		await browser.storage.local.remove("anansiConnection");
+	}
+}
+
+/** Immutable connection compiled into this private extension artifact, or fallback. */
 export function extensionConnection(): ExtensionConnection {
-	return validateExtensionConnection(
-		__ANANSI_EXTENSION_ORIGIN__,
-		__ANANSI_EXTENSION_INGEST_TOKEN__,
-	);
+	try {
+		return validateExtensionConnection(
+			__ANANSI_EXTENSION_ORIGIN__,
+			__ANANSI_EXTENSION_INGEST_TOKEN__,
+		);
+	} catch {
+		return Object.freeze({
+			origin: "http://127.0.0.1:3001",
+			token: "unconfigured-placeholder-token",
+		});
+	}
 }
 
 const PREPARE_CONNECTION: ExtensionConnection = Object.freeze({

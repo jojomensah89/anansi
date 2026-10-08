@@ -29,9 +29,9 @@ import {
 	type ExtensionSourceConfig,
 } from "@anansi/sources";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
-import type { AiBinding, TagGenerationProvider, VectorizeBinding } from "./ai.ts";
+import type { AiBinding, VectorizeBinding } from "./ai.ts";
 import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
-import { hybridSearch, type SemanticRuntime } from "./semantic-search.ts";
+import { hybridSearch } from "./semantic-search.ts";
 import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
 import { ingestCapture } from "./ingest.ts";
 import { handleRestoreRequest } from "./restore.ts";
@@ -81,13 +81,6 @@ export interface ApiEnv extends LibraryAuthEnv {
 	media?: MediaSource;
 	ai?: AiBinding;
 	vectorize?: VectorizeBinding;
-	/** Local-only Ollama + sidecar runtime. Hosted Workers use ai/vectorize. */
-	semantic?: SemanticRuntime;
-	/** Local-only nudge; ingestion itself never waits for semantic indexing. */
-	semanticKick?: () => void;
-	/** Local-only tag-generation provider and nudge. */
-	tagger?: TagGenerationProvider;
-	taggingKick?: () => void;
 	/** Shared secret for /api/ingest. Absent means ingest is closed. */
 	ingestToken?: string;
 }
@@ -147,6 +140,7 @@ const itemsRoute: Route = {
 					tag: q.getAll("tag"),
 					archived: q.get("archived") === "1",
 					favorite: q.get("favorite") === "1" ? true : undefined,
+					nsfw: q.get("nsfw") === "1" ? true : undefined,
 					removed: (["exclude", "only"] as const).find(
 						(v) => v === q.get("removed"),
 					),
@@ -181,23 +175,25 @@ const searchRoute: Route = {
           const searchOptions: SearchOptions = {
             query, source: q.getAll("source"), author: q.getAll("author"), tag: q.getAll("tag"),
             media: q.get("media") ?? undefined, contentType: q.getAll("type"),
-            archived: q.get("archived") === "1", favorite: q.get("favorite") === "1" ? true : undefined, removed: (["exclude", "only"] as const).find(v => v === q.get("removed")),
+            archived: q.get("archived") === "1", favorite: q.get("favorite") === "1" ? true : undefined,
+            nsfw: q.get("nsfw") === "1" ? true : undefined,
+            removed: (["exclude", "only"] as const).find(v => v === q.get("removed")),
             order: q.get("order") === "posted" ? "posted" : "saved", cursor: q.get("cursor") ?? undefined,
             limit: num(q.get("limit"), 50),
           };
           const page = await searchItemsPage(env.db, searchOptions);
           const aiSettings = await getAiSettings(env.db);
-          const runtime = env.semantic ?? (env.ai && env.vectorize ? {
+          const runtime = (env.ai && env.vectorize) ? {
             provider: createEmbeddingProvider(env.ai, aiSettings.embeddingModel, aiSettings.embeddingDimensions),
             index: createVectorIndex(env.vectorize, aiSettings.embeddingDimensions),
             charge: async (text: string) => (await consumeSemanticCredits(env.db, text)).allowed,
-          } : undefined);
+          } : undefined;
           const hybrid = await hybridSearch(
             env.db,
             query,
             searchOptions,
             page,
-            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: env.semantic ? undefined : aiSettings.embeddingDimensions, generation: aiSettings.semanticGeneration },
+            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: aiSettings.embeddingDimensions, generation: aiSettings.semanticGeneration },
             runtime,
           );
           return json({ query, items: hybrid.items, results: hybrid.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
@@ -363,12 +359,12 @@ const aiSettingsRoute: Route = {
       embeddingProgress: await aiProgress(env.db, "embedding", settings.embeddingModel),
       taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
       semanticIndex: await semanticIndexStats(env.db, settings.embeddingModel, settings.semanticGeneration),
-      available: Boolean(env.semantic || env.tagger || env.ai),
+      available: Boolean(env.ai),
       capabilities: {
-        semanticSearch: Boolean(env.semantic || (env.ai && env.vectorize)),
-        autoTagging: Boolean(env.tagger || env.ai),
+        semanticSearch: Boolean(env.ai && env.vectorize),
+        autoTagging: Boolean(env.ai),
       },
-      runtime: env.semantic || env.tagger ? "ollama" : env.ai ? "cloudflare" : "none",
+      runtime: env.ai ? "cloudflare" : "none",
     });
   },
 };
@@ -377,11 +373,11 @@ const semanticPreviewRoute: Route = {
 	method: "GET",
 	path: "/api/ai/semantic-preview",
 	handle: async ({ env }) => {
-		if (!(env.semantic || (env.ai && env.vectorize))) return json({ error: "semantic search is unavailable in this environment" }, 503);
+		if (!(env.ai && env.vectorize)) return json({ error: "semantic search is unavailable in this environment" }, 503);
 		const settings = await getAiSettings(env.db);
 		const estimate = await estimateSemanticBackfill(env.db, settings.embeddingModel);
 		const remainingCredits = Math.max(0, settings.semanticBudgetLimit - settings.semanticBudgetUsed);
-		return json({ estimate, credits: { used: settings.semanticBudgetUsed, limit: settings.semanticBudgetLimit, remaining: remainingCredits, month: settings.semanticBudgetMonth }, runtime: env.semantic ? "local" : "cloudflare" });
+		return json({ estimate, credits: { used: settings.semanticBudgetUsed, limit: settings.semanticBudgetLimit, remaining: remainingCredits, month: settings.semanticBudgetMonth }, runtime: "cloudflare" });
 	},
 };
 
@@ -399,7 +395,6 @@ const aiReclassifyRoute: Route = {
       });
     }
     await reclassifyAiTopics(env.db);
-    env.taggingKick?.();
     return json({
       taxonomyVersion: TOPIC_TAXONOMY_VERSION,
       progress: await aiProgress(env.db),
@@ -415,18 +410,15 @@ const aiSettingsUpdateRoute: Route = {
   handle: async ({ env, request }) => {
     const body = await request.json().catch(() => null) as { semanticSearchEnabled?: unknown; semanticIndexPaused?: unknown; semanticBudgetLimit?: unknown; confirmSemanticBackfill?: unknown; autoTaggingEnabled?: unknown } | null;
     if (!body || (body.semanticSearchEnabled !== undefined && typeof body.semanticSearchEnabled !== "boolean") || (body.semanticIndexPaused !== undefined && typeof body.semanticIndexPaused !== "boolean") || (body.semanticBudgetLimit !== undefined && (!Number.isInteger(body.semanticBudgetLimit) || (body.semanticBudgetLimit as number) < 1 || (body.semanticBudgetLimit as number) > 1_000_000)) || (body.confirmSemanticBackfill !== undefined && typeof body.confirmSemanticBackfill !== "boolean") || (body.autoTaggingEnabled !== undefined && typeof body.autoTaggingEnabled !== "boolean")) return json({ error: "invalid AI settings" }, 400);
-    if (env.semantic && body.autoTaggingEnabled === true && !env.tagger) return json({ error: "automatic tags require a local Ollama tag model" }, 400);
     const current = await getAiSettings(env.db);
     const enablingSemantic = body.semanticSearchEnabled === true && current.semanticSearchEnabled !== 1;
     if (enablingSemantic) {
-      if (!(env.semantic || (env.ai && env.vectorize))) return json({ error: "semantic search is unavailable in this environment" }, 503);
+      if (!(env.ai && env.vectorize)) return json({ error: "semantic search is unavailable in this environment" }, 503);
       if (body.confirmSemanticBackfill !== true) return json({ error: "review and confirm the semantic indexing estimate first" }, 409);
       const estimate = await estimateSemanticBackfill(env.db, current.embeddingModel);
-			if (!env.semantic) {
-				const limit = (body.semanticBudgetLimit as number | undefined) ?? current.semanticBudgetLimit;
-				const remaining = Math.max(0, limit - current.semanticBudgetUsed);
-				if (estimate.estimatedCredits > remaining) return json({ error: `backfill needs ${estimate.estimatedCredits} app credits but only ${remaining} remain; raise the monthly limit or wait for the monthly reset`, estimate, remainingCredits: remaining }, 409);
-			}
+      const limit = (body.semanticBudgetLimit as number | undefined) ?? current.semanticBudgetLimit;
+      const remaining = Math.max(0, limit - current.semanticBudgetUsed);
+      if (estimate.estimatedCredits > remaining) return json({ error: `backfill needs ${estimate.estimatedCredits} app credits but only ${remaining} remain; raise the monthly limit or wait for the monthly reset`, estimate, remainingCredits: remaining }, 409);
     }
     const disablingSemantic = body.semanticSearchEnabled === false && current.semanticSearchEnabled === 1;
     const settings = await setAiSettings(env.db, {
@@ -437,13 +429,9 @@ const aiSettingsUpdateRoute: Route = {
     });
     if (disablingSemantic) {
       await clearSemanticIndex(env.db);
-      const index = env.semantic?.index ?? (env.vectorize ? createVectorIndex(env.vectorize, current.embeddingDimensions) : undefined);
-			await drainSemanticVectorDeletes(env.db, index, 100);
+      const index = env.vectorize ? createVectorIndex(env.vectorize, current.embeddingDimensions) : undefined;
+      await drainSemanticVectorDeletes(env.db, index, 100);
     }
-    // A local toggle should start reconciliation immediately; the periodic
-    // worker remains the recovery path if this nudge is interrupted.
-    if (env.semanticKick && (body.semanticSearchEnabled !== undefined || body.semanticIndexPaused !== undefined)) env.semanticKick();
-    if (env.taggingKick && body.autoTaggingEnabled !== undefined) env.taggingKick();
     return json({
       settings,
       taxonomyVersion: TOPIC_TAXONOMY_VERSION,
@@ -603,8 +591,6 @@ const ingestRoute: Route = {
 			const work = fetchPendingMedia(env.db, env.media);
 			if (env.waitUntil) env.waitUntil(work); else await work;
 		}
-		if (env.semanticKick) env.semanticKick();
-		if (env.taggingKick) env.taggingKick();
 
 		return json(result.body, result.status);
 	},

@@ -59,27 +59,21 @@ Requirements: [Bun](https://bun.sh/) 1.3+, Chromium-based browser. SQLite DB is 
 
 ```bash
 bun install
-cp .env.example .env
-# Edit .env and set three independent server secrets:
-#   LIBRARY_TOKEN, INGEST_TOKEN, MCP_TOKEN
-# Then mirror INGEST_TOKEN into ANANSI_EXTENSION_INGEST_TOKEN.
-# Keep ANANSI_EXTENSION_ORIGIN=http://127.0.0.1:3001
-bun run dev:local
+cp .dev.vars.example .dev.vars
+# Edit .dev.vars and set your master secret:
+#   ANANSI_SECRET=your-random-secret
+bun run dev
 ```
 
-Open `http://127.0.0.1:3001`. This is the one public local origin: the library is at `/`, JSON endpoints are under `/api`, and MCP is at `/mcp`. The launcher creates `data/anansi.db` on first start and prints the local library sign-in token.
+Open `http://127.0.0.1:8787`. This is the one public local origin: the library is at `/`, JSON endpoints are under `/api`, and MCP is at `/mcp`.
 
-An internal Bun process listens on port `8788` because Vite's Node runtime cannot load Bun's SQLite implementation. Vite proxies `/api` and `/mcp` to it. Do not enter or configure port `8788` anywhere.
-
-Build the private extension in a second terminal:
+Build the extension:
 
 ```bash
 bun run --cwd apps/extension build
 ```
 
-Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `apps/extension/.output/chrome-mv3`. The extension connects immediately; there is no server or token field in the popup.
-
-> The configured build contains your ingest credential. This is appropriate for your private, load-unpacked extension, but anyone with the artifact can extract it. Never upload this configured build to a public extension store or share it.
+Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `apps/extension/.output/chrome-mv3`. Click the Anansi icon in the toolbar, enter your local Worker URL (`http://127.0.0.1:8787` or hosted URL) and `ANANSI_SECRET`, and click **Connect**. The extension validates the connection and saves your bookmarks seamlessly. (You can also pre-bake secrets in `.env` for private builds).
 
 GitHub first import: sign in to GitHub in the same browser profile → popup → **Import** beside GitHub. It walks your stars pages in the worker (no tabs open), persists the pagination cursor, and resumes after interruptions. Unstarring hides from current-star view without deleting history; re-starring restores it.
 
@@ -244,14 +238,11 @@ resource-setup value; using a different dimension or metric will break semantic
 search. The model and Vectorize index are only used after semantic search is
 enabled in Settings.
 
-During setup, enter three independent secrets when Cloudflare prompts for them:
+During setup, enter your master secret when Cloudflare prompts for it:
 
-- `LIBRARY_TOKEN` — sign in to the hosted library.
-- `INGEST_TOKEN` — authenticate extension captures.
-- `MCP_TOKEN` — authenticate MCP clients at `/mcp`.
+- `ANANSI_SECRET` — master secret protecting library sign-in, Chrome extension ingestion, and MCP clients. (Legacy `LIBRARY_TOKEN`, `INGEST_TOKEN`, and `MCP_TOKEN` remain supported if configured individually).
 
-Generate each with `openssl rand -hex 32`. The app remains closed to each
-surface when its secret is absent. Both Cloudflare AI features start off; enable
+Generate with `openssl rand -hex 32`. Both Cloudflare AI features start off; enable
 Semantic search or Automatic tags from `/settings` only when you want to use
 your account's AI quota.
 
@@ -287,51 +278,17 @@ ready.
 
 After deployment returns `https://<worker>.workers.dev`:
 
-1. Open the URL and sign in with `LIBRARY_TOKEN`.
-2. Set `ANANSI_EXTENSION_ORIGIN` to the Worker URL and
-   `ANANSI_EXTENSION_INGEST_TOKEN` to the same value as `INGEST_TOKEN` in your
-   local `.env`.
-3. Build the extension separately with `bun run --cwd apps/extension build`
-   and load `apps/extension/.output/chrome-mv3` from `chrome://extensions`.
-4. Sign into each provider in the same Chrome profile before its first import.
-5. Add the Worker URL and `MCP_TOKEN` to any remote MCP client you want to use.
+1. Open the URL and sign in with `ANANSI_SECRET`.
+2. In the Chrome extension (either from the Chrome Web Store or unpacked build), click the Anansi icon in the toolbar.
+3. Enter your deployed Worker URL and `ANANSI_SECRET`, and click **Connect**.
+4. Sign into each provider (X, GitHub, Reddit, TikTok) in the same Chrome profile before its first import.
+5. Add the Worker URL and `ANANSI_SECRET` to any remote MCP client you want to use (`Authorization: Bearer <ANANSI_SECRET>`).
 
 The Worker is the only public origin: the library is `/`, the API is `/api/*`,
-and MCP is `/mcp`. New schema changes still start with `packages/db/src/schema.ts`
+and MCP is `/mcp`. New schema changes start with `packages/db/src/schema.ts`
 and `bun run db:generate`; review and commit the new SQL migration, then push
-to the connected repository. Workers Builds applies only pending D1 migrations
+to the connected repository. Workers Builds applies pending D1 migrations
 before publishing the Worker.
-
-#### Existing Alchemy installations
-
-Wrangler becomes the deploy and migration owner after a one-time handoff. Edit
-`wrangler.jsonc` to point at the existing Worker name, D1 database ID, R2
-bucket, and Vectorize index. Keep the bindings `DB`, `MEDIA`, `AI`, and
-`VECTORIZE` unchanged.
-
-Back up D1 and inspect the existing migration ledger before changing it. Compare
-the result of this query with the SQL filenames in `packages/db/drizzle`:
-
-```powershell
-bun run wrangler d1 export DB --remote --output anansi-before-wrangler.sql
-bun run wrangler d1 execute DB --remote --command "SELECT name FROM __alchemy_migrations ORDER BY id"
-```
-
-If every applied name matches a repository migration filename, copy those
-already-applied names into Wrangler's ledger. This baseline script does not
-run schema SQL or alter application data:
-
-```powershell
-bun run wrangler d1 execute DB --remote --file scripts/alchemy-to-wrangler-baseline.sql
-bun run wrangler d1 migrations list DB --remote
-```
-
-The migration list should show no already-applied migration pending. Then run
-`bun run build` and `bun run deploy`; Wrangler applies only future migrations
-and updates the existing Worker and bindings. If the names differ, stop and
-reconcile the migration history before deploying. Keep the backup until the app
-and saved data are verified. Do not run the old Alchemy `destroy` command
-during this handoff.
 
 #### Manual deploy and local development
 

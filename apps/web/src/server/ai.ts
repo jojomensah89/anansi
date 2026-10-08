@@ -107,11 +107,23 @@ export function normalizeTags(value: unknown, max = 5): string[] {
 
 export async function generateTags(ai: AiBinding, model: string, text: string, max = 3): Promise<string[]> {
   const allowed = TOPIC_DEFINITIONS.map(({ id, label }) => `${id} (${label})`).join(", ");
-  const output = await ai.run(model, { prompt: `Return only a JSON array of up to ${max} topic IDs from this allowlist: ${allowed}. Do not invent labels or translate them.\n\n${text.slice(0, MAX_TEXT)}` }).catch((error) => { throw classifyAiError(error); });
-  const raw = typeof output === "string" ? output : (output as { response?: unknown })?.response;
-  if (typeof raw !== "string") throw new AiProviderError("malformed", "Workers AI returned no tag text");
+  const isClef = model.includes("clef");
+  const prompt = isClef
+    ? `Classify this content into up to ${max} topic IDs strictly from this allowlist: ${allowed}. Return only a JSON array of matching IDs with no explanation.\n\n${text.slice(0, MAX_TEXT)}`
+    : `Return only a JSON array of up to ${max} topic IDs from this allowlist: ${allowed}. Do not invent labels or translate them.\n\n${text.slice(0, MAX_TEXT)}`;
+  const output = await ai.run(model, { prompt }).catch((error) => { throw classifyAiError(error); });
+  const raw = typeof output === "string"
+    ? output
+    : (output as { response?: unknown; result?: unknown })?.response ?? (output as { result?: unknown })?.result;
   let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { throw new AiProviderError("malformed", "Workers AI returned malformed tag JSON"); }
+  if (typeof output === "object" && output !== null && (Array.isArray(output) || Array.isArray((output as Record<string, unknown>).tags))) {
+    parsed = output;
+  } else if (typeof raw === "string") {
+    const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    try { parsed = JSON.parse(cleaned); } catch { throw new AiProviderError("malformed", "Workers AI returned malformed tag JSON"); }
+  } else {
+    throw new AiProviderError("malformed", "Workers AI returned no tag text");
+  }
   return canonicalizeTopicIds(normalizeTags(parsed, max), max);
 }
 

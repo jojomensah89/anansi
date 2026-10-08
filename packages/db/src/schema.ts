@@ -77,6 +77,8 @@ export const items = sqliteTable(
      * persist an "I am done with this" is a column the importer preserves.
      */
     archivedAt: integer("archived_at"),
+    /** 1 if flagged as sensitive/NSFW/over_18; 0 otherwise. */
+    nsfw: integer("nsfw").notNull().default(0),
   },
   (t) => [
     uniqueIndex("items_source_external").on(t.source, t.externalId),
@@ -86,6 +88,7 @@ export const items = sqliteTable(
     index("items_posted").on(t.postedAt),
     index("items_archived").on(t.archivedAt),
     index("items_author").on(t.authorHandle),
+    index("items_nsfw").on(t.nsfw),
   ],
 );
 
@@ -200,7 +203,7 @@ export const aiSettings = sqliteTable("ai_settings", {
   autoTaggingEnabled: integer("auto_tagging_enabled").notNull().default(0),
   embeddingModel: text("embedding_model").notNull().default("@cf/baai/bge-small-en-v1.5"),
   embeddingDimensions: integer("embedding_dimensions").notNull().default(384),
-  tagModel: text("tag_model").notNull().default("@cf/meta/llama-3.1-8b-instruct"),
+  tagModel: text("tag_model").notNull().default("@cf/clef-flash-9b"),
   updatedAt: integer("updated_at").notNull().default(0),
   quotaPauseReason: text("quota_pause_reason"),
   lastRunAt: integer("last_run_at"),

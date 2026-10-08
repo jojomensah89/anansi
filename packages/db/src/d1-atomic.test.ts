@@ -122,6 +122,7 @@ describe("D1 atomic capture", () => {
           id: `id-${index}`,
           raw: "{}",
           metrics: "{}",
+          nsfw: item.nsfw ? 1 : 0,
         }),
       ),
     )).rejects.toThrow("personal-tier limit");

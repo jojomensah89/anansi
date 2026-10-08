@@ -8,7 +8,7 @@ const FIELDS: Record<RestoreTable, { requiredString: string[]; optionalString: s
     requiredString: ["id", "source", "externalId", "url", "kind", "metrics", "raw"],
     optionalString: ["authorHandle", "authorName", "authorAvatar", "title", "body", "articleText", "articleFormat", "searchText", "note", "lang", "captureOrigin"],
     requiredNumber: ["savedAt"],
-    optionalNumber: ["contentTruncated", "favorite", "postedAt", "savedAtExact", "saveOrder", "platformSaved", "removedFromSourceAt", "lastSourceEventAt", "archivedAt"],
+    optionalNumber: ["contentTruncated", "favorite", "postedAt", "savedAtExact", "saveOrder", "platformSaved", "removedFromSourceAt", "lastSourceEventAt", "archivedAt", "nsfw"],
   },
   tags: { requiredString: ["id", "label", "origin"], optionalString: ["color", "kind"], requiredNumber: [], optionalNumber: [] },
   itemTags: { requiredString: ["itemId", "tagId"], optionalString: ["provenance", "model"], requiredNumber: [], optionalNumber: ["appliedAt"] },
@@ -19,7 +19,7 @@ const FIELDS: Record<RestoreTable, { requiredString: string[]; optionalString: s
   collections: { requiredString: ["id", "name", "filters"], optionalString: [], requiredNumber: ["createdAt", "updatedAt"], optionalNumber: [] },
 };
 const NON_NULL_OPTIONAL: Partial<Record<RestoreTable, readonly string[]>> = {
-  items: ["articleFormat", "searchText", "note", "captureOrigin", "contentTruncated", "favorite", "savedAtExact", "platformSaved"],
+  items: ["articleFormat", "searchText", "note", "captureOrigin", "contentTruncated", "favorite", "savedAtExact", "platformSaved", "nsfw"],
   tags: ["color", "kind"],
   itemTags: ["provenance"],
   itemTagOverrides: ["createdAt"],

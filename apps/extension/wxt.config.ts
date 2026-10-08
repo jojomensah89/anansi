@@ -57,7 +57,11 @@ export default defineConfig({
 			"https://github.com/*",
 			"https://www.tiktok.com/*",
 			"https://tiktok.com/*",
-			`${connection.origin}/*`,
+			...(connection.origin ? [`${connection.origin}/*`] : []),
+		],
+		optional_host_permissions: [
+			"https://*/*",
+			"http://127.0.0.1/*",
 		],
 	},
 });

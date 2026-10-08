@@ -127,6 +127,13 @@
       "when": 1790467200000,
       "tag": "0017_native_save_state",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1790553600000,
+      "tag": "0018_items_nsfw",
+      "breakpoints": true
     }
   ]
 }

@@ -13,7 +13,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@anansi/config": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:"
   }
