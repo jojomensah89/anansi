@@ -5,8 +5,8 @@
  * "a remote MCP server is a URL someone else can connect their own agent to,
  * with nothing to install." Until this passes, that sentence is a plan.
  */
-const base = process.env.MCP_URL ?? "http://127.0.0.1:3001/mcp";
-const token = process.env.MCP_TOKEN ?? "dev-mcp";
+const base = process.env.MCP_URL ?? "http://127.0.0.1:8787/mcp";
+const token = process.env.ANANSI_SECRET ?? process.env.MCP_TOKEN ?? "dev-mcp";
 
 let id = 0;
 async function rpc(method: string, params?: unknown, auth = token) {

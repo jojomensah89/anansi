@@ -81,131 +81,13 @@ TikTok favorites: sign in to TikTok in the same browser and press **Import** in 
 
 Library data backup: use **Saved views → Download library data (no media files)**. On a new, empty Anansi installation, choose **Restore into an empty library** in the same menu and select that JSON file. Restore validates the file before starting and uploads records in resumable batches; choose the same file after an interruption. It restores item and collection data, tags and manual tag decisions, highlights, media metadata, and Chrome bookmark links. It does not contain R2 or local media bytes; those must be fetched again where their origin is still available. A permanently rejected chunk after partial progress requires a fresh empty installation for recovery. Browser restore accepts files up to 100 MB.
 
-### Developer-only local AI search and tagging
+### AI Tagging & Semantic Search
 
-The hosted path uses the existing Cloudflare Workers AI and Vectorize bindings;
-hosted users only enable Semantic search in Settings. A local model is not
-required for installation, `bun run dev:local`, or deployment.
+Anansi leverages Cloudflare Workers AI and Vectorize:
 
-For the local web UI, install [Ollama](https://ollama.com/download) (0.11.10+
-for EmbeddingGemma). A clone-to-working semantic setup is:
-
-1. Confirm the tools are available:
-
-   ```powershell
-   bun --version       # 1.3+
-   ollama --version    # 0.11.10+ for EmbeddingGemma
-   ollama list
-   ```
-
-2. Install Anansi's dependencies and create the local environment if you have
-   not already done so:
-
-   ```powershell
-   bun install
-   Copy-Item .env.example .env
-   ```
-
-   Keep the existing local authentication values in `.env`; Ollama settings
-   are server-side values and must not be renamed to `VITE_*` variables.
-
-3. Pull the embedding model once:
-
-   ```powershell
-   ollama pull embeddinggemma
-   ```
-
-4. Make sure the Ollama daemon is running. The Ollama desktop app normally
-   does this; if it is not running, start it with `ollama serve` in another
-   terminal.
-
-5. Start Anansi:
-
-   ```powershell
-   bun run dev:local
-   ```
-
-   Open `http://127.0.0.1:3001`, go to **Settings**, and enable **AI semantic
-   search** or **Automatic tags**. Semantic search uses `embeddinggemma`; tags
-   use the configured `OLLAMA_TAG_MODEL` (default
-   `qwen3:4b-instruct-2507-q4_K_M`).
-
-6. Build and load the extension so you can import real bookmarks:
-
-   ```powershell
-   bun run --cwd apps/extension build
-   ```
-
-   In `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**,
-   and select `apps/extension/.output/chrome-mv3`. Sign in to a supported source
-   and import a few bookmarks. Then search using a concept rather than an exact
-   keyword. Anansi calls Ollama on `http://127.0.0.1:11434` from the local server
-   and stores vectors in the ignored SQLite sidecar at
-   `data/semantic/ollama.sqlite`. New bookmarks are saved and keyword-searchable
-   immediately; semantic indexing catches up in the background. If Ollama is
-   stopped or the model is missing, the UI says so and continues with BM25
-   keyword results. Tagging also runs in the background and never blocks a save.
-
-   The extension is optional if the clone already contains library data or you
-   only want to run the synthetic smoke test; it is required to capture new
-   browser bookmarks.
-
-Local keyword search remains available without Ollama. It uses SQLite FTS5 with
-BM25 ranking: terms are quoted and implicitly ANDed, English stemming is
-enabled, a trailing `*` performs prefix matching, quoted text is a phrase, and
-misspellings are not fuzzy-matched. Semantic search adds an optional vector
-candidate set and keeps the keyword page when the local index is warming or
-unavailable.
-
-Before using private bookmarks, validate the complete local path with synthetic
-data:
-
-```powershell
-bun run semantic:ollama
-bun run ai:tagging:ollama
-bun run e2e:local
-```
-
-The check should report an observed dimension (768 for the default model) and
-`"expectedSemanticOnlyMatch": true`. This proves the local provider, sidecar,
-hybrid ranking, and filtering path; it does not prove a hosted Cloudflare
-deployment or MCP/CLI semantic search. `bun run e2e:local` is the stronger
-opt-in local acceptance: it uses a temporary SQLite database to exercise
-authenticated ingest/idempotency, Ollama tagging and embeddings, FTS5, the
-semantic API, extension configuration, and HTTP plus stdio MCP. These commands
-never use private captures or Cloudflare credentials.
-
-Change `OLLAMA_EMBEDDING_MODEL` in `.env` to try `nomic-embed-text` (smaller,
-English-focused) or `nomic-embed-text-v2-moe` (larger, multilingual) instead;
-run `ollama pull <model>` before restarting, and changing models creates a
-fresh local index generation. The
-existing `bun run semantic:local` Transformers.js smoke remains available for
-offline contract testing only. The remote Workers AI/Vectorize check is
-separate and documented in
-`docs/superpowers/plans/2026-09-07-alchemy-semantic-smoke-runbook.md`.
-
-To force a rebuild, stop the local server and remove only the sidecar (the
-canonical library database is separate), then start Anansi again:
-
-```powershell
-Remove-Item -LiteralPath .\data\semantic\ollama.sqlite
-bun run dev:local
-```
-
-Common fixes:
-
-- **“Ollama is unavailable”** — run `ollama list`, start `ollama serve`, and
-  retry the search. BM25 remains available while Ollama is down.
-- **Model not found** — run `ollama pull embeddinggemma`, or make
-  `OLLAMA_EMBEDDING_MODEL` match a model shown by `ollama list`.
-- **Automatic tags** — run `ollama pull qwen3:4b-instruct-2507-q4_K_M`, or make
-  `OLLAMA_TAG_MODEL` match a text-generation model shown by `ollama list`.
-- **Index warming** — leave the local server running; jobs are processed in the
-  background. A model change or sidecar removal intentionally starts a fresh
-  generation.
-- **Remote Ollama URL** — this is an explicit developer override; Anansi prints
-  a warning because bookmark text will leave the machine. The default is
-  loopback.
+- **Automatic Tagging**: Powered by `@cf/clef-flash-9b` to assign concise, consistent topic tags to saves as they are captured.
+- **Semantic Search**: Powered by `@cf/baai/bge-small-en-v1.5` and Cloudflare Vectorize to find items by concept and meaning alongside BM25 keyword search.
+- Both features are optional and can be toggled on/off in **Settings** (`/settings`).
 
 ### B. Cloudflare — one-click self-hosting
 
@@ -268,7 +150,7 @@ app credits by default. One credit counts each started 1,000 characters sent in
 an embedding input. Credits track workload; they are not a provider-bill estimate.
 At the cap, Anansi sends no more embedding requests; captures still save, and
 search requests that cannot be embedded fall back to keyword results. You can
-change the cap in Settings. Local Ollama search does not use hosted credits.
+change the cap in Settings.
 
 After the first successful deploy, open the Worker project’s **Settings → Build
 → Build Variables and Secrets** and add `BUN_VERSION=1.3.1` for subsequent
@@ -292,8 +174,7 @@ before publishing the Worker.
 
 #### Manual deploy and local development
 
-The one-click button is the easiest first install. For a manual deployment,
-configure the resources and secrets in your Cloudflare account, then run:
+For a manual deployment, configure the resources and secrets in your Cloudflare account, then run:
 
 ```powershell
 bun run cf-typegen
@@ -301,14 +182,12 @@ bun run build
 bun run deploy
 ```
 
-`bun run deploy` applies remote D1 migrations and publishes the Worker output
-created by `bun run build`.
-Local development remains SQLite-backed through `bun run dev:local`; Wrangler's
-Cloudflare Vite build uses a separate config and does not change that workflow.
+`bun run deploy` applies remote D1 migrations and publishes the Worker output created by `bun run build`.
+Local development runs through `bun run dev` (powered by Wrangler with local D1 emulation).
 
 ## 🧠 Ask it from your agent (MCP)
 
-Streamable HTTP MCP server at `http://127.0.0.1:3001/mcp` locally (or `https://<worker>.workers.dev/mcp` when hosted). Bearer auth with `MCP_TOKEN` when configured. The web `/mcp` setup page uses a literal `<YOUR_MCP_TOKEN>` placeholder and never prints the secret.
+Streamable HTTP MCP server at `http://127.0.0.1:8787/mcp` locally (or `https://<worker>.workers.dev/mcp` when hosted). Bearer auth with `ANANSI_SECRET` (or legacy `MCP_TOKEN`) when configured. The web `/mcp` setup page uses a literal `<YOUR_ANANSI_SECRET>` placeholder and never prints the secret.
 
 | Tool | Purpose |
 | --- | --- |
@@ -321,129 +200,59 @@ Streamable HTTP MCP server at `http://127.0.0.1:3001/mcp` locally (or `https://<
 | `list_tags` | Visible tag vocabulary and usage counts |
 | `library_stats` | Visible library and media statistics |
 
-The optional `source` filter accepts visible `x`, `reddit`, `github`, `web`, and `tiktok`
-items. MCP search is
-keyword/BM25 today; it does not claim the web UI's optional semantic ranking.
+The optional `source` filter accepts visible `x`, `reddit`, `github`, `web`, and `tiktok` items.
 
-Claude Code:
+### Connecting your agent
+
+**Claude Code**:
 
 ```bash
-claude mcp add --transport http anansi http://127.0.0.1:3001/mcp --header "Authorization: Bearer <YOUR_MCP_TOKEN>"
+claude mcp add --transport http anansi http://127.0.0.1:8787/mcp --header "Authorization: Bearer <YOUR_ANANSI_SECRET>"
 ```
 
-Codex / env-backed clients:
-
-```toml
-[mcp_servers.anansi]
-url = "http://127.0.0.1:3001/mcp"
-bearer_token_env_var = "MCP_TOKEN"
-```
-
-Keep `MCP_TOKEN` in the client environment, never in a committed file.
-
-### Choose a transport
-
-Anansi exposes the same MCP server through two transports. The tool definitions
-and database functions are shared; only the connection method changes.
-
-| Use case | Configuration | Transport and database | Authentication |
-| --- | --- | --- | --- |
-| OpenCode or another local agent | `opencode.json` | Starts `bun run apps/cli/src/cli.ts serve --mcp` and reads the local SQLite library directly | The local process boundary; no HTTP token |
-| Browser-based or remote-capable clients | MCP URL above | Streamable HTTP at `/mcp`; local Vite proxies `3001` to the internal Bun server on `8788` | `Authorization: Bearer <MCP_TOKEN>` |
-
-The OpenCode entry is deliberately `type: "local"`:
+**Cursor / Windsurf / Codex (HTTP MCP)**:
 
 ```json
 {
-  "mcp": {
+  "mcpServers": {
     "anansi": {
-      "type": "local",
-      "command": ["bun", "run", "apps/cli/src/cli.ts", "serve", "--mcp"],
-      "enabled": true
+      "url": "http://127.0.0.1:8787/mcp",
+      "headers": {
+        "Authorization": "Bearer <YOUR_ANANSI_SECRET>"
+      }
     }
   }
 }
 ```
 
-This is not a second MCP implementation. The CLI connects the shared server
-to an stdio transport, while `/mcp` connects that same server to the
-Web-standard Streamable HTTP transport. The CLI writes diagnostics to stderr;
-stdout remains reserved for JSON-RPC.
-
-### Verify the MCP paths
-
-For a repeatable local acceptance check, run:
-
-```bash
-bun run scripts/e2e-local-smoke.ts
-```
-
-This requires a running Ollama daemon with the configured embedding and tag
-models. It uses a temporary SQLite library and exercises authenticated local
-ingest, `initialize`, `tools/list`, search, and both HTTP and stdio MCP. If the
-AI jobs remain pending, the harness stops before its MCP assertions; treat
-that as an Ollama/model-readiness failure rather than an MCP transport result.
-For the OpenCode wiring itself, run:
-
-```bash
-opencode mcp list
-```
-
-The Anansi entry should report `connected`. This verifies that OpenCode can
-launch the configured stdio process; it does not test the HTTP route.
-
-With `bun run dev:local` running, the HTTP route can be checked at both layers:
-
-```text
-http://127.0.0.1:8788/mcp   internal Bun handler
-http://127.0.0.1:3001/mcp   public local origin and Vite proxy
-```
-
-The authenticated HTTP check should reject a wrong bearer with `401`, accept
-`initialize` with `200`, list the same eight tools, complete a search and
-`get_saved` call, and return a normal MCP error/result for hostile search text.
-These local checks prove the local handler, proxy, auth, and transport wiring;
-they do not prove a deployed Cloudflare Worker or an external client reaching
-it over the internet.
-
-The standalone scripts under `apps/cli/scripts/mcp-smoke.ts` and
-`apps/web/scripts/mcp-http-smoke.ts` also exercise real transports. Their
-search assertions depend on the hard-coded sample query being present in the
-current library, so a zero-result failure can be a stale data fixture rather
-than a transport failure. Use `scripts/e2e-local-smoke.ts` for an isolated,
-fixture-controlled acceptance run.
-
 ## 🏗️ How it works
 
 ```mermaid
 flowchart LR
-  B[Browser extension<br/>session capture + queue] -->|POST /api/ingest<br/>INGEST_TOKEN| S[Web server<br/>validate + parse]
-  S -->|local dev| L[(data/anansi.db<br/>SQLite + FTS5)]
-  S -->|hosted| D[(D1<br/>meta + text + retry state)]
-  S -->|hosted| R[(R2<br/>accepted image copies)]
-  L --> W[Web library UI]
-  D --> W
-  L --> M[MCP server<br/>search / get / recent / by-author]
-  D --> M
-  M --> A[Claude / Codex / agent]
+  B[Browser extension<br/>session capture + queue] -->|POST /api/ingest<br/>ANANSI_SECRET| S[Web Worker<br/>validate + parse]
+  S --> D[(Cloudflare D1<br/>meta + text + search)]
+  S --> R[(Cloudflare R2<br/>accepted image copies)]
+  S --> AI[(Workers AI<br/>Clef tagging + embeddings)]
+  S --> V[(Vectorize<br/>semantic index)]
+  D --> W[Web library UI]
+  D --> M[Streamable HTTP MCP<br/>/mcp]
+  M --> A[Claude / Codex / Agents]
 ```
 
-Durable boundaries: extension captures and queues; server validates and parses; database owns identity, search, removal state, and provenance; MCP and HTTP call the same database functions.
+Durable boundaries: extension captures and queues; worker validates and parses; database owns identity, search, removal state, and provenance; MCP and HTTP call the same database functions.
 
 <details>
-<summary><strong>Project structure & local API</strong></summary>
+<summary><strong>Project structure & API</strong></summary>
 
 ```text
-apps/cli/          Local CLI, import adapters, database and stdio MCP entrypoint
 apps/extension/    WXT React MV3 extension and platform content scripts
-apps/web/          TanStack Start UI, JSON API, MCP HTTP route, local server
-packages/db/       SQLite/D1 schema, migrations, search, and item operations
+apps/web/          TanStack Start UI, JSON API, Streamable HTTP MCP route, Worker entrypoint
+packages/db/       D1/SQLite schema, migrations, search, and item operations
 packages/mcp/      Transport-independent MCP server and tool definitions
 packages/sources/  Shared capture contracts and source parsers
 packages/ui/       Shared UI components and styles
-wrangler.jsonc    Cloudflare Worker bindings and deployment resources
 packages/env/      Typed runtime environment bindings
-scripts/            Explicit local smoke and development entrypoints
+wrangler.jsonc    Cloudflare Worker bindings and deployment configuration
 ```
 
 ```text
@@ -453,18 +262,7 @@ GET  /api/sources GET/PATCH /api/ai POST /api/ingest POST /api/extension/heartbe
 GET  /api/extension/config
 ```
 
-`POST /api/ingest` and heartbeat require `INGEST_TOKEN`. Ingest is closed when no token is configured.
-
-CLI for local DB / parser work:
-
-```bash
-bun run anansi --help
-bun run anansi db migrate
-bun run anansi search "design system"
-bun run anansi recent --limit 20
-bun run anansi media sync
-bun run anansi serve --mcp
-```
+`POST /api/ingest` and heartbeat require `ANANSI_SECRET` (or `INGEST_TOKEN`). Ingest is closed when no secret is configured.
 
 </details>
 
@@ -474,28 +272,26 @@ bun run anansi serve --mcp
 - GitHub + Reddit use browser-managed session cookies; X uses signed-in page scripts. Cookie values are never read or uploaded.
 - Raw payloads are bounded and validated before server-side parsing; extension traffic is bearer-authed
 - Chrome bookmark access is optional, requested only when mirroring is enabled
-- Local DB + media live under `data/` (local dev); D1 + R2 in your account (hosted). Never commit `.env`, database files, raw captures, or media.
+- D1 + R2 in your Cloudflare account. Never commit secrets, database files, raw captures, or media.
 
 ## 🛠️ Development
 
 [![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black?logo=bun)](https://bun.sh)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](./package.json)
-[![Local SQLite dev](https://img.shields.io/badge/Local--dev-SQLite-green)](./README.md)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange)](./wrangler.jsonc)
 
 ```bash
 bun test
 bun run typecheck
-bun run --cwd apps/extension compile
 bun run --cwd apps/extension build
-bun run --cwd apps/web build
-bun run apps/web/scripts/mcp-http-smoke.ts
+bun run build
 ```
 
 Covers queue recovery, retries, parser fixtures, authenticated ingest, GitHub import/live transitions, search, source health, and card rendering. See [CONTRIBUTING.md](./CONTRIBUTING.md) — scrub fixtures before committing.
 
 ## 🗺️ Roadmap
 
-- [ ] 🔍 Cloudflare AI-enrichment acceptance — local Ollama tagging/semantic search and the HTTP/stdio MCP paths are exercised; clean-account/provider evidence remains pending
+- [ ] 🔍 Cloudflare AI-enrichment acceptance — Workers AI Clef tagging and Vectorize semantic search clean-account acceptance
 - [ ] 🗂️ Collections v2 — curated hand-picked lists alongside today's saved filter views
 - [ ] First clean-account deploy: install → migrate → first capture → search → export → restore against Cloudflare
 - [ ] Measured free-tier usage + media-host allowlist published here
