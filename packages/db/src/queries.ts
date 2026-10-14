@@ -8,6 +8,7 @@ import { canonicalTopicId, topicDefinition } from "./topics.ts";
 export type CaptureOrigin =
   | "platform_event"
   | "platform_import"
+  | "archive_import"
   | "toolbar"
   | "context_menu"
   | "chrome_bookmark"
@@ -41,6 +42,7 @@ export interface IngestItem {
   metrics: Record<string, number>;
   media: { kind: string; originUrl: string; width?: number; height?: number }[];
   links: string[];
+  nsfw?: boolean;
   raw: unknown;
 }
 
@@ -162,6 +164,7 @@ export async function prepareUpsertItems(
       captureOrigin: options.captureOrigin ?? "legacy_unknown",
       saveOrder: item.saveOrder ?? null,
       metrics: JSON.stringify({ ...objectJson(was?.metrics), ...item.metrics }),
+      nsfw: item.nsfw ? 1 : was?.nsfw ?? 0,
       // links ride inside raw rather than earning a column: the spec's schema
       // has none, and they are read only when one item is opened. Folded in
       // here because the row shape drops every NormalizedItem field that has

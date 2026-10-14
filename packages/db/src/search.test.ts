@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { setArchived, setSourceEnabled, tagItems, type IngestItem, upsertItems } from "./queries.ts";
+import { setArchived, tagItems, type IngestItem, upsertItems } from "./queries.ts";
 import { items, media, tags } from "./schema.ts";
 import { getItems, hydrateSearchItems, listItems, searchItemsPage, sourceHealth, toFtsQuery } from "./search.ts";
 import { openTestDb } from "./test-db.ts";
@@ -214,7 +214,6 @@ describe("search result projection characterization", () => {
     await setArchived(db, [archivedId], true);
     await db.update(items).set({ favorite: 1, note: "manual note" }).where(eq(items.id, richId));
     await db.update(items).set({ platformSaved: 0 }).where(eq(items.id, removedId));
-    await setSourceEnabled(db, "tiktok", false);
     await db.update(media).set({ storedKey: "media/main" }).where(eq(media.originUrl, "https://cdn.test/main.jpg"));
     await db.update(media).set({ storedKey: "media/quote" }).where(eq(media.originUrl, "https://cdn.test/quote.jpg"));
 
@@ -227,7 +226,7 @@ describe("search result projection characterization", () => {
     expect(lexical.items).toHaveLength(1);
     expect(list.items).toHaveLength(1);
     expect(semantic).toHaveLength(1);
-    expect(hiddenOnly).toHaveLength(0);
+    expect(hiddenOnly).toHaveLength(1);
 
     const lexicalItem = lexical.items[0]!;
     const listItem = list.items[0]!;

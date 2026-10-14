@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { api, type Collection } from "../lib/api.ts";
 import { libraryKeys } from "../lib/library-query.ts";
+import { restoreLibraryFile } from "../lib/restore-library.ts";
 import { SavedViewsSkeleton, useSlowLoad } from "./skeleton.tsx";
 
 export function LibraryActions({ current, onApply }: {
@@ -12,6 +13,9 @@ export function LibraryActions({ current, onApply }: {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState<string | null>(null);
+  const [abandonableBackupId, setAbandonableBackupId] = useState<string | null>(null);
   const collections = useQuery({
     queryKey: libraryKeys.collections(),
     queryFn: ({ signal }) => api.collections(signal),
@@ -73,6 +77,26 @@ export function LibraryActions({ current, onApply }: {
     }
   };
 
+  const restoreFile = async (file: File) => {
+    setRestoring(true);
+    setRestoreProgress("Checking export…");
+    setAbandonableBackupId(null);
+    try {
+      await restoreLibraryFile(file, setRestoreProgress);
+      await queryClient.invalidateQueries();
+      toast.success("Library data restored");
+    } catch (error) {
+      setRestoreProgress(message(error));
+      toast.error("Restore stopped", { description: message(error) });
+      try {
+        const { restore } = await api.restoreStatus();
+        if (restore?.status === "active" && Object.values(restore.progress).every((count) => count === 0)) {
+          setAbandonableBackupId(restore.backupId);
+        }
+      } catch { /* Keep the original restore error. */ }
+    } finally { setRestoring(false); }
+  };
+
   return (
     <details style={{ position: "relative" }}>
       <summary style={summaryStyle}>Saved views</summary>
@@ -93,7 +117,22 @@ export function LibraryActions({ current, onApply }: {
           <input id="collection-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name this view" maxLength={80} style={{ flex: 1, minWidth: 0, height: 30, borderRadius: 5, border: "1px solid var(--edge)", background: "var(--ink)", color: "var(--text)", padding: "0 8px", font: "inherit", fontSize: 12 }} />
           <button type="submit" disabled={!name.trim() || save.isPending} style={smallButton}>Save</button>
         </form>
-        <button type="button" disabled={exporting} onClick={() => void exportAll()} style={{ ...smallButton, width: "100%", marginTop: 8, background: "transparent", color: "var(--muted)" }}>{exporting ? "Preparing export…" : "Download full library export"}</button>
+        <button type="button" disabled={exporting} onClick={() => void exportAll()} style={{ ...smallButton, width: "100%", marginTop: 8, background: "transparent", color: "var(--muted)" }}>{exporting ? "Preparing export…" : "Download library data (no media files)"}</button>
+        <label style={{ ...smallButton, display: "block", textAlign: "center", marginTop: 8, cursor: restoring ? "wait" : "pointer" }}>
+          {restoring ? "Restoring…" : "Restore into an empty library"}
+          <input type="file" accept=".json,application/json" disabled={restoring} style={{ display: "none" }} onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (file) void restoreFile(file);
+          }} />
+        </label>
+        {restoreProgress && <p role="status" style={{ ...statusStyle, lineHeight: 1.5 }}>{restoreProgress}</p>}
+        {abandonableBackupId && <button type="button" style={{ ...smallButton, width: "100%" }} onClick={() => {
+          void api.restoreAbort(abandonableBackupId).then(() => {
+            setAbandonableBackupId(null);
+            setRestoreProgress("Empty restore session cleared. Choose a corrected export.");
+          }).catch((error) => toast.error("Could not clear restore session", { description: message(error) }));
+        }}>Clear empty restore session</button>}
       </div>
     </details>
   );

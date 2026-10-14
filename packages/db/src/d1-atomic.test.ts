@@ -102,6 +102,15 @@ describe("D1 atomic capture", () => {
     )).toBe(true);
   });
 
+  test("legacy one-shot restore rejects a large D1 backup before writing", async () => {
+    const source = openTestDb();
+    await upsertItems(source, [item]);
+    const backup = await exportLibrary(source);
+    const db = openD1(new FakeD1() as unknown as D1Database);
+    const large = { ...backup, items: Array.from({ length: D1_ATOMIC_STATEMENT_LIMIT + 1 }, (_, index) => ({ ...backup.items[0]!, id: `item-${index}`, externalId: `external-${index}` })) };
+    await expect(restoreLibrary(db, large)).rejects.toThrow("resumable restore API");
+  });
+
   test("rejects an oversized atomic group before D1 executes a partial batch", async () => {
     const binding = new FakeD1();
     const db = openD1(binding as unknown as D1Database);
@@ -113,6 +122,7 @@ describe("D1 atomic capture", () => {
           id: `id-${index}`,
           raw: "{}",
           metrics: "{}",
+          nsfw: item.nsfw ? 1 : 0,
         }),
       ),
     )).rejects.toThrow("personal-tier limit");

@@ -67,6 +67,104 @@ const setup = (
 };
 
 describe("CaptureQueue", () => {
+	test("upgrade assigns deterministic order without losing legacy records", async () => {
+		const h = setup();
+		await h.queue.enqueue(capture("z-older"));
+		await h.queue.enqueue(capture("a-newer"));
+		for (const record of await h.store.list()) {
+			const { sequence: _sequence, ...legacy } = record;
+			await h.store.put({ ...legacy, createdAt: record.eventId === "z-older" ? 1 : 2 });
+		}
+		const restart = createCaptureQueue({ ...h, random: () => 0.5 });
+		expect(await restart.getStatus()).toMatchObject({ queued: 2 });
+		const upgraded = (await h.store.list()).sort((a, b) => a.sequence! - b.sequence!);
+		expect(upgraded.map((record) => [record.eventId, record.sequence])).toEqual([["z-older", 1], ["a-newer", 2]]);
+		expect(upgraded.map((record) => record.capture)).toEqual([capture("z-older"), capture("a-newer")]);
+		expect(h.scheduler.times.at(-1)).toBe(h.clock.now());
+	});
+	test("restart finishes an interrupted same-millisecond ordering upgrade in the original order", async () => {
+		const h = setup();
+		for (const id of ["alpha", "beta", "gamma"]) await h.queue.enqueue(capture(id));
+		for (const record of await h.store.list()) {
+			const { sequence: _sequence, ...legacy } = record;
+			await h.store.put({ ...legacy, createdAt: 100 });
+		}
+		const first = await h.store.get("alpha");
+		await h.store.put({ ...first!, sequence: 1 });
+		const restarted = createCaptureQueue({ ...h, random: () => 0.5 });
+		await restarted.getStatus();
+		const ordered = (await h.store.list()).sort((a, b) => a.sequence! - b.sequence!);
+		expect(ordered.map((record) => record.eventId)).toEqual(["alpha", "beta", "gamma"]);
+	});
+	test("a later unsave retires a terminally failed save without retrying stale state", async () => {
+		const first = capture("bad-save");
+		const unsave = capture("later-unsave", "x", { action: "unsave", externalId: first.externalId,
+			canonicalUrl: first.canonicalUrl, normalizedItem: undefined });
+		const h = setup([{ kind: "http", status: 422 }, { kind: "success", receipt: {
+			eventId: unsave.eventId, itemId: null, outcome: "ignored_stale",
+		} }]);
+		await h.queue.enqueue(first);
+		await h.queue.retry();
+		expect((await h.store.get(first.eventId))?.state).toBe("failed");
+		await h.queue.enqueue(unsave);
+		expect(await h.store.get(first.eventId)).toBeNull();
+		await h.queue.retry({ includeFailed: true });
+		expect(h.transport.calls.map((record) => record.eventId)).toEqual([first.eventId, unsave.eventId]);
+		expect(await h.store.get(unsave.eventId)).toBeNull();
+	});
+	test("retires a failed save and delivers its already queued unsave in the same drain", async () => {
+		const save = capture("queued-bad-save");
+		const unsave = capture("queued-later-unsave", "x", { action: "unsave", externalId: save.externalId,
+			canonicalUrl: save.canonicalUrl, normalizedItem: undefined });
+		const h = setup([
+			{ kind: "http", status: 422 },
+			{ kind: "success", receipt: { eventId: unsave.eventId, itemId: null, outcome: "ignored_stale" } },
+		]);
+
+		await h.queue.enqueue(save);
+		await h.queue.enqueue(unsave);
+		await h.queue.retry();
+
+		expect(h.transport.calls.map((record) => record.eventId)).toEqual([save.eventId, unsave.eventId]);
+		expect(await h.store.list()).toHaveLength(0);
+	});
+	test("an unsave can supersede a failed save even when that failure filled the queue", async () => {
+		const first = capture("full-bad-save");
+		const unsave = capture("full-later-unsave", "x", { action: "unsave", externalId: first.externalId,
+			canonicalUrl: first.canonicalUrl, normalizedItem: undefined });
+		const h = setup([{ kind: "http", status: 422 }], { maxTotalBytes: 500 });
+		await h.queue.enqueue(first);
+		await h.queue.retry();
+		const old = await h.store.get(first.eventId);
+		expect(old?.state).toBe("failed");
+		expect(old!.sizeBytes + new TextEncoder().encode(JSON.stringify(unsave)).byteLength).toBeGreaterThan(500);
+		await h.queue.enqueue(unsave);
+		expect(await h.store.get(first.eventId)).toBeNull();
+		expect((await h.store.get(unsave.eventId))?.state).toBe("queued");
+	});
+	test("retrying save blocks its unsave but not unrelated live items", async () => {
+		const success = (r: OutboxRecord) => ({ kind: "success" as const, receipt: { eventId: r.eventId, itemId: "i", outcome: "created" } });
+		const h = setup([{ kind: "network" }, success, success, success]);
+		const save = capture("first");
+		await h.queue.enqueue(save);
+		await h.queue.retry();
+		await h.queue.enqueue(capture("second", "x", { action: "unsave", externalId: save.externalId, normalizedItem: undefined }));
+		await h.queue.enqueue(capture("unrelated"));
+		await h.queue.retry();
+		expect(h.transport.calls.map((c) => c.eventId)).toEqual(["first", "unrelated"]);
+		h.clock.set(20_000);
+		await h.queue.retry();
+		expect(h.transport.calls.map((c) => c.eventId)).toEqual(["first", "unrelated", "first", "second"]);
+	});
+	test("live saves overtake queued import pages between requests", async () => {
+		const success = (r: OutboxRecord) => ({ kind: "success" as const, receipt: { eventId: r.eventId, itemId: "i", outcome: "created" } });
+		const h = setup([success, success]);
+		await h.queue.enqueue({ schemaVersion: 1, payloadType: "raw_page", eventId: "history", source: "x", action: "snapshot",
+			observedAt, captureMethod: "platform_import", runId: "run", page: 1, raw: {} });
+		await h.queue.enqueue(capture("live"));
+		await h.queue.retry();
+		expect(h.transport.calls.map((c) => c.eventId)).toEqual(["live", "history"]);
+	});
 	test("persists before transport and deletes only after a matching receipt", async () => {
 		const event = capture("persist-first");
 		const { queue, store, transport, scheduler } = setup([

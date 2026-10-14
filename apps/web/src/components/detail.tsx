@@ -1,4 +1,3 @@
-import type { ItemDetail } from "@anansi/db";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";

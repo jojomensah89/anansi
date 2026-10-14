@@ -31,6 +31,6 @@ export function openD1(binding: D1Database): AnansiDb {
       );
     }
     await db.batch(statements as unknown as Parameters<typeof db.batch>[0]);
-  });
+  }, D1_ATOMIC_STATEMENT_LIMIT);
   return db as unknown as AnansiDb;
 }

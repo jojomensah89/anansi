@@ -91,7 +91,7 @@ export function sourcePresentation(
 	}
 	return {
 		state: "ready",
-		text: source.mode === "manual" ? "Save a page or selection" : "Ready",
+		text: source.mode === "manual" ? "Save a page or selection" : source.source === "tiktok" ? "Ready to import through the extension" : "Ready",
 		tone: "ok",
 	};
 }

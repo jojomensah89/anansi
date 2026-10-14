@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 import { Rail } from "../components/rail.tsx";
 import { SettingsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
 import { api, type AiSettingsResponse } from "../lib/api.ts";
+import { useShowNsfw } from "../lib/settings.ts";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
 function Settings() {
+  const [showNsfw, setShowNsfw] = useShowNsfw();
   const [data, setData] = useState<AiSettingsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reclassifying, setReclassifying] = useState(false);
@@ -186,13 +188,26 @@ function Settings() {
             <button type="button" className="mono" disabled={reclassifying || watchingTagging || data.capabilities?.autoTagging === false} onClick={() => void reclassify()} style={{ border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 8px", background: "transparent", color: "var(--muted)", fontSize: 10.5, cursor: reclassifying || watchingTagging ? "wait" : "pointer" }}>{reclassifying ? "Reclassifying…" : "Reclassify AI topics"}</button>
           </div>
         </section>}
+      <section className="anansi-settings-section" style={{ marginTop: 28 }}>
+        <h2 className="anansi-settings-heading">Content & display</h2>
+        <div className="anansi-settings-list">
+          <Toggle
+            icon={<ShieldIcon />}
+            label="Include sensitive (NSFW) content"
+            badge="Filter"
+            description="Display saved bookmarks and posts flagged as sensitive or adult content by X and Reddit."
+            checked={showNsfw}
+            onChange={setShowNsfw}
+          />
+        </div>
+      </section>
     </main>
   </div>;
 }
 
 const smallButtonStyle: React.CSSProperties = { border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 8px", background: "transparent", color: "var(--muted)", fontSize: 10.5, cursor: "pointer" };
 
-function Toggle({ icon, label, badge, description, checked, disabled = false, onChange }: { icon: React.ReactNode; label: string; badge: "Smart" | "Beta"; description: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
+function Toggle({ icon, label, badge, description, checked, disabled = false, onChange }: { icon: React.ReactNode; label: string; badge: "Smart" | "Beta" | "Filter"; description: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
   return <div className="anansi-settings-row">
     <span className="anansi-settings-icon" aria-hidden="true">{icon}</span>
     <span className="anansi-settings-copy"><strong>{label}</strong><span className={`anansi-settings-badge anansi-settings-badge-${badge.toLowerCase()}`}>{badge}</span><span className="anansi-settings-description">{description}</span></span>
@@ -202,3 +217,4 @@ function Toggle({ icon, label, badge, description, checked, disabled = false, on
 
 function CpuIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4M10 10h4v4h-4z" /></svg>; }
 function SparkIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m12 3 1.4 5.6L19 10l-5.6 1.4L12 17l-1.4-5.6L5 10l5.6-1.4L12 3Z" /><path d="m19 16 .6 2.4L22 19l-2.4.6L19 22l-.6-2.4L16 19l2.4-.6L19 16Z" /></svg>; }
+function ShieldIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>; }

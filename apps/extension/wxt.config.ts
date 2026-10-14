@@ -55,7 +55,13 @@ export default defineConfig({
 			"https://old.reddit.com/*",
 			"https://reddit.com/*",
 			"https://github.com/*",
-			`${connection.origin}/*`,
+			"https://www.tiktok.com/*",
+			"https://tiktok.com/*",
+			...(connection.origin ? [`${connection.origin}/*`] : []),
+		],
+		optional_host_permissions: [
+			"https://*/*",
+			"http://127.0.0.1/*",
 		],
 	},
 });

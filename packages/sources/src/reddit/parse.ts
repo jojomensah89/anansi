@@ -104,6 +104,7 @@ export function parseSavedListing(raw: unknown, ctx: ParseContext): NormalizedIt
       },
       media: isComment ? [] : mediaOf(d),
       links: outbound,
+      nsfw: Boolean(d.over_18),
       raw: {
         kind,
         subreddit: d.subreddit ?? null,

@@ -108,6 +108,15 @@ export function readItemList(raw: unknown): ItemListPage {
 
 const HANDLE = /^[A-Za-z0-9_.]{1,24}$/;
 
+export function readAccountInfo(raw: unknown): { handle: string | null; signedOut: boolean } {
+	const root = raw as Any;
+	const handle = root?.data?.username;
+	if (root?.message === "success" && typeof handle === "string" && HANDLE.test(handle)) {
+		return { handle, signedOut: false };
+	}
+	return { handle: null, signedOut: root?.data?.error_code === 13 };
+}
+
 /**
  * The signed-in handle, from the blob TikTok rehydrates its app with.
  *
@@ -119,7 +128,9 @@ export function readHandle(scope: unknown): string | null {
 	const root = scope as Any;
 	const candidates = [
 		root?.__DEFAULT_SCOPE__?.["webapp.app-context"]?.user?.uniqueId,
+		root?.__DEFAULT_SCOPE__?.["webapp.app-context"]?.user?.username,
 		root?.["webapp.app-context"]?.user?.uniqueId,
+		root?.["webapp.app-context"]?.user?.username,
 		root?.AppContext?.user?.uniqueId,
 		root?.__DEFAULT_SCOPE__?.["webapp.app-context"]?.uniqueId,
 	];
@@ -189,6 +200,7 @@ export interface MutationConfig {
 	/** Field carrying the direction, and the value that means "saved". */
 	actionField?: string;
 	savedValue?: string;
+	unsavedValue?: string;
 }
 
 export interface FavouriteMutation {
@@ -196,14 +208,19 @@ export interface FavouriteMutation {
 	videoId: string;
 }
 
+/** TikTok can return HTTP 200 for a rejected action; require its own success code. */
+export function isSuccessfulMutationResponse(raw: unknown): boolean {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+	const response = raw as { status_code?: unknown; statusCode?: unknown };
+	return response.status_code === 0 || response.statusCode === 0;
+}
+
 /**
  * Read a favourite mutation, entirely as configured.
  *
- * Deliberately inert until the server says otherwise. TikTok's mutation
- * endpoint and its field names have not been confirmed against a current
- * authenticated request, and inventing them would produce an adapter that
- * looks finished and silently records nothing. When a real fixture settles the
- * shape, the config describes it and this starts working with no reinstall.
+ * The server describes the mutation endpoint and field names, so these can be
+ * changed without rebuilding the extension. A current authenticated browser
+ * acceptance check is still required before treating them as stable.
  */
 export function readFavouriteMutation(
 	url: string,
@@ -211,6 +228,10 @@ export function readFavouriteMutation(
 	config: MutationConfig,
 ): FavouriteMutation | null {
 	if (!config.mutationUrl || !config.idField) return null;
+	try {
+		const host = new URL(url, "https://www.tiktok.com").hostname.toLowerCase();
+		if (host !== "www.tiktok.com" && host !== "tiktok.com") return null;
+	} catch { return null; }
 	const path = pathOf(url);
 	if (!path || !path.includes(config.mutationUrl)) return null;
 
@@ -235,5 +256,7 @@ export function readFavouriteMutation(
 	if (!config.actionField) return { action: "save", videoId };
 	const direction = fields.get(config.actionField);
 	const saved = config.savedValue ?? "1";
+	const unsaved = config.unsavedValue ?? "0";
+	if (direction !== saved && direction !== unsaved) return null;
 	return { action: direction === saved ? "save" : "unsave", videoId };
 }

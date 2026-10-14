@@ -58,3 +58,45 @@ export function useHideRemoved(): [boolean, (next: boolean) => void] {
 
   return [hidden, set];
 }
+
+const NSFW_KEY = "anansi:show-nsfw";
+
+function readNsfw(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(NSFW_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether to include NSFW/sensitive items in the library.
+ *
+ * Off by default: items marked sensitive by X or over_18 by Reddit are
+ * excluded from queries and search until explicitly toggled on.
+ */
+export function useShowNsfw(): [boolean, (next: boolean) => void] {
+  const [showNsfw, setShowNsfw] = useState(false);
+
+  useEffect(() => {
+    setShowNsfw(readNsfw());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === NSFW_KEY) setShowNsfw(readNsfw());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const set = useCallback((next: boolean) => {
+    setShowNsfw(next);
+    try {
+      localStorage.setItem(NSFW_KEY, next ? "1" : "0");
+    } catch {
+      // The preference simply does not persist. It still applies this session.
+    }
+  }, []);
+
+  return [showNsfw, set];
+}
+

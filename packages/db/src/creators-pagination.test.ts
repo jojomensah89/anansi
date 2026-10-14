@@ -41,7 +41,7 @@ describe("creator pagination", () => {
 			fixture("reddit", "reddit-shared", "shared", "Shared Reddit"),
 			fixture("x", "x-other", "other", "Other"),
 			fixture("x", "x-archived", "archived", "Archived"),
-			fixture("tiktok", "hidden", "hidden", "Hidden"),
+			fixture("tiktok", "favorite", "tiktok-user", "TikTok User"),
 		]);
 		const [archived] = await db
 			.select({ id: items.id })
@@ -52,14 +52,14 @@ describe("creator pagination", () => {
 		await setArchived(db, [archivedId], true);
 
 		const page = await creatorPage(db, { limit: 10 });
-		expect(page.total).toBe(3);
-		expect(page.singleSaveCount).toBe(2);
-		expect(page.topTenSaves).toBe(4);
+		expect(page.total).toBe(4);
+		expect(page.singleSaveCount).toBe(3);
+		expect(page.topTenSaves).toBe(5);
 		expect(
 			page.creators.map(
 				(creator) => `${creator.source}:${creator.authorHandle}`,
 			),
-		).toEqual(["x:shared", "reddit:shared", "x:other"]);
+		).toEqual(["x:shared", "reddit:shared", "tiktok:tiktok-user", "x:other"]);
 
 		const searched = await creatorPage(db, { query: "SHARED", limit: 10 });
 		expect(searched.total).toBe(2);

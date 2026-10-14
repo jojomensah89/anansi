@@ -23,7 +23,7 @@ test("detail tags use the shared picker instead of a create-only form", () => {
 		note: "",
 		favorite: false,
 		tags: ["research"],
-		tagMeta: [{ label: "research", color: "#22c55e", count: 1 }],
+		tagMeta: [{ label: "research", color: "#22c55e" }],
 		archived: false,
 		postedAt: null,
 		savedAt: 1,

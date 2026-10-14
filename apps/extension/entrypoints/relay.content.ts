@@ -16,6 +16,7 @@ import {
   parseExtensionMessage,
   type PlatformSource,
 } from "../lib/messages.ts";
+import { createRelayHandshake } from "../lib/relay-handshake.ts";
 
 export default defineContentScript({
   matches: [
@@ -25,6 +26,8 @@ export default defineContentScript({
     "https://old.reddit.com/*",
     "https://reddit.com/*",
     "https://github.com/*",
+    "https://www.tiktok.com/*",
+    "https://tiktok.com/*",
   ],
   runAt: "document_start",
 
@@ -32,6 +35,10 @@ export default defineContentScript({
     // Correlation only. MAIN-world code can observe this value, so it is not
     // an authentication secret against code already executing in the page.
     const nonce = crypto.randomUUID();
+    let persistenceTail: Promise<unknown> = Promise.resolve();
+    const handshake = createRelayHandshake((message: unknown) =>
+      window.postMessage(message, window.location.origin));
+    document.addEventListener("DOMContentLoaded", () => handshake.documentReady(), { once: true });
 
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
@@ -41,7 +48,25 @@ export default defineContentScript({
         expectedNonce: nonce,
       });
       if (!parsed.ok) return;
-      void browser.runtime.sendMessage(parsed.message).catch(() => {});
+      if (parsed.message.action === "bookmark") {
+        // Retry the same mutation identity until the worker acknowledges its
+        // durable handoff. A sleeping/restarting worker must not lose a save.
+        const message = { ...parsed.message, mutationId: parsed.message.mutationId ?? crypto.randomUUID() };
+        const key = `native-handoff:${crypto.randomUUID()}`;
+        const forward = async () => {
+          try {
+            const result = await browser.runtime.sendMessage(message);
+            if (result?.ok) { await browser.storage.local.remove(key); return; }
+          } catch { /* the worker may be restarting */ }
+          setTimeout(() => void forward(), 2_000);
+        };
+        // Separate keys avoid read/modify/write races between open tabs. The
+        // worker replays these if this page closes before acknowledgement.
+        const entry = { message, pageUrl: window.location.href, order: performance.timeOrigin + performance.now() };
+        const persisted = persistenceTail.then(() => browser.storage.local.set({ [key]: entry }));
+        persistenceTail = persisted.catch(() => {});
+        void persisted.then(forward).catch(() => void forward());
+      } else void browser.runtime.sendMessage(parsed.message).catch(() => {});
     });
 
     browser.runtime.onMessage.addListener((message: unknown) => {
@@ -66,8 +91,31 @@ export default defineContentScript({
         pageUrl: window.location.href,
         expectedNonce: nonce,
       });
-      if (parsed.ok) window.postMessage(parsed.message, window.location.origin);
+      if (parsed.ok) {
+        if (parsed.message.action === "configure") handshake.configure(parsed.message);
+        else window.postMessage(parsed.message, window.location.origin);
+      }
       return undefined;
     });
+
+    // The page script starts with no nonce or watched operations. Ask the
+    // background for its current source config as soon as this relay loads;
+    // an already-open SPA tab may never get another tabs.onUpdated event.
+    const host = window.location.hostname;
+    const source = host === "x.com" || host === "twitter.com" ? "x"
+      : host === "github.com" ? "github"
+      : host === "tiktok.com" || host === "www.tiktok.com" ? "tiktok"
+      : "reddit";
+    {
+      void browser.runtime.sendMessage({
+        anansi: "page-event",
+        messageVersion: MESSAGE_PROTOCOL_VERSION,
+        source,
+        nonce,
+        action: "ready",
+        queryId: null,
+        relay: true,
+      }).catch(() => {});
+    }
   },
 });

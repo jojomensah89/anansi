@@ -1,8 +1,29 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { aiEnrichmentJobs, applyAiTags, getAiSettings, itemTags, items, markSemanticChunksComplete, reconcileAiJobs, searchItemsPage, setAiSettings, stageSemanticChunks, upsertItems, type AnansiDb } from "@anansi/db";
+import { aiEnrichmentJobs, applyAiTags, getAiSettings, itemTags, items, markSemanticChunksComplete, reconcileAiJobs, searchItemsPage, setAiSettings, stageSemanticChunks, startLibraryRestore, upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
-import { LocalVectorIndex } from "./local-vector-index.ts";
+
+class TestVectorIndex {
+	dimensions: number;
+	vectors: Map<string, number[]> = new Map();
+	constructor(dimensions: number) { this.dimensions = dimensions; }
+	async upsert(records: Array<{ id: string; values: number[] }>) {
+		for (const r of records) this.vectors.set(r.id, r.values);
+	}
+	async query(values: number[], options?: { topK?: number }) {
+		const matches: Array<{ id: string; score: number }> = [];
+		for (const [id, vec] of this.vectors.entries()) {
+			let dot = 0;
+			for (let i = 0; i < Math.min(values.length, vec.length); i++) dot += (values[i] ?? 0) * (vec[i] ?? 0);
+			matches.push({ id, score: dot });
+		}
+		matches.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+		return matches.slice(0, options?.topK ?? 10);
+	}
+	async deleteByIds(ids: string[]) {
+		for (const id of ids) this.vectors.delete(id);
+	}
+}
 
 /**
  * The HTTP surface, tested against a fully migrated in-memory library with no
@@ -52,6 +73,17 @@ const readJson = async (res: Response | Promise<Response>): Promise<any> =>
 	(await (await res).json()) as any;
 
 describe("handleApi", () => {
+	test("active library restore blocks concurrent extension writes", async () => {
+		const fresh = openLocalDb(":memory:");
+		migrateLocalDb(fresh);
+		const empty = fresh as unknown as AnansiDb;
+		await startLibraryRestore(empty, "f".repeat(64), { items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 });
+		const isolated = { ...env, db: empty };
+		const ingest = await dispatchApi(isolated, new Request("https://anansi.test/api/ingest", {
+			method: "POST", headers: { authorization: "Bearer test-token" }, body: "{}",
+		}));
+		expect(ingest.status).toBe(409);
+	});
 	test("GET /api/stats reports the library size", async () => {
 		const body = await readJson(get("/api/stats"));
 		expect(body.items).toBeGreaterThan(0);
@@ -178,7 +210,7 @@ describe("handleApi", () => {
 		const staged = await stageSemanticChunks(db, canonicalItem, settings.embeddingModel, settings.semanticGeneration);
 		await markSemanticChunksComplete(db, staged.chunks.map((chunk) => chunk.id), 384);
 		const semanticVector = [1, ...Array.from({ length: 383 }, () => 0)];
-		const index = new LocalVectorIndex(384);
+		const index = new TestVectorIndex(384);
 		await index.upsert([
 			...staged.chunks.map((chunk) => ({ id: chunk.id, values: semanticVector })),
 			{ id: "hidden-or-deleted", values: semanticVector },
@@ -200,6 +232,18 @@ describe("handleApi", () => {
 			expect(body.nextCursor).toBeNull();
 			expect(body.results.map((item: { id: string }) => item.id)).toContain(semanticRow.id);
 			expect(body.results.map((item: { id: string }) => item.id)).not.toContain("hidden-or-deleted");
+			const first = await readJson(handleApi(semanticEnv, new Request("https://anansi.test/api/search?q=seed&limit=1", {
+				headers: { authorization: "Bearer library-test-token" },
+			})));
+			expect(first.semantic.applied).toBe(true);
+			expect(first.nextCursor).toBeString();
+			const lexicalFirst = (await searchItemsPage(db, { query: "seed", limit: 1 })).items[0];
+			expect(first.results.map((item: { id: string }) => item.id)).toContain(lexicalFirst?.id);
+			const continued = await readJson(handleApi(semanticEnv, new Request(`https://anansi.test/api/search?q=seed&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`, {
+				headers: { authorization: "Bearer library-test-token" },
+			})));
+			expect(continued.semantic.degradedReason).toBe("pagination-boundary");
+			expect(continued.results.some((item: { id: string }) => item.id === lexicalFirst?.id)).toBe(false);
 			const filtered = await readJson(handleApi(semanticEnv, new Request("https://anansi.test/api/search?q=unmatched+phrase&author=someone-else", {
 				headers: { authorization: "Bearer library-test-token" },
 			})));
@@ -230,7 +274,7 @@ describe("handleApi", () => {
 	test("an empty warming semantic index preserves the lexical page", async () => {
 		await setAiSettings(db, { semanticSearchEnabled: true });
 		const vector = [1, ...Array.from({ length: 383 }, () => 0)];
-		const emptyIndex = new LocalVectorIndex(384);
+		const emptyIndex = new TestVectorIndex(384);
 		const warmingEnv: ApiEnv = {
 			...env,
 			ai: { run: async () => ({ data: [vector] }) },
@@ -245,49 +289,6 @@ describe("handleApi", () => {
 		} finally {
 			await setAiSettings(db, { semanticSearchEnabled: false });
 		}
-	});
-
-	test("local runtime exposes automatic tags when a tagger is configured", async () => {
-		let kicks = 0;
-		const localEnv: ApiEnv = {
-			...env,
-			semantic: {
-				local: true,
-				provider: { model: "local", dimensions: 384, embed: async () => [1, ...Array.from({ length: 383 }, () => 0)] },
-				index: new LocalVectorIndex(384),
-			},
-			tagger: { model: "tag-model", generateTags: async () => ["local"] },
-			taggingKick: () => { kicks += 10; },
-			semanticKick: () => { kicks += 1; },
-		};
-		const headers = { authorization: "Bearer library-test-token", "content-type": "application/json" };
-		const tags = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ autoTaggingEnabled: true }) }));
-		expect(tags.status).toBe(200);
-		expect(kicks).toBe(10);
-		const semantic = await handleApi(localEnv, new Request("https://anansi.test/api/ai", { method: "PATCH", headers, body: JSON.stringify({ semanticSearchEnabled: true, confirmSemanticBackfill: true }) }));
-		expect(semantic.status).toBe(200);
-		expect(kicks).toBe(11);
-		const status = await readJson(handleApi(localEnv, new Request("https://anansi.test/api/ai", { headers })));
-		expect(status.capabilities).toEqual({ semanticSearch: true, autoTagging: true });
-		await setAiSettings(db, { semanticSearchEnabled: false, autoTaggingEnabled: false });
-	});
-
-	test("local automatic tags require a configured tagger", async () => {
-		const localEnv: ApiEnv = {
-			...env,
-			semantic: {
-				local: true,
-				provider: { model: "local", dimensions: 384, embed: async () => [1, ...Array.from({ length: 383 }, () => 0)] },
-				index: new LocalVectorIndex(384),
-			},
-		};
-		const response = await handleApi(localEnv, new Request("https://anansi.test/api/ai", {
-			method: "PATCH",
-			headers: { authorization: "Bearer library-test-token", "content-type": "application/json" },
-			body: JSON.stringify({ autoTaggingEnabled: true }),
-		}));
-		expect(response.status).toBe(400);
-		await setAiSettings(db, { semanticSearchEnabled: false, autoTaggingEnabled: false });
 	});
 
 	test("GET /api/items/:id returns the full item, never raw", async () => {
@@ -403,6 +404,10 @@ describe("handleApi", () => {
 		expect(body.enabled).toBe(true);
 		expect(body.ingest).toEndWith("/api/ingest");
 		expect(body.sources[0].operation).toBe("Bookmarks");
+		expect(body.sources.find((source: { source: string }) => source.source === "tiktok")).toMatchObject({
+			mode: "observe", watchUrls: ["/api/user/collect/item_list"],
+			mutationUrl: "/api/item/collect/", idField: "itemId", actionField: "action", savedValue: "1", unsavedValue: "2",
+		});
 		expect(body.ingestProtocolVersion).toBe(2);
 		// Web is on because it has no legacy path to conflict with. X is on for
 		// acceptance testing; GitHub and Reddit remain staged until each has been
@@ -412,6 +417,7 @@ describe("handleApi", () => {
 			reddit: true,
 			web: true,
 			github: true,
+				tiktok: true,
 		});
 		expect(body.features.chromeBookmarks).toBe(true);
 		const github = body.sources.find(
@@ -465,7 +471,7 @@ describe("handleApi", () => {
 			extensionVersion: "0.1.0",
 			activeClients: 1,
 		});
-		expect(sources.sources).toHaveLength(4);
+		expect(sources.sources).toHaveLength(5);
 		expect(
 			sources.sources.map((source: { source: string; mode: string }) => [
 				source.source,
@@ -476,6 +482,7 @@ describe("handleApi", () => {
 			["reddit", "session"],
 			["web", "manual"],
 			["github", "session"],
+			["tiktok", "page"],
 		]);
 		expect(
 			sources.sources.find(

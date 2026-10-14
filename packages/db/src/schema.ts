@@ -77,6 +77,8 @@ export const items = sqliteTable(
      * persist an "I am done with this" is a column the importer preserves.
      */
     archivedAt: integer("archived_at"),
+    /** 1 if flagged as sensitive/NSFW/over_18; 0 otherwise. */
+    nsfw: integer("nsfw").notNull().default(0),
   },
   (t) => [
     uniqueIndex("items_source_external").on(t.source, t.externalId),
@@ -86,6 +88,7 @@ export const items = sqliteTable(
     index("items_posted").on(t.postedAt),
     index("items_archived").on(t.archivedAt),
     index("items_author").on(t.authorHandle),
+    index("items_nsfw").on(t.nsfw),
   ],
 );
 
@@ -127,6 +130,19 @@ export const itemSourceLinks = sqliteTable(
     primaryKey({ columns: [t.kind, t.externalId] }),
     index("item_source_links_item_present").on(t.itemId, t.present),
   ],
+);
+
+/** Latest explicit save state survives events that arrive before item content. */
+export const itemSourceStates = sqliteTable(
+  "item_source_states",
+  {
+    source: text("source").notNull(),
+    externalId: text("external_id").notNull(),
+    platformSaved: integer("platform_saved").notNull(),
+    /** Unix seconds from the source event; equal-second arrivals retain FIFO order. */
+    observedAt: integer("observed_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.source, t.externalId] })],
 );
 
 export const media = sqliteTable(
@@ -187,7 +203,7 @@ export const aiSettings = sqliteTable("ai_settings", {
   autoTaggingEnabled: integer("auto_tagging_enabled").notNull().default(0),
   embeddingModel: text("embedding_model").notNull().default("@cf/baai/bge-small-en-v1.5"),
   embeddingDimensions: integer("embedding_dimensions").notNull().default(384),
-  tagModel: text("tag_model").notNull().default("@cf/meta/llama-3.1-8b-instruct"),
+  tagModel: text("tag_model").notNull().default("@cf/clef-flash-9b"),
   updatedAt: integer("updated_at").notNull().default(0),
   quotaPauseReason: text("quota_pause_reason"),
   lastRunAt: integer("last_run_at"),
@@ -310,6 +326,27 @@ export const collections = sqliteTable("collections", {
   filters: text("filters").notNull(),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
+});
+
+/** An interrupted logical restore can resume safely across Worker invocations. */
+export const restoreRuns = sqliteTable("restore_runs", {
+  id: integer("id").primaryKey(),
+  backupId: text("backup_id").notNull(),
+  counts: text("counts").notNull(),
+  progress: text("progress").notNull(),
+  status: text("status").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+/** One receipt per chunk prevents concurrent retries from inserting different rows. */
+export const restoreChunks = sqliteTable("restore_chunks", {
+  id: text("id").primaryKey(),
+  backupId: text("backup_id").notNull(),
+  tableName: text("table_name").notNull(),
+  offset: integer("offset").notNull(),
+  rowCount: integer("row_count").notNull(),
+  digest: text("digest").notNull(),
 });
 
 /** Last operational snapshot from each browser extension installation. */

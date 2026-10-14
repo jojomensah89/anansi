@@ -7,7 +7,7 @@ export const MCP_TOOL_CATALOG = [
 		name: "search_saved",
 		title: "Search saved posts",
 		summary:
-			"Search visible saved items and return ranked excerpts with source URLs.",
+			"Search visible saved items with filters and a relevance cursor.",
 	},
 	{
 		name: "get_saved",

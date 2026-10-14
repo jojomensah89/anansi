@@ -45,6 +45,7 @@ export interface NormalizedItem {
   metrics: Record<string, number>;
   media: MediaRef[];
   links: string[];
+  nsfw?: boolean;
   raw: unknown;
 }
 

@@ -58,9 +58,15 @@ export function Palette({ open, onClose, onOpen, onSearch, total, filters }: {
     };
   }, [filters, open, query]);
 
+  const stateRef = useRef({ hits, cursor, onOpen });
+  useEffect(() => {
+    stateRef.current = { hits, cursor, onOpen };
+  });
+
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
+      const { hits, cursor, onOpen } = stateRef.current;
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setCursor((value) => Math.min(value + 1, Math.max(0, hits.length - 1)));
@@ -75,7 +81,7 @@ export function Palette({ open, onClose, onOpen, onSearch, total, filters }: {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [cursor, hits, onOpen, open]);
+  }, [open]);
 
   if (!open) return null;
   const term = query.trim();

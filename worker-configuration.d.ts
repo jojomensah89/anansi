@@ -6,9 +6,10 @@ interface __BaseEnv_Env {
 	DB: D1Database;
 	VECTORIZE: VectorizeIndex;
 	AI: Ai;
-	LIBRARY_TOKEN: string;
-	INGEST_TOKEN: string;
-	MCP_TOKEN: string;
+	ANANSI_SECRET?: string;
+	LIBRARY_TOKEN?: string;
+	INGEST_TOKEN?: string;
+	MCP_TOKEN?: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
@@ -21,7 +22,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "LIBRARY_TOKEN" | "INGEST_TOKEN" | "MCP_TOKEN">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ANANSI_SECRET" | "LIBRARY_TOKEN" | "INGEST_TOKEN" | "MCP_TOKEN">> {}
 }
 
 // Begin runtime types

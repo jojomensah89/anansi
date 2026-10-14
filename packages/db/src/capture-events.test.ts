@@ -4,9 +4,9 @@ import type {
 	NormalizedItem,
 	RawPageCapture,
 } from "@anansi/sources";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { applyCapture, CaptureApplicationError } from "./capture-events.ts";
-import { captureEvents, itemSourceLinks, items } from "./schema.ts";
+import { captureEvents, itemSourceLinks, itemSourceStates, items } from "./schema.ts";
 import { openTestDb } from "./test-db.ts";
 
 const normalized = (
@@ -43,6 +43,43 @@ const itemEvent = (
 });
 
 describe("applyCapture", () => {
+	test("unknown unsave leaves a tombstone that an old import cannot resurrect", async () => {
+		const db = openTestDb();
+		await applyCapture(db, itemEvent({ action: "unsave", normalizedItem: undefined, eventId: "remove-first", observedAt: 300 }));
+		expect(await db.select().from(items)).toHaveLength(0);
+		expect((await db.select().from(itemSourceStates))[0]?.platformSaved).toBe(0);
+		await applyCapture(db, { schemaVersion: 1, payloadType: "raw_page", eventId: "old-page", source: "x",
+			action: "snapshot", observedAt: 100, captureMethod: "platform_import", runId: "import", page: 1, raw: {} }, [normalized()]);
+		expect((await db.select().from(items))[0]).toMatchObject({ platformSaved: 0, lastSourceEventAt: 300, removedFromSourceAt: 300 });
+		await applyCapture(db, itemEvent({ eventId: "fresh-save", observedAt: 301 }));
+		expect((await db.select().from(items))[0]?.platformSaved).toBe(1);
+	});
+	test("same-second save unsave save keeps FIFO arrival state and stale saves stay ignored", async () => {
+		const db = openTestDb();
+		await applyCapture(db, itemEvent({ eventId: "one", observedAt: 300 }));
+		await applyCapture(db, itemEvent({ eventId: "two", action: "unsave", normalizedItem: undefined, observedAt: 300 }));
+		await applyCapture(db, itemEvent({ eventId: "three", observedAt: 300 }));
+		await applyCapture(db, itemEvent({ eventId: "older", observedAt: 299 }));
+		expect((await db.select().from(itemSourceStates))[0]).toMatchObject({ platformSaved: 1, observedAt: 300 });
+		expect((await db.select().from(items))[0]?.platformSaved).toBe(1);
+	});
+	test("a historical page restores state only for items on that page", async () => {
+		const db = openTestDb();
+		const unrelated = normalized({ externalId: "tweet-2", url: "https://x.com/anansi/status/tweet-2" });
+		await applyCapture(db, itemEvent({ eventId: "other-save", externalId: unrelated.externalId,
+			canonicalUrl: unrelated.url, normalizedItem: unrelated }));
+		await applyCapture(db, itemEvent({ eventId: "target-unsave", action: "unsave",
+			normalizedItem: undefined, observedAt: 300 }));
+		// A broad UPDATE would touch the unrelated item and abort this import.
+		db.run(sql.raw(`CREATE TRIGGER reject_unrelated_update BEFORE UPDATE ON items
+			WHEN OLD.external_id = 'tweet-2' BEGIN SELECT RAISE(ABORT, 'unrelated item updated'); END`));
+		await applyCapture(db, { schemaVersion: 1, payloadType: "raw_page", eventId: "target-page",
+			source: "x", action: "snapshot", observedAt: 100, captureMethod: "platform_import",
+			runId: "import", page: 1, raw: {} }, [normalized()]);
+		const stored = await db.select().from(items);
+		expect(stored.find((item) => item.externalId === "tweet-1")?.platformSaved).toBe(0);
+		expect(stored.find((item) => item.externalId === "tweet-2")?.platformSaved).toBe(1);
+	});
 	test("creates an item and returns the same receipt when the event is replayed", async () => {
 		const db = openTestDb();
 		const capture = itemEvent();

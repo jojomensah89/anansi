@@ -24,6 +24,7 @@ const FALLBACKS: Record<(typeof POPUP_SOURCES)[number], PopupSourceConfig> = {
 		mode: "page",
 		url: "https://github.com/stars",
 	},
+	tiktok: { source: "tiktok", host: "tiktok.com", mode: "observe" },
 };
 
 /** Reject the entire remote catalogue if one instruction is unsafe or ambiguous. */
@@ -55,7 +56,8 @@ export type PopupConnectionKind =
 	| "connected"
 	| "unreachable"
 	| "unauthorized"
-	| "incompatible";
+	| "incompatible"
+	| "unconfigured";
 
 export interface PopupConnectionState {
 	kind: PopupConnectionKind;
@@ -94,4 +96,9 @@ export const CONNECTED_CONNECTION: PopupConnectionState = {
 export const UNREACHABLE_CONNECTION: PopupConnectionState = {
 	kind: "unreachable",
 	message: "Server unreachable",
+};
+
+export const UNCONFIGURED_CONNECTION: PopupConnectionState = {
+	kind: "unconfigured",
+	message: "Not connected",
 };

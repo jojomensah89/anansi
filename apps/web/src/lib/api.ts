@@ -1,4 +1,4 @@
-import type { CardMedia, ItemDetail, SearchHit } from "@anansi/db";
+import type { CardMedia, ItemDetail, SearchHit, RestoreCounts, RestoreState, RestoreTable } from "@anansi/db";
 import type { ImportMode } from "@anansi/sources";
 
 /**
@@ -80,6 +80,7 @@ export interface ItemQuery {
   tag?: string[];
   archived?: boolean;
   favorite?: boolean;
+  nsfw?: boolean;
   /** Items the platform no longer has saved. Kept by default. */
   removed?: "include" | "exclude" | "only";
   order?: "saved" | "posted";
@@ -218,6 +219,7 @@ export const api = {
       authors: number;
       archived: number;
       bySource: Record<string, number>;
+      captureRevision: number;
       media: { total: number; stored: number };
     }>("/api/stats", signal),
 
@@ -231,6 +233,7 @@ export const api = {
     for (const t of opts.tag ?? []) q.append("tag", t);
     if (opts.archived) q.set("archived", "1");
     if (opts.favorite) q.set("favorite", "1");
+    if (opts.nsfw) q.set("nsfw", "1");
     if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
     if (opts.order === "posted") q.set("order", "posted");
     q.set("limit", String(opts.limit ?? 60));
@@ -291,6 +294,11 @@ export const api = {
     if (!res.ok) throw await responseError(res, "/api/export");
     return res.blob();
   },
+  restoreStatus: () => get<{ restore: RestoreState | null }>("/api/restore"),
+  restoreStart: (backupId: string, counts: RestoreCounts) => post<{ restore: RestoreState }>("/api/restore/start", { backupId, counts }),
+  restoreChunk: (backupId: string, table: RestoreTable, offset: number, rows: unknown[]) => post<{ restore: RestoreState }>("/api/restore/chunk", { backupId, table, offset, rows }),
+  restoreFinish: (backupId: string) => post<{ restore: RestoreState }>("/api/restore/finish", { backupId }),
+  restoreAbort: (backupId: string) => post<{ aborted: true }>("/api/restore/abort", { backupId }),
 };
 
 function itemParams(opts: ItemQuery): URLSearchParams {
@@ -303,6 +311,7 @@ function itemParams(opts: ItemQuery): URLSearchParams {
   for (const t of opts.tag ?? []) q.append("tag", t);
   if (opts.archived) q.set("archived", "1");
   if (opts.favorite) q.set("favorite", "1");
+  if (opts.nsfw) q.set("nsfw", "1");
   if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
   if (opts.order === "posted") q.set("order", "posted");
   q.set("limit", String(opts.limit ?? 60));
@@ -313,6 +322,7 @@ export function sourceLabel(source: string): string {
   return ({
     x: "X bookmarks",
     github: "GitHub stars",
+    tiktok: "TikTok favorites",
     reddit: "Reddit saves",
     web: "Web pages & bookmarks",
   } as Record<string, string>)[source] ?? source;

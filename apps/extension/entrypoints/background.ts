@@ -12,7 +12,7 @@ import type {
 	ExtensionRemoteConfig,
 	ExtensionSourceConfig,
 	HeartbeatSourceState,
-	ItemEventCapture,
+	NormalizedItem,
 	RawPageCapture,
 	ShippedCaptureSource,
 } from "@anansi/sources";
@@ -20,6 +20,9 @@ import {
 	EXTENSION_PLATFORM_SOURCES,
 	isExtensionPlatformSource,
 	parseExtensionConfig,
+	parseSavedListing,
+	parseStarredPage,
+	parseItemList,
 	SHIPPED_CAPTURE_SOURCES,
 } from "@anansi/sources";
 import { type CaptureQueue, createCaptureQueue } from "../lib/capture-queue.ts";
@@ -29,8 +32,8 @@ import {
 	removalCaptures,
 	toBookmarkCapture,
 } from "../lib/chrome-bookmarks.ts";
-import { cachedForServer, type ServerCache } from "../lib/config-cache.ts";
-import { extensionConnection } from "../lib/connection.ts";
+import { cachedForServer, createPersistedConfigCache, type ServerCache } from "../lib/config-cache.ts";
+import { getExtensionConnection } from "../lib/connection.ts";
 import {
 	createHeartbeatClient,
 	type HeartbeatClient,
@@ -58,10 +61,14 @@ import {
 	toWebCapture,
 	UNSUPPORTED_MESSAGES,
 } from "../lib/page-capture.ts";
+import { createLiveCapture } from "../lib/live-capture.ts";
+import { nativeItemsFromPayload } from "../lib/native-snapshot.ts";
 import { tweetUrl } from "../lib/platforms/x.ts";
+import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
 import {
 	SYNC_ALARM,
 	scheduleDailyCatchUp,
+	scheduleEarliestAlarm,
 	scheduleOutboxRetry,
 } from "../lib/schedule.ts";
 import {
@@ -120,9 +127,21 @@ const SOURCE_RUN_RECOVERY_ALARM_PREFIX = "anansi-source-run-recovery:";
 const CAPTURE_SOURCES = EXTENSION_PLATFORM_SOURCES;
 const HEARTBEAT_SOURCES = SHIPPED_CAPTURE_SOURCES;
 const tabNonces = new Map<number, string>();
+const identifiedTikTokRuns = new Map<string, string>();
 
 let cached: ServerCache<RemoteConfig> | null = null;
 let cachedToken: string | null = null;
+const persistedConfig = createPersistedConfigCache<RemoteConfig>({
+	storage: {
+		get: (key) => browser.storage.local.get(key),
+		set: (values) => browser.storage.local.set(values),
+		remove: (key) => browser.storage.local.remove(key),
+	},
+	validate: (value) => {
+		const parsed = parseExtensionConfig(value);
+		return parsed.ok ? parsed.config : null;
+	},
+});
 let persistent: { outbox: IndexedDbOutbox; runs: SourceRuns } | null = null;
 let durableQueue: CaptureQueue | null = null;
 let healthHeartbeat: HeartbeatClient | null = null;
@@ -147,8 +166,9 @@ function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
 }
 
 async function settings(): Promise<Settings | null> {
-	const { origin, token } = extensionConnection();
-	return { server: origin, token };
+	const conn = await getExtensionConnection();
+	if (!conn) return null;
+	return { server: conn.origin, token: conn.token };
 }
 
 async function patchStatus(
@@ -212,6 +232,9 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
 		cachedToken = s.token;
 	}
 	const now = Date.now();
+	if (!cached) {
+		cached = await persistedConfig.load(s.server, s.token, now).catch(() => null);
+	}
 	const fresh = cachedForServer(cached, s.server, now, CONFIG_TTL_MS);
 	if (!force && fresh) return fresh;
 
@@ -222,7 +245,10 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
 			redirect: "error",
 			signal: AbortSignal.timeout(15_000),
 		});
-		if (res.status === 401 || res.status === 403) cached = null;
+		if (res.status === 401 || res.status === 403) {
+			cached = null;
+			await persistedConfig.clear(s.server, s.token);
+		}
 		if (res.status === 404) {
 			throw new Error(
 				`404 at ${url} — is an older Anansi server still on that port?`,
@@ -234,6 +260,7 @@ async function loadConfig(force = false): Promise<RemoteConfig | null> {
 			throw new Error(`invalid extension config: ${parsed.error.message}`);
 		}
 		cached = { serverOrigin: s.server, at: Date.now(), value: parsed.config };
+		await persistedConfig.save(s.server, s.token, parsed.config, cached.at).catch(() => {});
 		await patchStatus("_", { message: null });
 		return parsed.config;
 	} catch (err) {
@@ -251,17 +278,16 @@ function queue(): CaptureQueue {
 	const { outbox } = persistentState();
 	durableQueue = createCaptureQueue({
 		store: outbox,
-		transport: createIngestTransport(async () => {
+		transport: createIngestTransport(async (record) => {
 			const [s, config] = await Promise.all([settings(), loadConfig()]);
-			return s && config ? { ingest: config.ingest, token: s.token } : null;
+			return s && config && (!isCaptureSource(record.source) || nativeDeliveryEnabled(record.source, config))
+				? { ingest: config.ingest, token: s.token } : null;
 		}),
 		clock: { now: Date.now },
 		random: Math.random,
 		scheduler: {
 			schedule(at) {
-				browser.alarms.create(OUTBOX_ALARM, {
-					when: Math.max(Date.now() + 100, at),
-				});
+				return scheduleEarliestAlarm(browser.alarms, OUTBOX_ALARM, Math.max(Date.now() + 100, at));
 			},
 		},
 	});
@@ -275,8 +301,13 @@ function queue(): CaptureQueue {
  * look is a second thing that can be stale, and a stale count is exactly the
  * failure this whole pass exists to remove.
  */
-function publishQueueStatus(): Promise<CaptureQueueStatus> {
-	return queue().getStatus();
+async function publishQueueStatus(): Promise<CaptureQueueStatus> {
+	await queue().getStatus(); // Recover interrupted uploads before counting.
+	const counts = await queueBySource();
+	return Object.values(counts).reduce((total, source) => ({
+		queued: total.queued + source.queued, uploading: total.uploading + source.uploading,
+		retrying: total.retrying + source.retrying, failed: total.failed + source.failed,
+	}), { queued: 0, uploading: 0, retrying: 0, failed: 0 });
 }
 
 function heartbeat(): HeartbeatClient {
@@ -336,6 +367,10 @@ async function wakeDurableQueue(
 	includeFailed = false,
 	source?: CaptureSource,
 ): Promise<CaptureQueueStatus> {
+	await recoverNativeHandoffs();
+	await Promise.all(
+		EXTENSION_PLATFORM_SOURCES.map((platform) => flushPendingSaves(platform)),
+	);
 	const status = await queue().retry(
 		includeFailed
 			? { includeFailed: true, ...(source ? { source } : {}) }
@@ -385,67 +420,6 @@ async function legacyUpload(source: string, raw: unknown): Promise<boolean> {
 	}
 }
 
-/** Exactly one delivery path owns a payload, selected by its source flag. */
-async function deliverRaw(
-	source: CaptureSource,
-	raw: unknown,
-	requestedPage?: number,
-	cursor?: string | null,
-	captureMethod: "platform_import" | "platform_event" = "platform_import",
-): Promise<void> {
-	const config = await loadConfig();
-	const delivery = captureDeliveryMode(
-		config?.ingestProtocolVersion,
-		config?.features?.captureV2,
-		source,
-	);
-	if (delivery === "legacy") {
-		await legacyUpload(source, raw);
-		return;
-	}
-
-	const { outbox, runs } = persistentState();
-	const identity = await runs.capturePage(source, requestedPage);
-	const capture: RawPageCapture = {
-		schemaVersion: 1,
-		payloadType: "raw_page",
-		eventId: identity.eventId,
-		source,
-		action: "snapshot",
-		observedAt: Math.floor(Date.now() / 1000),
-		captureMethod,
-		runId: identity.runId,
-		page: identity.page,
-		...(cursor ? { cursor } : {}),
-		raw,
-	};
-	const enqueued = await queue().enqueue(capture);
-	// Only now: a cursor that moves before its page is durable is how an
-	// interrupted import silently skips everything it had not yet sent.
-	if (cursor !== undefined) await runs.setCursor(source, cursor);
-	await wakeDurableQueue();
-
-	const [pending, current] = await Promise.all([
-		outbox.get(enqueued.eventId),
-		readStatus(source),
-	]);
-	if (!pending) {
-		await patchStatus(source, {
-			uploaded: current.uploaded + 1,
-			message: null,
-		});
-	} else if (pending.state === "failed") {
-		await patchStatus(source, {
-			failed: current.failed + 1,
-			message: pending.lastError?.message ?? "capture delivery failed",
-		});
-	} else {
-		await patchStatus(source, {
-			message: "saved locally; delivery will retry",
-		});
-	}
-}
-
 /** Queue adapter used by the lifecycle; resolving is the durable page receipt. */
 async function enqueueImportedPage(page: SourceImportPage): Promise<void> {
 	const config = await loadConfig();
@@ -473,6 +447,7 @@ async function enqueueImportedPage(page: SourceImportPage): Promise<void> {
 		...(page.cursor ? { cursor: page.cursor } : {}),
 		raw: page.raw,
 	};
+	await hydrateNativeCaptures(page.source, page.raw);
 	await queue().enqueue(capture);
 	await wakeDurableQueue().catch(() => {});
 }
@@ -528,146 +503,128 @@ async function applyImportEffects(
 	}
 }
 
-/**
- * Deliver one precise save or unsave.
- *
- * The event id is derived rather than random on purpose: X fires some
- * mutations through both fetch and XHR, so the same click can be observed
- * twice, and two events with one id are one event.
- */
-async function deliverItemEvent(
-	source: CaptureSource,
-	action: "save" | "unsave",
-	externalId: string,
-	canonicalUrl?: string,
-): Promise<boolean> {
-	const mode = async (force: boolean) => {
-		const config = await loadConfig(force);
-		return captureDeliveryMode(
-			config?.ingestProtocolVersion,
-			config?.features?.captureV2,
-			source,
-		);
-	};
+/** Native events are persisted before configuration or network work. */
+let nativeCaptures: ReturnType<typeof createLiveCapture> | null = null;
+const NATIVE_CAPTURE_ALARM = "anansi-native-capture";
+function nativeDeliveryEnabled(source: string, config: RemoteConfig): boolean {
+	return isCaptureSource(source) && config.enabled &&
+		config.sources.some((entry) => entry.source === source) &&
+		captureDeliveryMode(config.ingestProtocolVersion, config.features?.captureV2, source) === "queue";
+}
+function liveCapture() {
+	if (!nativeCaptures) nativeCaptures = createLiveCapture({
+		store: persistentState().outbox, queue: queue(), now: Date.now,
+		createId: () => crypto.randomUUID(),
+		canEnqueue: async (source) => {
+			const config = await loadConfig();
+			return Boolean(config && nativeDeliveryEnabled(source, config));
+		},
+	});
+	return nativeCaptures;
+}
 
-	/**
-	 * Ask again before giving up.
-	 *
-	 * The config is cached for an hour, and this is the one path where acting on
-	 * an hour-old copy is silently wrong: enabling a source on the server did
-	 * nothing until the cache expired, so an unsave made in that window
-	 * disappeared with no record anywhere. A mutation happens at human pace, and
-	 * the server is on this machine, so one revalidation costs nothing.
-	 */
-	let delivery = await mode(false);
-	if (delivery === "legacy") delivery = await mode(true);
+function platformUrl(source: CaptureSource, externalId: string): string {
+	return source === "github" ? `https://github.com/${externalId}`
+		: source === "tiktok" ? `https://www.tiktok.com/video/${externalId}`
+		: source === "reddit" ? `https://www.reddit.com/comments/${externalId.replace(/^t[13]_/, "")}`
+		: tweetUrl(externalId);
+}
 
-	/**
-	 * Legacy delivery has no way to say "this one item changed", so there is
-	 * nothing to send — but saying nothing is what made this look like it
-	 * worked. An unsave that cannot be delivered has to leave a mark.
-	 */
-	if (delivery === "legacy") {
-		await patchStatus(source, {
-			message:
-				action === "unsave"
-					? "unsave not recorded — this source is not enabled for precise capture on the server"
-					: "save state not recorded — this source is not enabled for precise capture on the server",
-		});
-		return false;
+function contentFromPage(source: CaptureSource, raw: unknown): NormalizedItem[] {
+	const context = { importedAt: Math.floor(Date.now() / 1000) };
+	try {
+		switch (source) {
+			case "x": return nativeItemsFromPayload("x", raw, context.importedAt);
+			case "reddit": return parseSavedListing(raw, context);
+			case "github": return parseStarredPage(raw, context);
+			case "tiktok": return parseItemList(raw, context);
+			default: return [];
+		}
+	} catch { return []; }
+}
+
+let recoveringHandoffs: Promise<void> | null = null;
+async function recoverNativeHandoffs(): Promise<void> {
+	if (recoveringHandoffs) return recoveringHandoffs;
+	recoveringHandoffs = (async () => {
+		const stored = await browser.storage.local.get(null);
+		const handoffs = Object.entries(stored).sort((a, b) =>
+			Number((a[1] as { order?: number })?.order ?? 0) - Number((b[1] as { order?: number })?.order ?? 0));
+		for (const [key, value] of handoffs) {
+			if (!key.startsWith("native-handoff:") || !value || typeof value !== "object") continue;
+			const entry = value as { message?: PageEventMessage; pageUrl?: string };
+			if (typeof entry.pageUrl !== "string" || typeof entry.message?.nonce !== "string") continue;
+			const parsed = parseExtensionMessage(entry.message, { path: "page-to-relay", pageUrl: entry.pageUrl, expectedNonce: entry.message.nonce });
+			if (!parsed.ok || parsed.message.anansi !== "page-event" || parsed.message.action !== "bookmark") continue;
+			const event = parsed.message;
+			try {
+				await recordNativeMutation(event.source, event.bookmarkAction, event.externalId, event.canonicalUrl,
+					event.raw, event.normalizedItem, event.mutationId, event.observedAt);
+				await browser.storage.local.remove(key);
+			} catch { /* Keep the handoff until durable native storage accepts it. */ }
+		}
+	})();
+	try { await recoveringHandoffs; } finally { recoveringHandoffs = null; }
+}
+
+async function reportNativePending(source: CaptureSource, state: { pending: number; needsContent: boolean }) {
+	if (state.pending) {
+		await patchStatus(source, { message: state.needsContent
+			? "saved on the platform; fetching post content automatically"
+			: "capture held on this device; delivery will retry" });
+		await scheduleEarliestAlarm(browser.alarms, NATIVE_CAPTURE_ALARM, Date.now() + 30_000);
+		if (state.needsContent) await persistentState().runs.requestRefresh(source);
 	}
+}
 
-	const observedAt = Math.floor(Date.now() / 1000);
-	const identity =
-		source === "github"
-			? `sequence:${await persistentState().runs.nextItemEventSequence(source)}`
-			: String(observedAt);
-	const capture: ItemEventCapture = {
-		schemaVersion: 1,
-		payloadType: "item_event",
-		eventId: `${source}:${action}:${externalId}:${identity}`,
-		source,
-		action,
-		observedAt,
-		captureMethod: "platform_event",
-		externalId,
-		canonicalUrl:
-			canonicalUrl ??
-			(source === "github"
-				? `https://github.com/${externalId}`
-				: tweetUrl(externalId)),
-	};
-	await queue().enqueue(capture);
+async function recordNativeMutation(
+	source: CaptureSource, action: "save" | "unsave", externalId: string,
+	canonicalUrl?: string, raw?: unknown, normalizedItem?: NormalizedItem,
+	mutationId?: string, observedAt?: number,
+) {
+	const content = normalizedItem ?? (raw === undefined ? undefined
+		: contentFromPage(source, raw).find((item) => item.externalId === externalId));
+	const state = await liveCapture().record({
+		source, action, externalId, canonicalUrl: canonicalUrl ?? content?.url ?? platformUrl(source, externalId),
+		mutationId: mutationId ?? crypto.randomUUID(),
+		observedAt: observedAt ?? Math.floor(Date.now() / 1000), normalizedItem: content,
+	});
+	await reportNativePending(source, state);
+	await patchStatus(source, { lastRun: Date.now(), ...(state.pending ? {} : { message: null }) });
+	return state;
+}
+
+async function handleBookmarkMutation(...args: Parameters<typeof recordNativeMutation>): Promise<void> {
+	// A worker restart may leave an older confirmed transition in the relay's
+	// persisted handoff. Admit it before this page's newly confirmed transition.
+	await recoverNativeHandoffs();
+	const state = await recordNativeMutation(...args);
+	// Keep the runtime message alive through the immediate drain. Detached
+	// work can be suspended with the worker and defer ready captures to an alarm.
 	await wakeDurableQueue().catch(() => {});
-	return true;
+	if (state.needsContent) void processPendingRefreshes().catch(() => {});
 }
 
-/**
- * A save arrives before its content does.
- *
- * X answers CreateBookmark with "Done" and nothing else, so the id is held
- * until a refresh has queued the timeline page that carries the post. An
- * unsave needs no content and goes out immediately.
- */
-async function handleBookmarkMutation(
-	source: CaptureSource,
-	action: "save" | "unsave",
-	externalId: string,
-	canonicalUrl?: string,
-	raw?: unknown,
-): Promise<void> {
+/** Migrate old id-only pending saves once, then preserve their new identity. */
+async function migratePendingSaves(source: CaptureSource): Promise<void> {
 	const runs = persistentState().runs;
-
-	// Reddit can look the object up and send it along, so content and event
-	// arrive together. The queue is serial per source, so enqueuing the page
-	// first is what guarantees the item exists before the event lands on it.
-	if (raw !== undefined) {
-		await deliverRaw(source, raw);
-		await deliverItemEvent(source, action, externalId, canonicalUrl);
-		await patchStatus(source, { lastRun: Date.now() });
-		return;
+	const run = await runs.current(source);
+	for (const externalId of run.pendingSaves) {
+		await liveCapture().record({ source, action: "save", externalId,
+			canonicalUrl: platformUrl(source, externalId), mutationId: `legacy-pending:${externalId}`,
+			observedAt: Math.max(1, Math.floor(run.updatedAt / 1000)) });
+		await runs.ackPendingSave(source, externalId);
 	}
-
-	if (action === "unsave") {
-		await deliverItemEvent(source, "unsave", externalId, canonicalUrl);
-		await patchStatus(source, { lastRun: Date.now() });
-		return;
-	}
-	await runs.recordPendingSave(source, externalId);
-	await runs.requestRefresh(source);
-	scheduleOutboxRetry(browser.alarms, OUTBOX_ALARM, Date.now());
 }
 
-/** Send the held saves now that the pages carrying their content are queued. */
-const pendingSaveFlushes = new Set<CaptureSource>();
+async function hydrateNativeCaptures(source: CaptureSource, raw: unknown): Promise<void> {
+	await migratePendingSaves(source);
+	await reportNativePending(source, await liveCapture().hydrate(source, contentFromPage(source, raw)));
+}
 
 async function flushPendingSaves(source: CaptureSource): Promise<void> {
-	if (pendingSaveFlushes.has(source)) return;
-	pendingSaveFlushes.add(source);
-	try {
-		const runs = persistentState().runs;
-		const pending = await runs.takePendingSaves(source);
-		for (const externalId of pending) {
-			try {
-				if (await deliverItemEvent(source, "save", externalId)) {
-					await runs.ackPendingSave(source, externalId);
-				}
-			} catch (error) {
-				// The id stays durable until its event is queued. Ask for another
-				// small refresh so a transient queue/config failure gets retried.
-				scheduleOutboxRetry(browser.alarms, OUTBOX_ALARM, Date.now());
-				await runs.requestRefresh(source).catch(() => {});
-				await patchStatus(source, {
-					message:
-						error instanceof Error
-							? `save state pending: ${error.message}`
-							: "save state pending; delivery will retry",
-				});
-			}
-		}
-	} finally {
-		pendingSaveFlushes.delete(source);
-	}
+	await migratePendingSaves(source);
+	await reportNativePending(source, await liveCapture().retry(source));
 }
 
 /**
@@ -741,7 +698,8 @@ type MenuSpec = Parameters<typeof browser.contextMenus.create>[0];
 const MIRROR_KEY = "mirrorChromeBookmarks";
 let bookmarkInstallation: Promise<string> | undefined;
 function bookmarkInstallationId(): Promise<string> {
-	return (bookmarkInstallation ??= (async () => {
+	if (bookmarkInstallation) return bookmarkInstallation;
+	bookmarkInstallation = (async () => {
 		const stored = await browser.storage.local.get("bookmarkInstallationId");
 		if (typeof stored.bookmarkInstallationId === "string")
 			return stored.bookmarkInstallationId;
@@ -751,7 +709,8 @@ function bookmarkInstallationId(): Promise<string> {
 	})().catch((error) => {
 		bookmarkInstallation = undefined;
 		throw error;
-	}));
+	});
+	return bookmarkInstallation;
 }
 
 async function mirroringOn(): Promise<boolean> {
@@ -910,6 +869,7 @@ const ENTRY_URLS: Record<string, string> = {
 	x: "https://x.com/i/bookmarks",
 	reddit: "https://www.reddit.com/user/me/saved/",
 	github: "https://github.com/stars",
+	tiktok: "https://www.tiktok.com/",
 };
 
 const HOST_PATTERNS: Record<string, string[]> = {
@@ -920,6 +880,7 @@ const HOST_PATTERNS: Record<string, string[]> = {
 		"https://reddit.com/*",
 	],
 	github: ["https://github.com/*"],
+	tiktok: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
 };
 
 async function findTab(source: CaptureSource, expectedUrl?: string) {
@@ -965,6 +926,33 @@ async function openTab(
 	});
 
 	return { id, ours: true };
+}
+
+async function waitForTikTokHandle(runId: string, timeoutMs = 12_000): Promise<string | null> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const handle = identifiedTikTokRuns.get(runId);
+		if (handle) return handle;
+		await new Promise((resolve) => setTimeout(resolve, 250));
+	}
+	return null;
+}
+
+async function navigateTikTokTab(tabId: number, url: string): Promise<boolean> {
+	try {
+		await browser.tabs.update(tabId, { url });
+		await new Promise<void>((resolve, reject) => {
+			const timer = setTimeout(() => { browser.tabs.onUpdated.removeListener(onUpdated); reject(new Error("TikTok navigation timed out")); }, 25_000);
+			function onUpdated(id: number, info: { status?: string }) {
+				if (id !== tabId || info.status !== "complete") return;
+				clearTimeout(timer);
+				browser.tabs.onUpdated.removeListener(onUpdated);
+				setTimeout(resolve, 900);
+			}
+			browser.tabs.onUpdated.addListener(onUpdated);
+		});
+		return true;
+	} catch { return false; }
 }
 
 async function closeOwnedTab(
@@ -1163,11 +1151,33 @@ async function startCapture(
 			return;
 		}
 
+		if (source === "tiktok") {
+			await patchStatusForRun(source, runId, { message: "finding your favorites…" });
+			await talk(tab.id, { anansi: "page-command", messageVersion: MESSAGE_PROTOCOL_VERSION, source, runId, action: "identify", config: entry });
+			const handle = await waitForTikTokHandle(runId);
+			identifiedTikTokRuns.delete(runId);
+			const destination = handle && profileUrl(handle);
+			if (!destination) {
+				await applyImportEffects((await sourceImportLifecycle().fail({ source, runId, tabId: tab.id, code: "capture_failed" })).effects);
+				await patchStatusForRun(source, runId, { startedAt: null, message: "could not identify your TikTok account; reload TikTok and retry" });
+				return;
+			}
+			const current = await browser.tabs.get(tab.id).catch(() => null);
+			if (!current?.url || !isProfileView(current.url, handle)) {
+				if (!(await navigateTikTokTab(tab.id, destination)) || !(await configure())) {
+					await applyImportEffects((await sourceImportLifecycle().fail({ source, runId, tabId: tab.id, code: "platform_request_failed" })).effects);
+					await patchStatusForRun(source, runId, { startedAt: null, message: "could not open your TikTok Favorites page" });
+					return;
+				}
+			}
+		}
+
 		// Nothing to request, so the capture is a scroll: the app fetches its own
 		// item lists as the page grows, and those are what get kept.
 		await patchStatusForRun(source, runId, {
 			startedAt: begun.run.startedAt,
 			pages: 0,
+			items: 0,
 			uploaded: 0,
 			failed: 0,
 			message: "scanning…",
@@ -1176,6 +1186,7 @@ async function startCapture(
 			anansi: "page-command",
 			messageVersion: MESSAGE_PROTOCOL_VERSION,
 			source,
+			runId,
 			action: "scan",
 			config: entry,
 		});
@@ -1218,6 +1229,7 @@ async function startCapture(
 			{
 				...entry,
 				...(begun.run.cursor ? { resumeCursor: begun.run.cursor } : {}),
+				...(source === "x" && begun.run.cursor ? { refreshTop: true } : {}),
 			};
 	await patchStatusForRun(source, runId, {
 		startedAt: begun.run.startedAt,
@@ -1534,11 +1546,21 @@ async function queueBySource(): Promise<Record<string, CaptureQueueStatus>> {
 	const counts: Record<string, CaptureQueueStatus> = {};
 	for (const source of CAPTURE_SOURCES) counts[source] = { ...EMPTY_COUNTS };
 	for (const record of records) {
-		const bucket = (counts[record.source] ??= { ...EMPTY_COUNTS });
+		let bucket = counts[record.source];
+		if (!bucket) {
+			bucket = { ...EMPTY_COUNTS };
+			counts[record.source] = bucket;
+		}
 		if (record.state === "queued") bucket.queued++;
 		else if (record.state === "uploading") bucket.uploading++;
 		else if (record.state === "retry_wait") bucket.retrying++;
 		else bucket.failed++;
+	}
+	const queuedIds = new Set(records.map((record) => record.eventId));
+	for (const source of CAPTURE_SOURCES) {
+		for (const capture of await liveCapture().pending(source)) {
+			if (!queuedIds.has(capture.eventId)) counts[source]!.queued++;
+		}
 	}
 	return counts;
 }
@@ -1650,6 +1672,12 @@ async function handlePopupCommand(
 			return await setMirroring(true);
 		case "mirror-off":
 			return await setMirroring(false);
+		case "connection-updated": {
+			cached = null;
+			cachedToken = null;
+			await loadConfig(true);
+			return { ok: true };
+		}
 		case "save-page": {
 			const [tab] = await browser.tabs.query({
 				active: true,
@@ -1699,6 +1727,19 @@ async function handlePageEvent(
 	}
 	switch (msg.action) {
 		case "ready":
+			if (msg.relay && tabId) {
+				const config = await loadConfig(true);
+				const entry = config?.sources.find((candidate) => candidate.source === source);
+				if (entry) {
+					await browser.tabs.sendMessage(tabId, {
+						anansi: "page-command",
+						messageVersion: MESSAGE_PROTOCOL_VERSION,
+						source,
+						action: "configure",
+						config: entry,
+					}).catch(() => {});
+				}
+			}
 			return { ok: true };
 		case "page":
 			{
@@ -1740,13 +1781,20 @@ async function handlePageEvent(
 				msg.externalId,
 				msg.canonicalUrl,
 				msg.raw,
+				msg.normalizedItem,
+				msg.mutationId,
+				msg.observedAt,
 			);
 			return { ok: true };
 		case "observed": {
-			await deliverRaw(source, msg.raw);
+			const accepted = await sourceImportLifecycle().page({ source, runId: msg.runId, tabId, page: 0, items: msg.items, raw: msg.raw, captureMethod: "platform_import" });
+			await applyImportEffects(accepted.effects);
+			if (accepted.kind === "queue-failed") return { ok: false, error: accepted.errorCode ?? "capture queue rejected the page" };
+			if (accepted.kind !== "accepted-page") return { ok: true };
 			const current = await readStatus(source);
-			await patchStatus(source, {
+			await patchStatusForRun(source, msg.runId, {
 				lastRun: Date.now(),
+				pages: current.pages + 1,
 				items: current.items + msg.items,
 			});
 			return { ok: true };
@@ -1772,22 +1820,25 @@ async function handlePageEvent(
 			}
 			return { ok: true };
 		case "identified":
-			await persistentState().runs.setHandle(source, msg.handle);
+			if ((await persistentState().runs.current(source)).runId === msg.runId) {
+				identifiedTikTokRuns.set(msg.runId, msg.handle);
+				await persistentState().runs.setHandle(source, msg.handle);
+			}
 			return { ok: true };
 		case "scanned": {
 			const run = await persistentState().runs.current(source);
-			if (run.runId) {
+			if (run.runId === msg.runId) {
 				const currentStatus = await readStatus(source);
 				const completed = await sourceImportLifecycle().complete({
 					source,
-					runId: run.runId,
+					runId: msg.runId,
 					tabId,
-					initialImport: false,
+					initialImport: true,
 				});
 				await applyImportEffects(completed.effects);
 				if (completed.kind === "completed" && currentStatus.items === 0) {
-					await patchStatusForRun(source, run.runId, {
-						message: "nothing loaded on that page",
+					await patchStatusForRun(source, msg.runId, {
+						message: "no favorites were returned",
 					});
 				}
 			}
@@ -1898,7 +1949,7 @@ export default defineBackground(() => {
 				requestHeartbeat();
 				return;
 			}
-			if (alarm.name === OUTBOX_ALARM) {
+			if (alarm.name === OUTBOX_ALARM || alarm.name === NATIVE_CAPTURE_ALARM) {
 				await wakeDurableQueue();
 				await processPendingRefreshes();
 				return;

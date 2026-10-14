@@ -27,7 +27,7 @@ import { storedAvatarSource } from "./avatar.tsx";
  */
 export type Filters = Pick<
   ItemQuery,
-  "source" | "author" | "media" | "type" | "tag" | "archived" | "favorite" | "removed"
+  "source" | "author" | "media" | "type" | "tag" | "archived" | "favorite" | "removed" | "nsfw"
 >;
 
 interface Option {
@@ -654,7 +654,8 @@ function Chip({
   onOpen: () => void;
   onClear: () => void;
 }) {
-  const chosen = field.options.filter((o) => values.includes(o.value));
+  const valuesSet = new Set(values);
+  const chosen = field.options.filter((o) => valuesSet.has(o.value));
   const icons = chosen.filter((o) => o.icon).slice(0, 3);
   const label =
     chosen.length === 1 ? (chosen[0]?.label ?? values[0]) : `${values.length} selected`;
@@ -800,6 +801,7 @@ function ValueMenu({
 }) {
   const [query, setQuery] = useState("");
   useEffect(() => setQuery(""), [field.key]);
+  const valuesSet = useMemo(() => new Set(values), [values]);
 
   const shown = field.options.filter(
     (o) =>
@@ -867,7 +869,7 @@ function ValueMenu({
           </div>
         )}
         {shown.map((option) => {
-          const on = values.includes(option.value);
+          const on = valuesSet.has(option.value);
           return (
             <MenuRow key={option.value} active={on} onClick={() => onToggle(field, option.value)}>
               <span

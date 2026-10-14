@@ -187,7 +187,7 @@ describe("source import lifecycle", () => {
 		const { lifecycle, runs } = setup();
 		const fullRun = await begin(lifecycle, "full");
 		await lifecycle.page(page(fullRun, { cursor: "full-next" }));
-		await lifecycle.complete({ source: "x", runId: fullRun });
+		await lifecycle.complete({ source: "x", runId: fullRun, state: "limited" });
 		const liveRun = await begin(lifecycle, "live");
 		await lifecycle.page(page(liveRun, { cursor: "live-must-not-persist" }));
 		await lifecycle.complete({
@@ -196,6 +196,14 @@ describe("source import lifecycle", () => {
 			initialImport: false,
 		});
 		expect((await runs.current("x")).cursor).toBe("full-next");
+	});
+
+	test("a completed backfill clears its cursor so the next import starts at the newest page", async () => {
+		const { lifecycle, runs } = setup();
+		const runId = await begin(lifecycle, "full");
+		await lifecycle.page(page(runId, { cursor: "last-page" }));
+		await lifecycle.complete({ source: "x", runId });
+		expect((await runs.current("x")).cursor).toBeUndefined();
 	});
 
 	test("pending saves flush only after the run has accepted its content page", async () => {

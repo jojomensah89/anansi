@@ -21,5 +21,6 @@ export function isVisibleSource(source: string): boolean {
 
 /** Bound SQL predicate used at every user-facing item query boundary. */
 export function visibleSourceClause(column: SQL): SQL {
+	if (HIDDEN_SOURCES.length === 0) return sql`1 = 1`;
 	return sql`${column} not in (${sql.join(HIDDEN_SOURCES.map((source) => sql`${source}`), sql`, `)})`;
 }

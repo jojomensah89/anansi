@@ -7,7 +7,7 @@ import {
 	listItems,
 	listTags,
 	recentSaves,
-	searchItems,
+	searchItemsPage,
 } from "@anansi/db";
 import {
 	VISIBLE_LIBRARY_SOURCES,
@@ -262,8 +262,8 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 		{
 			title: "Search saved posts",
 			description:
-				"Keyword search across every visible saved item. Returns ranked excerpts and source URLs. " +
-				"Matching is keyword-based with English stemming; a misspelling returns no result.",
+			"Keyword search across visible saved items. Returns ranked excerpts and source URLs, with filters and a stable relevance cursor. " +
+			"Matching uses English stemming; a misspelling returns no result. Reuse the same query and filters to continue with next_cursor.",
 			inputSchema: {
 				query: z
 					.string()
@@ -271,21 +271,36 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 					.min(1)
 					.max(500)
 					.describe("Words to search for. A trailing * does prefix matching."),
-				source: MCP_SOURCES.optional(),
-				author: z.string().trim().min(1).max(200).optional(),
-				since: ISO_DATE.optional(),
+				source: sourceList.optional(),
+				author: textList.optional(),
+				tag: textList.optional(),
+				media: MCP_MEDIA.optional(),
+				content_type: typeList.optional(),
+				archived: z.boolean().default(false),
+				removed: MCP_REMOVED.default("include"),
+				favorite: z.boolean().optional(),
+				since: ISO_DATE.optional().describe(
+					"Only include items posted on or after this ISO date or datetime.",
+				),
+				cursor: z
+					.string()
+					.max(2000)
+					.optional()
+					.describe("Opaque cursor from a previous search_saved result."),
 				limit: z.number().int().min(1).max(50).default(10),
 			},
 		},
-		async ({ query, source, author, since, limit }) => {
-			const rows = await searchItems(db, {
-				query,
-				source,
-				author,
-				since: unix(since),
-				limit,
+		async (args) => {
+			const result = await searchItemsPage(db, {
+				query: args.query,
+				...listOptions(args),
 			});
-			return json({ query, count: rows.length, results: rows.map(hit) });
+			return json({
+				query: args.query,
+				count: result.items.length,
+				next_cursor: result.nextCursor,
+				results: result.items.map(hit),
+			});
 		},
 	);
 

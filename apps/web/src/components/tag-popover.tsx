@@ -42,7 +42,10 @@ export function TagPopover({
 	const input = useRef<HTMLInputElement>(null);
 
 	const currentKey = current.join("\u0000");
-	useEffect(() => setSelected(new Set(current.map(normalize))), [currentKey]);
+	useEffect(() => {
+		const items = currentKey ? currentKey.split("\u0000") : [];
+		setSelected(new Set(items.map(normalize)));
+	}, [currentKey]);
 
 	const updatePlacement = useCallback(() => {
 		const rect = anchor.current?.getBoundingClientRect();
@@ -150,6 +153,7 @@ export function TagPopover({
 				value={query}
 				onChange={(event) => setQuery(event.target.value)}
 				placeholder="Search or create a tag"
+				aria-label="Search or create a tag"
 				maxLength={100}
 				style={{ width: "100%", boxSizing: "border-box", height: 30, padding: "0 8px", border: "1px solid var(--edge)", borderRadius: 5, background: "var(--card)", color: "var(--text)", font: "inherit", fontSize: 11.5, outline: "none" }}
 			/>

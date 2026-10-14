@@ -6,8 +6,7 @@
     "build": "vite build",
     "build:cloudflare": "vite build --config vite.cloudflare.config.ts",
     "serve": "vite preview",
-    "dev:bare": "vite dev",
-    "serve:local": "bun run scripts/serve-local.ts"
+    "dev:bare": "vite dev"
   },
   "dependencies": {
     "@anansi/db": "workspace:*",
@@ -32,7 +31,6 @@
     "@anansi/sources": "workspace:*"
   },
   "devDependencies": {
-    "@anansi/config": "workspace:*",
     "@cloudflare/vite-plugin": "^1.60.1",
     "@tanstack/react-router-devtools": "^1.167.0",
     "@testing-library/dom": "^10.4.1",
@@ -42,7 +40,6 @@
     "@vitejs/plugin-react": "^6.0.4",
     "jsdom": "^30.0.0",
     "typescript": "catalog:",
-    "vite": "^8.1.5",
-    "web-vitals": "^6.0.1"
+    "vite": "^8.1.5"
   }
 }

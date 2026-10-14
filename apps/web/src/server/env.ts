@@ -45,13 +45,14 @@ export async function serverEnv(): Promise<ServerEnv> {
     const { env, waitUntil } = await import(/* @vite-ignore */ "cloudflare:workers");
     if (env?.DB) {
       const { openD1 } = await import("@anansi/db/d1");
+      const secret = ((env as unknown as Record<string, unknown>).ANANSI_SECRET as string | undefined) || undefined;
       cached = {
         db: openD1(env.DB),
         media: { bucket: env.MEDIA, runtime: "worker" },
-        libraryToken: env.LIBRARY_TOKEN || undefined,
+        libraryToken: secret || env.LIBRARY_TOKEN || undefined,
         waitUntil,
-        ingestToken: env.INGEST_TOKEN || undefined,
-        mcpToken: env.MCP_TOKEN || undefined,
+        ingestToken: secret || env.INGEST_TOKEN || undefined,
+        mcpToken: secret || env.MCP_TOKEN || undefined,
         ai: env.AI as AiBinding | undefined,
         vectorize: env.VECTORIZE as VectorizeBinding | undefined,
         source: "d1",
@@ -64,13 +65,14 @@ export async function serverEnv(): Promise<ServerEnv> {
 
   const { openLocalDb } = await import("@anansi/db/local");
   const path = process.env.ANANSI_DB_PATH ?? "data/anansi.db";
+  const secret = process.env.ANANSI_SECRET;
   cached = {
     db: openLocalDb(path) as unknown as AnansiDb,
     media: { dir: process.env.ANANSI_MEDIA_DIR ?? "data/media" },
-    libraryToken: process.env.LIBRARY_TOKEN,
+    libraryToken: secret || process.env.LIBRARY_TOKEN,
     allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "http://localhost:3001,http://127.0.0.1:3001").split(",").map((v: string) => v.trim()).filter(Boolean),
-    ingestToken: process.env.INGEST_TOKEN,
-    mcpToken: process.env.MCP_TOKEN,
+    ingestToken: secret || process.env.INGEST_TOKEN,
+    mcpToken: secret || process.env.MCP_TOKEN,
     source: "local",
   };
   return cached;

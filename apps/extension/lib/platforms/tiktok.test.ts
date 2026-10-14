@@ -9,14 +9,23 @@ import {
 	isFavouritesRequest,
 	isLikesRequest,
 	isProfileView,
+	isSuccessfulMutationResponse,
 	profileUrl,
 	readFavouriteMutation,
 	readHandle,
+	readAccountInfo,
 	readHandleFromProfileHref,
 	readItemList,
 } from "./tiktok.ts";
 
 const CONFIG = { watchUrls: ["/api/user/collect/item_list"] };
+
+test("reads the signed-in TikTok account response without mistaking an unknown response for logout", () => {
+	expect(readAccountInfo({ message: "success", data: { username: "joojo44" } })).toEqual({ handle: "joojo44", signedOut: false });
+	expect(readAccountInfo({ message: "error", data: { error_code: 13 } })).toEqual({ handle: null, signedOut: true });
+	expect(readAccountInfo({ message: "success", data: {} })).toEqual({ handle: null, signedOut: false });
+	expect(readAccountInfo({ message: "success", data: { username: "../other" } })).toEqual({ handle: null, signedOut: false });
+});
 
 describe("telling Favourites from Likes", () => {
 	test("accepts the collected-item listing", () => {
@@ -60,6 +69,13 @@ describe("telling Favourites from Likes", () => {
 			isFavouritesRequest("https://www.tiktok.com/api/user/collect/item_list/", {}),
 		).toBe(false);
 	});
+});
+
+test("only a confirmed TikTok mutation becomes a live event", () => {
+	expect(isSuccessfulMutationResponse({ status_code: 0 })).toBe(true);
+	expect(isSuccessfulMutationResponse({ statusCode: 0 })).toBe(true);
+	expect(isSuccessfulMutationResponse({ status_code: 10000 })).toBe(false);
+	expect(isSuccessfulMutationResponse({})).toBe(false);
 });
 
 describe("readItemList", () => {
@@ -159,16 +175,17 @@ describe("where to send the tab", () => {
 
 describe("readFavouriteMutation", () => {
 	const configured = {
-		mutationUrl: "/api/commit/collect/",
-		idField: "aweme_id",
+		mutationUrl: "/api/item/collect/",
+		idField: "itemId",
 		actionField: "action",
 		savedValue: "1",
+		unsavedValue: "2",
 	};
 
 	test("is inert until the server describes the request", () => {
 		expect(
 			readFavouriteMutation(
-				"https://www.tiktok.com/api/commit/collect/?aweme_id=7400000000000000001&action=1",
+				"https://www.tiktok.com/api/item/collect/?itemId=7400000000000000001&action=1",
 				null,
 				{},
 			),
@@ -178,7 +195,7 @@ describe("readFavouriteMutation", () => {
 	test("reads the configured fields from the query", () => {
 		expect(
 			readFavouriteMutation(
-				"https://www.tiktok.com/api/commit/collect/?aweme_id=7400000000000000001&action=1",
+				"https://www.tiktok.com/api/item/collect/?itemId=7400000000000000001&action=1",
 				null,
 				configured,
 			),
@@ -188,8 +205,8 @@ describe("readFavouriteMutation", () => {
 	test("reads them from the body, and body wins over query", () => {
 		expect(
 			readFavouriteMutation(
-				"https://www.tiktok.com/api/commit/collect/?action=1",
-				"aweme_id=7400000000000000002&action=0",
+				"https://www.tiktok.com/api/item/collect/?action=1",
+				"itemId=7400000000000000002&action=2",
 				configured,
 			),
 		).toEqual({ action: "unsave", videoId: "7400000000000000002" });
@@ -205,10 +222,12 @@ describe("readFavouriteMutation", () => {
 		).toBeNull();
 		expect(
 			readFavouriteMutation(
-				"https://www.tiktok.com/api/commit/collect/?aweme_id=../../etc&action=1",
+				"https://www.tiktok.com/api/item/collect/?itemId=../../etc&action=1",
 				null,
 				configured,
 			),
 		).toBeNull();
+		expect(readFavouriteMutation("https://evil.example/api/item/collect/?itemId=7400000000000000001&action=1", null, configured)).toBeNull();
+		expect(readFavouriteMutation("https://www.tiktok.com/api/item/collect/?itemId=7400000000000000001&action=9", null, configured)).toBeNull();
 	});
 });

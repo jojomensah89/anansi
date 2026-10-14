@@ -18,8 +18,8 @@ import {
   useSlowLoad,
 } from "../components/skeleton.tsx";
 import { api, type Collection, type ItemRow, type SemanticSearchStatus } from "../lib/api.ts";
-import { libraryKeys, useLibraryQuery } from "../lib/library-query.ts";
-import { useHideRemoved } from "../lib/settings.ts";
+import { libraryFreshnessOptions, libraryKeys, libraryStatsChanged, libraryStatsFingerprint, useLibraryQuery } from "../lib/library-query.ts";
+import { useHideRemoved, useShowNsfw } from "../lib/settings.ts";
 import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
 
 export const Route = createFileRoute("/")({
@@ -28,9 +28,11 @@ export const Route = createFileRoute("/")({
 });
 
 function semanticNoticeFor(query: string | undefined, status: SemanticSearchStatus | undefined): { message: string; status: SemanticSearchStatus } | null {
-  if (!query || !status?.enabled || (status.applied && status.state !== "warming") || status.degradedReason === "pagination-boundary") return null;
+  if (!query || !status?.enabled || (status.applied && status.state !== "warming")) return null;
   const message = status.state === "warming"
     ? "Semantic index warming — showing available semantic results."
+      : status.degradedReason === "pagination-boundary"
+        ? "Continuing with keyword-ranked results after semantic matches."
       : status.local && (status.state === "unavailable" || status.degradedReason === "provider-unavailable")
         ? "Ollama is unavailable — showing keyword results."
       : status.state === "error" || status.state === "paused" || status.degradedReason
@@ -84,6 +86,7 @@ function Library() {
       removed: search.removed as Filters["removed"],
       archived: search.archived,
       favorite: search.favorite,
+      nsfw: search.nsfw,
     }),
     [search],
   );
@@ -113,16 +116,30 @@ function Library() {
    * neither deserves one for a load too fast to notice.
    */
   const [hideRemoved] = useHideRemoved();
+  const [showNsfw] = useShowNsfw();
 
   const ordering = view === "timeline" ? "posted" : "saved";
-  const library = useLibraryQuery({ filters, query: search.q ?? "", order: ordering, hideRemoved });
+  const library = useLibraryQuery({ filters, query: search.q ?? "", order: ordering, hideRemoved, showNsfw });
   const items = library.items;
   const masonry = useMasonry(items);
-  const stats = useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000 });
+  const stats = useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000, ...libraryFreshnessOptions });
   const total = stats.data?.items ?? 0;
   const authors = stats.data?.authors ?? 0;
   const visibleCount = search.archived ? (stats.data?.archived ?? 0) : total;
   const counts = stats.data?.bySource ?? {};
+
+  const previousStatsFingerprint = useRef<string | null>(null);
+  useEffect(() => {
+    if (!stats.data) return;
+    const fingerprint = libraryStatsFingerprint(stats.data);
+    const previous = previousStatsFingerprint.current;
+    previousStatsFingerprint.current = fingerprint;
+    if (libraryStatsChanged(previous, fingerprint)) {
+      // Stats are the bounded two-second change probe. Refresh only the active
+      // filter/search/order chain when the library's counts actually change.
+      void queryClient.invalidateQueries({ queryKey: library.key, exact: true });
+    }
+  }, [library.key, queryClient, stats.data]);
 
   const bar = useFilterBar({ filters, onChange: setFilters, bySource: counts });
 

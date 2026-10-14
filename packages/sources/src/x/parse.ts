@@ -230,6 +230,7 @@ function normalizeTweet(
     metrics: metricsOf(subject),
     media: [...mediaOf(subject), ...(quoted ? mediaOf(quoted) : [])],
     links,
+    nsfw: Boolean(subject.legacy?.possibly_sensitive || tweet.legacy?.possibly_sensitive),
     raw: {
       sortIndex,
       isRetweet: !!retweeted,

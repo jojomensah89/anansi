@@ -4,8 +4,8 @@ import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { PanelLeft } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { Button } from "./button.tsx";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip.tsx";
+import { Button } from "./button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 import { cn } from "@anansi/ui/lib/utils";
 
 const STORAGE_KEY = "anansi.sidebar.open";
@@ -172,15 +172,12 @@ export function SidebarMenuButton({ className, isActive = false, tooltip, render
 		defaultTagName: "button",
 		props: mergeProps<"button">(
 			{
-				"data-slot": "sidebar-menu-button",
-				"data-sidebar": "menu-button",
-				"data-active": isActive,
 				className: cn("anansi-sidebar-menu-button", className),
 			},
 			{ ...props, children },
 		),
 		render,
-		state: { active: isActive },
+		state: { active: isActive ? "true" : undefined },
 	});
 
 	if (!tooltip) return button;
