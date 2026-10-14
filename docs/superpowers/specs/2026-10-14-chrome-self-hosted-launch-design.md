@@ -110,6 +110,54 @@ public publication remain separate user-controlled release decisions.
 
 ## Acceptance and evidence
 
+The user additionally requires all existing features to work. Launch acceptance
+therefore covers the complete currently reachable product, not only the changed
+connection and deployment code. Inventory from current routes, API handlers,
+extension actions and MCP catalog; do not use historical plans as feature truth.
+
+Maintain a feature matrix with source entry point, expected behavior, automated
+coverage, local/browser evidence, Cloudflare/provider evidence, defects and final
+status. Use explicit statuses: passed at the stated evidence level, failed,
+blocked awaiting external access, or intentionally excluded from public claims.
+No feature is marked passed solely because a build succeeds. Fix regressions
+within this launch scope; material new product behavior still requires user
+review. Optional features are exercised both disabled and enabled.
+
+Required feature groups include:
+
+- Library sign-in/sign-out and expired/rotated credentials; empty, loading,
+  offline and error states; navigation and theme behavior.
+- Grid, row and timeline views; pagination; keyword search and command palette;
+  source, author, type, tag, media, archive, favorite, removed and NSFW filters;
+  deep-link/search state and refresh after capture.
+- Item details, text/highlights/media, notes, favorites, archive/unarchive,
+  manual tags, bulk actions, saved-view collection create/apply/delete, and
+  creator browsing and author-based navigation.
+- Source configuration and health; enable/disable behavior; imports, resume,
+  daily catch-up, native save/unsave, duplicate prevention and provider sign-in
+  diagnostics for every current source; hide-removed preference persistence.
+- Chrome page/selection/context-menu capture and optional bookmark mirroring;
+  connect, reconnect, disconnect, service-worker restart, queue status/retry and
+  outage recovery without cross-library delivery or data loss; per-source
+  import/pause, initial/remaining Import all, Retry all, Open library and Details.
+- Logical export and empty-library restore, interrupted restore recovery and
+  rejection of invalid files; media serving, fetching, failure and retry.
+- Optional automatic tagging/reclassification and semantic indexing/search,
+  preview/confirmation, progress, pause/disable, vector cleanup, budgets and
+  keyword fallback; scheduled execution against actual hosted bindings.
+- MCP setup and authenticated HTTP transport: `search_saved`, `get_saved`,
+  `get_saved_many`, `list_saved`, `list_recent_saves`, `list_author_saves`,
+  `list_tags`, `library_stats`; filters, cursors, bounds and access denial.
+
+Current source catalog declares X, Reddit, GitHub, TikTok and Web supported.
+Those declarations require runtime acceptance before public release claims.
+Current AI API exposes Cloudflare or unavailable runtime; historical local
+Ollama UI branches are not active features and do not expand this launch scope.
+
+Initial local baseline on 2026-10-14: `bun test` passed 696 tests across 76 files
+with zero failures; `bun run typecheck` exited successfully. Runtime was Bun
+1.4.2. This baseline is not final-build browser, provider or Cloudflare evidence.
+
 Record commit, build mode, browser version, deployment identity, checks and known
 limitations. Separate automated/local evidence from authenticated browser and
 live Cloudflare evidence.
