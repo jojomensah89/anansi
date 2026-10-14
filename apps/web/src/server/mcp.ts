@@ -1,6 +1,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createAnansiServer } from "@anansi/mcp";
 import type { AnansiDb } from "@anansi/db";
+import { sameSecret } from "./library-auth.ts";
 
 /**
  * The same four tools, over HTTP.
@@ -22,14 +23,15 @@ export interface McpEnv {
 }
 
 export async function handleMcp(env: McpEnv, request: Request): Promise<Response> {
-  if (!env.token) {
+  const token = env.token?.trim();
+  if (!token) {
     return new Response(JSON.stringify({ error: "mcp endpoint is not configured" }), {
       status: 503,
       headers: { "content-type": "application/json" },
     });
   }
   const auth = request.headers.get("authorization") ?? "";
-  if (auth !== `Bearer ${env.token}`) {
+  if (!sameSecret(auth, `Bearer ${token}`)) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
       status: 401,
       headers: { "content-type": "application/json" },

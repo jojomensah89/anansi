@@ -23,16 +23,34 @@ Anansi is intentionally conservative about browser access:
 
 - No `<all_urls>` permission, no `cookies` permission.
 - No GitHub OAuth or personal access token for extension capture.
-- Extension-to-server traffic requires `INGEST_TOKEN` bearer auth; MCP requires `MCP_TOKEN` when configured.
+- Library, extension and MCP access fail closed without credentials. Explicit
+  `LIBRARY_TOKEN`, `INGEST_TOKEN` and `MCP_TOKEN` override `ANANSI_SECRET` for
+  their respective roles; otherwise the master secret is the fallback.
 - The local database and media live under `data/` and must never be committed.
 
 Please do not submit reports asking for session-cookie exfiltration, token harvesting, or bypassing platform login — those are out of scope by design.
 
 ## Secrets hygiene
 
-Never put `INGEST_TOKEN`, `MCP_TOKEN`, or `LIBRARY_TOKEN` in `VITE_*` vars, committed files, screenshots, or issue logs. Rotate any secret that was ever pasted publicly.
+Never put `ANANSI_SECRET`, `INGEST_TOKEN`, `MCP_TOKEN`, or `LIBRARY_TOKEN` in
+`VITE_*` vars, committed files, screenshots, or issue logs. Rotate any secret
+that was ever pasted publicly. Use a separate ingest key for the extension to
+limit its authority. Rotation requires reconnecting affected clients.
 
-The self-hosted extension is a private build: `ANANSI_EXTENSION_INGEST_TOKEN`
-embeds the owner's ingest credential so the popup needs no setup form. Anyone
-with that configured artifact can extract the credential. Never publish it to
-an extension store or share it; rebuild after rotating `INGEST_TOKEN`.
+Default Chrome builds are public artifacts with no embedded deployment URL or
+credential. Connect them through the popup. Explicit private build mode can embed
+`ANANSI_EXTENSION_INGEST_TOKEN`; anyone with that artifact can extract it.
+Never publish or share a private configured build. Rebuild after rotating its key.
+
+## Request protection
+
+The Worker uses separate Cloudflare rate-limit bindings for login, extension
+requests and MCP. Counters are per Cloudflare location and eventually consistent,
+not global quotas. Shared IP addresses share a budget. Missing or failing bindings
+close those routes with 503; throttling returns 429 and a retry hint. Confirm the
+bindings and any additional WAF rules on the deployed Worker before launch.
+
+Capture relays run on provider pages. Same-page scripts are not trusted simply
+because they know the relay nonce: it correlates messages, not authenticates a
+provider. Source identity, bounded payloads and queue limits remain required.
+See PRIVACY.md for capture destinations and optional AI processing.

@@ -1,125 +1,44 @@
 # Contributing to Anansi
 
-Thanks for picking up Anansi. It is a local-first memory layer for bookmarks,
-saved posts, GitHub stars, and web pages, searchable by you and your coding
-agent over MCP.
+Anansi is a self-hosted library for supported browser saves, web pages and GitHub stars, searchable through the web app and eight read-only MCP tools.
 
-## Quick setup
+## Setup
 
-Requirements: [Bun](https://bun.sh/) 1.3+, a Chromium-based browser for the
-extension. Ollama is optional unless you are testing local AI.
+Use Bun 1.4.2+ and Chrome for the current release target. Run `bun install --frozen-lockfile`, copy .dev.vars.example to .dev.vars, set ANANSI_SECRET to a generated random secret, and run `bun run dev`. This builds the Worker and applies local migrations before starting it.
+Optional LIBRARY_TOKEN, INGEST_TOKEN and MCP_TOKEN override their respective roles. Open http://127.0.0.1:8787; API is /api and MCP is /mcp. Follow the README for Cloudflare setup.
+AI is optional and uses Cloudflare bindings. Historical Ollama/CLI commands are not current runtime paths. Never run db:push; canonical SQL migrations in packages/db/drizzle include FTS5 tables and triggers.
 
-```powershell
-bun install
-Copy-Item .env.example .env
-# Set independent LIBRARY_TOKEN, INGEST_TOKEN, and MCP_TOKEN values.
-bun run dev:local
-```
+Build the public extension with `bun run --cwd apps/extension build`, load apps/extension/.output/public/chrome-mv3 and connect through the popup. See apps/extension/README.md.
 
-Open `http://127.0.0.1:3001`. This is the only browser-facing local origin;
-the launcher proxies `/api` and `/mcp` to its internal Bun process. Do not set
-`VITE_API_BASE`, use port `8788` in the browser, or enter a token in the
-extension popup.
-
-Build and load the private extension:
-
-```powershell
-bun run --cwd apps/extension build
-```
-
-Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**,
-and select `apps/extension/.output/chrome-mv3`. The build uses
-`ANANSI_EXTENSION_ORIGIN` and `ANANSI_EXTENSION_INGEST_TOKEN` from the local
-environment; the credential is extractable, so never publish or share this
-configured artifact.
-
-## Local AI and acceptance
-
-Local AI is an explicit developer path. Install Ollama, then pull the models
-listed in `.env.example` (`embeddinggemma` and
-`qwen3:4b-instruct-2507-q4_K_M`). With the daemon running:
-
-```powershell
-bun run ai:tagging:ollama
-bun run semantic:ollama
-bun run e2e:local
-```
-
-The end-to-end command creates a temporary SQLite database and synthetic
-bookmark, then proves authenticated ingest/idempotency, background tag and
-embedding completion, exact FTS5/BM25 search, semantic search, extension
-configuration, and HTTP plus stdio MCP. It never touches `data/anansi.db`.
-
-FTS5/BM25 is the default keyword path: terms are quoted and implicitly ANDed,
-English stemming is enabled, a trailing `*` performs prefix matching, and
-misspellings are not fuzzy-matched. Semantic search is optional and falls back
-to the lexical page while Ollama is unavailable or its sidecar is warming.
-
-## Checks before you push
+## Checks
 
 ```powershell
 bun test
 bun run typecheck
 bun run --cwd apps/extension compile
-bun run --cwd apps/extension build
-bun run --cwd apps/web build
-bun run apps/web/scripts/mcp-http-smoke.ts
+bun run --cwd apps/extension zip
+bun run --cwd apps/extension check:public-artifact
+bun run build
+bun run apps/web/scripts/launch-feature-smoke.ts
+git diff --check
 ```
 
-The default suite does not require Ollama, Cloudflare credentials, or network
-access. The Cloudflare acceptance procedure is opt-in and documented in
-[`docs/superpowers/plans/2026-09-07-alchemy-semantic-smoke-runbook.md`](./docs/superpowers/plans/2026-09-07-alchemy-semantic-smoke-runbook.md).
-
-## MCP
-
-The local HTTP endpoint is `http://127.0.0.1:3001/mcp` and requires
-`MCP_TOKEN`. The same eight read-only tools are available over stdio:
-
-```powershell
-$env:ANANSI_DB_PATH = ".\data\anansi.db"
-bun apps/cli/src/cli.ts serve --mcp
-```
-
-The catalog is `search_saved`, `get_saved`, `get_saved_many`, `list_saved`,
-`list_recent_saves`, `list_author_saves`, `list_tags`, and `library_stats`.
-MCP search is intentionally keyword/BM25 today. The visible source filter
-accepts `x`, `reddit`, `github`, and `web`; paused TikTok rows remain hidden.
+Synthetic smoke uses isolated memory data. Automated checks do not prove signed-in provider capture, live Workers AI or fresh-account Cloudflare installation. See release/chrome/README.md for release gates.
 
 ## Project map
 
-```text
-apps/cli/         Local CLI, import adapters, database and stdio MCP entrypoint
-apps/extension/   WXT React MV3 extension and platform content scripts
-apps/web/         TanStack Start UI, JSON API, MCP HTTP route, local server
-packages/db/      SQLite/D1 schema, migrations, search, and item operations
-packages/mcp/     Transport-independent MCP server and tool definitions
-packages/sources/ Shared capture contracts and source parsers
-packages/ui/      Shared UI components and styles
-wrangler.jsonc   Cloudflare Worker bindings and deployment resources
-packages/env/     Typed runtime environment bindings
-scripts/          Explicit local smoke and development entrypoints
-```
+- apps/extension: capture, queue, imports and popup.
+- apps/web: TanStack Start UI, JSON API and HTTP MCP.
+- packages/db: SQLite/D1 schema, migrations and library operations.
+- packages/mcp: eight read-only tools and shared server.
+- packages/sources: capture contracts, capabilities and parsers.
+- packages/ui and packages/env: shared UI and runtime binding types.
+- wrangler.jsonc: resources, scheduling and request protection.
+- release/chrome: submission materials and acceptance evidence.
 
-The root package and workspace packages are private implementation units; the
-repository is the OSS distribution. Do not publish a workspace package or
-change `private` metadata without a separate package-distribution design.
+The extension captures and queues; the server validates and parses; the database owns identity, search and provenance. Workspace packages stay private implementation units.
 
-Boundary: the extension captures and queues; the server validates and parses;
-the database owns identity, search, and provenance; MCP and HTTP call the same
-database functions.
+## Privacy and support
 
-## Privacy rules (must-follow)
-
-- Never commit `.env`, `data/`, raw captures, downloaded media, cookies,
-  tokens, or session values.
-- No `<all_urls>` or `cookies` permission. No GitHub OAuth/PAT for extension
-  capture. GitHub and Reddit imports use browser-managed session cookies —
-  never read or upload cookie values.
-- Test fixtures are committed only after scrubbing. See
-  `apps/cli/fixtures/README.md` before adding account-derived data.
-
-## Filing issues
-
-Use the bug and feature templates in `.github/ISSUE_TEMPLATE/`. Include the Bun
-version, source (X / Reddit / GitHub / TikTok / Web), repro steps, and redacted
-logs. Never paste tokens or private saved content.
+Never commit environment files, real library data, cookies, private captures, media or credentials. Use synthetic or scrubbed fixtures. Do not add mandatory all-site access or a cookies API permission. Browser session cookies must never be uploaded to Anansi.
+Report bugs using .github/ISSUE_TEMPLATE with browser/Bun version, source, reproduction steps and redacted logs. Report vulnerabilities privately per SECURITY.md. Read PRIVACY.md before changing data destinations.

@@ -172,7 +172,7 @@ export function McpServerPage() {
                     <span className="mcp-configured"><span className="mcp-status-dot" />Configured</span>
                   </div>
                   <p className="mcp-step-copy">
-                    Replace <code>{MCP_TOKEN_PLACEHOLDER}</code> with the <code>MCP_TOKEN</code> already configured on the Anansi server. It is never shown here.
+                    Replace <code>{MCP_TOKEN_PLACEHOLDER}</code> with <code>MCP_TOKEN</code> when it is configured; otherwise use the server&apos;s <code>ANANSI_SECRET</code>. The token is never shown here.
                   </p>
                   <div className="mcp-code-wrap">
                     <pre><code>{snippet}</code></pre>
