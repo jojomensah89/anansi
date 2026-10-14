@@ -5,6 +5,9 @@ import type {
 import { SourceMark } from "@anansi/ui/components/source-mark";
 import { useCallback, useEffect, useState } from "react";
 import {
+  requireOriginPermission,
+} from "../../lib/connection-lifecycle.ts";
+import {
   clearExtensionConnection,
   type ExtensionConnection,
   getExtensionConnection,
@@ -99,6 +102,7 @@ interface DurableSnapshot {
   queue: QueueStatus;
   bySource: Record<string, QueueStatus>;
   runs: Record<string, RunRecord>;
+	destinationOrigin?: string | null;
 }
 
 const EMPTY_QUEUE: QueueStatus = {
@@ -175,6 +179,8 @@ export default function App() {
   const [tokenInput, setTokenInput] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [legacyQueueNeedsDecision, setLegacyQueueNeedsDecision] = useState(false);
+  const [resolvingLegacyQueue, setResolvingLegacyQueue] = useState(false);
 
   useEffect(() => {
     void getExtensionConnection().then((conn) => {
@@ -188,6 +194,17 @@ export default function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (!connection || !snapshot || snapshot.destinationOrigin) return;
+    const pending = Object.values(snapshot.bySource).some((row) =>
+      row.queued + row.uploading + row.retrying + row.failed > 0,
+    );
+    if (pending) {
+      setLegacyQueueNeedsDecision(true);
+      setShowSettings(true);
+    }
+  }, [connection, snapshot]);
 
   /**
    * Ask the worker what is actually persisted.
@@ -231,7 +248,10 @@ export default function App() {
           if (current) {
             setConfig(null);
             setStats(null);
-            setConnectionState(connectionFromStatus(configResponse.status));
+            const state = connectionFromStatus(configResponse.status);
+            setConnectionState(state.kind === "unauthorized"
+              ? { ...state, message: "Credential mismatch — check INGEST_TOKEN or ANANSI_SECRET on your Worker" }
+              : state);
           }
           return;
         }
@@ -282,29 +302,36 @@ export default function App() {
     if (e) e.preventDefault();
     setIsConnecting(true);
     setConnectError(null);
+    let permissionWasPresent = false;
+    let permissionOrigin: string | null = null;
+    let connectionSucceeded = false;
     try {
       const validated = validateExtensionConnection(urlInput, tokenInput);
-      if (typeof browser !== "undefined" && browser.permissions?.request) {
-        try {
-          const granted = await browser.permissions.request({
-            origins: [`${validated.origin}/*`],
-          });
-          if (!granted) {
-            setConnectError("Permission to access the Worker URL was denied.");
-            setIsConnecting(false);
-            return;
-          }
-        } catch {
-          // Ignore if permission request not supported in test env
-        }
+      permissionOrigin = validated.origin;
+      const previousSnapshot = await command({ action: "queue-status" });
+      const currentSnapshot = (previousSnapshot as { snapshot?: DurableSnapshot } | undefined)?.snapshot;
+      const pending = currentSnapshot?.bySource
+        ? Object.values(currentSnapshot.bySource).reduce((total, queued) =>
+          total + queued.queued + queued.uploading + queued.retrying + queued.failed, 0)
+        : 0;
+      const importRunning = Object.values(currentSnapshot?.runs ?? {}).some((run) => run.phase === "running");
+      if (connection && connection.origin !== validated.origin &&
+        ((pending > 0 && currentSnapshot?.destinationOrigin && currentSnapshot.destinationOrigin !== validated.origin) || importRunning)) {
+        setConnectError("Pending captures or imports belong to your current Anansi server. Retry or reconnect there until they finish before switching servers.");
+        return;
       }
+
+      permissionWasPresent = await requireOriginPermission(
+        validated.origin,
+        browser.permissions,
+      );
       const res = await fetch(`${validated.origin}/api/extension/config`, {
         headers: { Authorization: `Bearer ${validated.token}` },
         redirect: "error",
         signal: AbortSignal.timeout(10_000),
       });
       if (res.status === 401 || res.status === 403) {
-        setConnectError("Invalid secret key. Check your ANANSI_SECRET.");
+        setConnectError("Invalid secret key. Use INGEST_TOKEN when your Worker has one configured; otherwise use ANANSI_SECRET.");
         setIsConnecting(false);
         return;
       }
@@ -321,25 +348,73 @@ export default function App() {
       const data = await res.json();
       if (!validatePopupRemoteConfig(data)) {
         setConnectError("Incompatible server version. Update or redeploy Anansi.");
-        setIsConnecting(false);
         return;
       }
+      await browser.storage.local.set({
+        anansiConnectionAttemptOrigin: validated.origin,
+        ...(connection?.origin ? { anansiConnectionPreviousOrigin: connection.origin } : {}),
+      });
       await saveExtensionConnection(validated.origin, validated.token);
+      const updated = await command({ action: "connection-updated" }) as { ok?: boolean; error?: string; code?: string } | undefined;
+      if (!updated?.ok) {
+        if (updated?.code === "legacy_queue_unowned") {
+          setConnection(validated);
+          setConfig(data);
+          setConnectionState(CONNECTED_CONNECTION);
+          setShowSettings(true);
+          setLegacyQueueNeedsDecision(true);
+          setConnectError(updated.error ?? "Pending captures need an explicit destination.");
+          connectionSucceeded = true;
+          return;
+        }
+        if (connection) await saveExtensionConnection(connection.origin, connection.token);
+        else await clearExtensionConnection();
+        await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
+        await command({ action: "connection-updated" });
+        setConnectError(updated?.error ?? "Could not update the connection. Retry after checking the extension.");
+        return;
+      }
       setConnection(validated);
       setConfig(data);
       setConnectionState(CONNECTED_CONNECTION);
+      setLegacyQueueNeedsDecision(false);
       setShowSettings(false);
-      void command({ action: "connection-updated" });
       refresh();
+      connectionSucceeded = true;
     } catch (err) {
       setConnectError((err as Error).message || "Could not connect to Worker.");
     } finally {
+      if (!connectionSucceeded) {
+        await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
+      }
+      if (!connectionSucceeded && permissionOrigin && !permissionWasPresent && permissionOrigin !== connection?.origin) {
+        // A failed connection should not leave a newly requested grant behind.
+        void browser.permissions?.remove({ origins: [`${permissionOrigin}/*`] }).catch(() => {});
+      }
       setIsConnecting(false);
+    }
+  };
+
+  const adoptLegacyQueue = async () => {
+    setResolvingLegacyQueue(true);
+    try {
+      const result = await command({ action: "adopt-legacy-queue" }) as { ok?: boolean; error?: string } | undefined;
+      if (!result?.ok) {
+        setConnectError(result?.error ?? "Could not assign the pending captures.");
+        return;
+      }
+      setLegacyQueueNeedsDecision(false);
+      setConnectError(null);
+      const response = await command({ action: "queue-status" }) as { snapshot?: DurableSnapshot } | undefined;
+      if (response?.snapshot) setSnapshot(response.snapshot);
+    } finally {
+      setResolvingLegacyQueue(false);
     }
   };
 
   const handleDisconnect = async () => {
     await clearExtensionConnection();
+    await command({ action: "connection-updated" });
     setConnection(null);
     setConfig(null);
     setStats(null);
@@ -347,7 +422,6 @@ export default function App() {
     setShowSettings(false);
     setUrlInput("");
     setTokenInput("");
-    void command({ action: "connection-updated" });
   };
 
   // The worker's durable run record is authoritative once it exists. Until
@@ -549,7 +623,7 @@ export default function App() {
               {connection ? "Connection Settings" : "Connect to Anansi"}
             </div>
             <div style={{ fontSize: 11, color: S.muted, lineHeight: 1.4 }}>
-              Enter your deployed Cloudflare Worker URL and secret key to sync bookmarks.
+              Enter your deployed Cloudflare Worker URL and secret key to sync bookmarks. Use INGEST_TOKEN when configured; otherwise use ANANSI_SECRET.
             </div>
           </div>
 
@@ -579,7 +653,7 @@ export default function App() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <label htmlFor="anansi-worker-token" style={{ fontSize: 11, color: S.muted, fontWeight: 500 }}>
-              Secret Key (ANANSI_SECRET)
+              Secret Key (INGEST_TOKEN or ANANSI_SECRET)
             </label>
             <input
               id="anansi-worker-token"
@@ -617,6 +691,15 @@ export default function App() {
             </div>
           )}
 
+          {legacyQueueNeedsDecision && connection && (
+            <div style={{ padding: "9px 10px", border: `1px solid ${S.warn}`, borderRadius: 6, color: S.muted, fontSize: 11, lineHeight: 1.4 }}>
+              Older pending captures have no recorded server destination. Delivery is paused. Assign them to {connection.origin} only if this is the library you want them added to.
+              <button type="button" disabled={resolvingLegacyQueue} onClick={() => void adoptLegacyQueue()} style={{ ...button, display: "block", marginTop: 8, width: "100%" }}>
+                {resolvingLegacyQueue ? "Assigning…" : "Assign pending captures here"}
+              </button>
+            </div>
+          )}
+
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
             <button
               type="submit"
@@ -650,6 +733,11 @@ export default function App() {
               </button>
             )}
           </div>
+          {connection && (
+            <div style={{ fontSize: 10.5, color: S.muted, lineHeight: 1.4 }}>
+              Disconnect keeps pending captures on this device and pauses delivery until you reconnect.
+            </div>
+          )}
         </form>
       ) : (
         <>
@@ -1070,15 +1158,19 @@ export default function App() {
         </span>
         <button
           type="button"
-          onClick={() => void browser.tabs.create({ url: new URL("/", connection?.origin ?? "http://127.0.0.1:3001").toString() })}
+          disabled={!connection}
+          onClick={() => {
+            if (connection) void browser.tabs.create({ url: new URL("/", connection.origin).toString() });
+          }}
           style={{
             marginLeft: "auto",
             background: "none",
             border: "none",
-            cursor: "pointer",
+            cursor: connection ? "pointer" : "default",
             font: "inherit",
             fontSize: 11.5,
             color: S.accent,
+            opacity: connection ? 1 : 0.5,
           }}
         >
           Open library ↗

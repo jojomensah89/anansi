@@ -6,6 +6,7 @@ import { createAiJobRunner } from "./server/ai-job-runner.ts";
 import { createEmbeddingProvider, createVectorIndex, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
 import { prepareSemanticItem, publishSemanticItem } from "./server/semantic-embedding.ts";
 import { drainSemanticVectorDeletes } from "./server/semantic-vector-cleanup.ts";
+import { limitPublicRequest, secureResponse, type SecurityBindings } from "./server/worker-security.ts";
 
 type WorkerBindings = Pick<Env, "DB" | "MEDIA"> & {
   AI?: AiBinding;
@@ -61,7 +62,10 @@ export async function runAiSchedule(env: WorkerBindings): Promise<void> {
 }
 
 export default {
-  fetch: startEntry.fetch,
+  async fetch(request: Request, env: WorkerBindings & SecurityBindings): Promise<Response> {
+    const denied = await limitPublicRequest(request, env);
+    return secureResponse(denied ?? await startEntry.fetch(request));
+  },
   async scheduled(_controller: ScheduledController, env: WorkerBindings): Promise<void> {
     await runMediaSchedule(env);
     await runAiSchedule(env);
