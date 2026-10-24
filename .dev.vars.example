@@ -1,3 +1,10 @@
 # Master secret protecting library sign-in, extension ingestion, and MCP access.
 ANANSI_SECRET=
 
+# Optional role keys override the master secret for their respective endpoints.
+# Set a distinct INGEST_TOKEN to keep the Chrome extension from accessing
+# library sign-in or MCP with its key. Generate each key independently.
+# LIBRARY_TOKEN=
+# INGEST_TOKEN=
+# MCP_TOKEN=
+

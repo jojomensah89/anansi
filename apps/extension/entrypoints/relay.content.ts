@@ -35,7 +35,6 @@ export default defineContentScript({
     // Correlation only. MAIN-world code can observe this value, so it is not
     // an authentication secret against code already executing in the page.
     const nonce = crypto.randomUUID();
-    let persistenceTail: Promise<unknown> = Promise.resolve();
     const handshake = createRelayHandshake((message: unknown) =>
       window.postMessage(message, window.location.origin));
     document.addEventListener("DOMContentLoaded", () => handshake.documentReady(), { once: true });
@@ -49,23 +48,22 @@ export default defineContentScript({
       });
       if (!parsed.ok) return;
       if (parsed.message.action === "bookmark") {
-        // Retry the same mutation identity until the worker acknowledges its
-        // durable handoff. A sleeping/restarting worker must not lose a save.
+        // The trusted worker owns durable storage. It acknowledges only after
+        // the handoff is persisted or has reached the durable native outbox.
         const message = { ...parsed.message, mutationId: parsed.message.mutationId ?? crypto.randomUUID() };
-        const key = `native-handoff:${crypto.randomUUID()}`;
         const forward = async () => {
           try {
-            const result = await browser.runtime.sendMessage(message);
-            if (result?.ok) { await browser.storage.local.remove(key); return; }
+            const result = await browser.runtime.sendMessage({
+              anansi: "native-handoff",
+              action: "store",
+              messageVersion: MESSAGE_PROTOCOL_VERSION,
+              message,
+            });
+            if (result?.ok) return;
           } catch { /* the worker may be restarting */ }
           setTimeout(() => void forward(), 2_000);
         };
-        // Separate keys avoid read/modify/write races between open tabs. The
-        // worker replays these if this page closes before acknowledgement.
-        const entry = { message, pageUrl: window.location.href, order: performance.timeOrigin + performance.now() };
-        const persisted = persistenceTail.then(() => browser.storage.local.set({ [key]: entry }));
-        persistenceTail = persisted.catch(() => {});
-        void persisted.then(forward).catch(() => void forward());
+        void forward();
       } else void browser.runtime.sendMessage(parsed.message).catch(() => {});
     });
 

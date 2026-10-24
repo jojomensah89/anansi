@@ -13,7 +13,7 @@
     "@anansi/env": "workspace:*",
     "@anansi/mcp": "workspace:*",
     "@anansi/ui": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-router": "^1.170.18",

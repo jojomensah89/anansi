@@ -146,7 +146,8 @@ export type PopupCommandMessage = MessageBase &
 					| "mirror-status"
 					| "mirror-on"
 					| "mirror-off"
-					| "connection-updated";
+					| "connection-updated"
+					| "adopt-legacy-queue";
 		  }
 		| {
 				anansi: "popup-command";

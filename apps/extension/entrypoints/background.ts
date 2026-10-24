@@ -26,6 +26,7 @@ import {
 	SHIPPED_CAPTURE_SOURCES,
 } from "@anansi/sources";
 import { type CaptureQueue, createCaptureQueue } from "../lib/capture-queue.ts";
+import { createQueueDestinationGuard } from "../lib/connection-lifecycle.ts";
 import {
 	type BookmarkNode,
 	importCaptures,
@@ -62,6 +63,10 @@ import {
 	UNSUPPORTED_MESSAGES,
 } from "../lib/page-capture.ts";
 import { createLiveCapture } from "../lib/live-capture.ts";
+import {
+	nativeHandoffStorageKey,
+	parseNativeHandoffStoreRequest,
+} from "../lib/native-handoff.ts";
 import { nativeItemsFromPayload } from "../lib/native-snapshot.ts";
 import { tweetUrl } from "../lib/platforms/x.ts";
 import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
@@ -144,6 +149,7 @@ const persistedConfig = createPersistedConfigCache<RemoteConfig>({
 });
 let persistent: { outbox: IndexedDbOutbox; runs: SourceRuns } | null = null;
 let durableQueue: CaptureQueue | null = null;
+let destinationGuard: ReturnType<typeof createQueueDestinationGuard> | null = null;
 let healthHeartbeat: HeartbeatClient | null = null;
 const sessionImports = new Map<
 	SessionSource,
@@ -276,21 +282,69 @@ function isCaptureSource(source: string): source is CaptureSource {
 function queue(): CaptureQueue {
 	if (durableQueue) return durableQueue;
 	const { outbox } = persistentState();
-	durableQueue = createCaptureQueue({
+	destinationGuard = createQueueDestinationGuard({
+		storage: {
+			get: (key) => browser.storage.local.get(key),
+			set: (values) => browser.storage.local.set(values),
+			remove: (key) => browser.storage.local.remove(key),
+		},
+		listRecords: () => outbox.list(),
+		hasPendingWork: async () => {
+			const durable = await browser.storage.local.get(null);
+			if (Object.keys(durable).some((key) => key.startsWith("native-handoff:"))) return true;
+			for (const source of EXTENSION_PLATFORM_SOURCES) {
+				if ((await liveCapture().pending(source)).length > 0) return true;
+				if ((await persistentState().runs.current(source)).phase === "running") return true;
+			}
+			return false;
+		},
+		getOrigin: async () => (await settings())?.server ?? null,
+		getProvenOrigin: async () => {
+			const stored = await browser.storage.local.get("anansiAuthorizedOrigin");
+			return typeof stored.anansiAuthorizedOrigin === "string" ? stored.anansiAuthorizedOrigin : null;
+		},
+	});
+	const underlying = createCaptureQueue({
 		store: outbox,
 		transport: createIngestTransport(async (record) => {
 			const [s, config] = await Promise.all([settings(), loadConfig()]);
-			return s && config && (!isCaptureSource(record.source) || nativeDeliveryEnabled(record.source, config))
+			return s && config && destinationGuard && await destinationGuard.canDeliver() && (!isCaptureSource(record.source) || nativeDeliveryEnabled(record.source, config))
 				? { ingest: config.ingest, token: s.token } : null;
 		}),
 		clock: { now: Date.now },
 		random: Math.random,
 		scheduler: {
-			schedule(at) {
+			async schedule(at) {
+				if (!(await settings()) || !(await destinationGuard!.canDeliver())) return;
 				return scheduleEarliestAlarm(browser.alarms, OUTBOX_ALARM, Math.max(Date.now() + 100, at));
 			},
 		},
 	});
+	durableQueue = {
+		async enqueue(capture) {
+			const admission = await destinationGuard!.beginEnqueue();
+			if (!admission.ok) throw new Error(admission.error);
+			try {
+				return await underlying.enqueue(capture);
+			} catch (error) {
+				await destinationGuard!.clearIfEmpty();
+				throw error;
+			} finally {
+				await admission.release();
+			}
+		},
+		async getStatus() {
+			const status = await underlying.getStatus();
+			await destinationGuard!.clearIfEmpty();
+			return status;
+		},
+		async retry(request) {
+			if (!(await destinationGuard!.canDeliver())) return underlying.getStatus();
+			const status = await underlying.retry(request);
+			await destinationGuard!.clearIfEmpty();
+			return status;
+		},
+	};
 	return durableQueue;
 }
 
@@ -367,6 +421,9 @@ async function wakeDurableQueue(
 	includeFailed = false,
 	source?: CaptureSource,
 ): Promise<CaptureQueueStatus> {
+	if (!(await settings()) || !(await queueDestination().canDeliver())) {
+		return queue().getStatus();
+	}
 	await recoverNativeHandoffs();
 	await Promise.all(
 		EXTENSION_PLATFORM_SOURCES.map((platform) => flushPendingSaves(platform)),
@@ -378,6 +435,11 @@ async function wakeDurableQueue(
 	);
 	requestHeartbeat();
 	return status;
+}
+
+function queueDestination() {
+	queue();
+	return destinationGuard!;
 }
 
 /** Legacy direct upload, kept only while a source's captureV2 flag is off. */
@@ -603,6 +665,60 @@ async function handleBookmarkMutation(...args: Parameters<typeof recordNativeMut
 	// work can be suspended with the worker and defer ready captures to an alarm.
 	await wakeDurableQueue().catch(() => {});
 	if (state.needsContent) void processPendingRefreshes().catch(() => {});
+}
+
+/** Persist relay handoffs only in this trusted worker, under a derived key. */
+async function handleNativeHandoffStore(
+	request: NonNullable<ReturnType<typeof parseNativeHandoffStoreRequest>>,
+	sender: RuntimeMessageSender,
+): Promise<BackgroundResult> {
+	if (!sender.tab || !Number.isSafeInteger(sender.tab.id)) {
+		return { ok: false, error: "native handoffs must come from a supported page" };
+	}
+	const parsed = validateRuntimeMessage(request.message, sender);
+	if (
+		!parsed.ok ||
+		parsed.message.anansi !== "page-event" ||
+		parsed.message.action !== "bookmark" ||
+		!parsed.source ||
+		!parsed.message.mutationId
+	) {
+		return { ok: false, error: "native handoff is invalid" };
+	}
+	const pageUrl = sender.url ?? sender.tab.url;
+	const current = await settings();
+	if (!pageUrl || !current) {
+		return { ok: false, error: "connect to Anansi before capturing" };
+	}
+	const key = nativeHandoffStorageKey(parsed.source, parsed.message.mutationId);
+	if (!key) return { ok: false, error: "native handoff identity is invalid" };
+	const admission = await queueDestination().beginEnqueue();
+	if (!admission.ok) return { ok: false, error: admission.error };
+	try {
+		await browser.storage.local.set({
+			[key]: {
+				message: parsed.message,
+				pageUrl,
+				order: Date.now(),
+			},
+		});
+	} catch {
+		await admission.release();
+		await queueDestination().clearIfEmpty();
+		return { ok: false, error: "could not persist native handoff" };
+	} finally {
+		await admission.release();
+	}
+	try {
+		await recoverNativeHandoffs();
+	} catch {
+		// The persisted record is the durability boundary; startup/alarm recovers it.
+	}
+	if ((await browser.storage.local.get(key))[key] !== undefined) {
+		await scheduleEarliestAlarm(browser.alarms, NATIVE_CAPTURE_ALARM, Date.now() + 30_000);
+	}
+	await wakeDurableQueue().catch(() => {});
+	return { ok: true };
 }
 
 /** Migrate old id-only pending saves once, then preserve their new identity. */
@@ -1576,6 +1692,7 @@ async function durableSnapshot() {
 		queue: queueStatus,
 		bySource,
 		runs: Object.fromEntries(runs.map((run) => [run.source, run])),
+		destinationOrigin: (await browser.storage.local.get("anansiQueueDestinationOrigin")).anansiQueueDestinationOrigin ?? null,
 	};
 }
 
@@ -1672,10 +1789,50 @@ async function handlePopupCommand(
 			return await setMirroring(true);
 		case "mirror-off":
 			return await setMirroring(false);
+		case "adopt-legacy-queue": {
+			const adopted = await queueDestination().adoptCurrentOrigin();
+			if (!adopted.ok) return adopted;
+			const current = await settings();
+			if (!current) return { ok: false, error: "Connect to an Anansi server before assigning pending captures." };
+			await browser.storage.local.set({ anansiAuthorizedOrigin: current.server });
+			await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
+			await wakeDurableQueue();
+			return { ok: true };
+		}
 		case "connection-updated": {
+			const originState = await browser.storage.local.get(["anansiConnectionPreviousOrigin", "anansiAuthorizedOrigin", "anansiConnectionAttemptOrigin"]);
+			const prior = typeof originState.anansiConnectionPreviousOrigin === "string"
+				? originState.anansiConnectionPreviousOrigin
+				: typeof originState.anansiAuthorizedOrigin === "string" ? originState.anansiAuthorizedOrigin : cached?.serverOrigin;
+			const current = await settings();
+			if (current) {
+				const admission = await queueDestination().canConnectTo(current.server);
+				if (!admission.ok) return admission;
+			}
+			if (!current && typeof originState.anansiConnectionAttemptOrigin === "string") {
+				try {
+					await browser.permissions.remove({ origins: [`${originState.anansiConnectionAttemptOrigin}/*`] });
+				} catch { /* The user may already have revoked this optional grant. */ }
+			}
+			if (typeof prior === "string" && (!current || prior !== current.server)) {
+				try {
+					await browser.permissions.remove({ origins: [`${prior}/*`] });
+				} catch {
+					// Chrome may already have revoked this optional grant.
+				}
+			}
 			cached = null;
 			cachedToken = null;
-			await loadConfig(true);
+			await browser.storage.local.remove("anansiExtensionConfigCacheV1");
+			if (current) {
+				await browser.storage.local.set({ anansiAuthorizedOrigin: current.server });
+				await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
+				await loadConfig(true);
+			} else {
+				await browser.alarms.clear(OUTBOX_ALARM);
+				await browser.alarms.clear(NATIVE_CAPTURE_ALARM);
+				await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
+			}
 			return { ok: true };
 		}
 		case "save-page": {
@@ -1871,6 +2028,8 @@ async function handleRuntimeMessage(
 	message: unknown,
 	sender: RuntimeMessageSender,
 ): Promise<BackgroundResult> {
+	const handoff = parseNativeHandoffStoreRequest(message);
+	if (handoff) return handleNativeHandoffStore(handoff, sender);
 	const parsed = validateRuntimeMessage(message, sender);
 	if (!parsed.ok) return { ok: false, error: parsed.error.message };
 
