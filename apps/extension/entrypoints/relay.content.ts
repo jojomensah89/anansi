@@ -18,6 +18,7 @@ import {
 } from "../lib/messages.ts";
 import { createRelayHandshake } from "../lib/relay-handshake.ts";
 import { captureSourceFromUrl } from "../lib/platforms/registry.ts";
+import { createSaveToast, deliverWithConfirmation, rejectedSaveAction } from "../lib/save-toast.ts";
 
 export default defineContentScript({
   matches: [
@@ -40,6 +41,20 @@ export default defineContentScript({
       window.postMessage(message, window.location.origin));
     document.addEventListener("DOMContentLoaded", () => handshake.documentReady(), { once: true });
 
+    const saveToast = createSaveToast({
+      document,
+      viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+      schedule: (run, ms) => window.setTimeout(run, ms),
+      cancel: (id) => window.clearTimeout(id),
+    });
+    // Remember where the person clicked, so the confirmation appears beside
+    // the platform's own button. The event's target is never read.
+    window.addEventListener(
+      "pointerdown",
+      (event) => saveToast.notePointer(event.clientX, event.clientY),
+      { capture: true, passive: true },
+    );
+
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
       const parsed = parseExtensionMessage(event.data, {
@@ -47,24 +62,26 @@ export default defineContentScript({
         pageUrl: window.location.href,
         expectedNonce: nonce,
       });
-      if (!parsed.ok) return;
+      if (!parsed.ok) {
+        const rejected = rejectedSaveAction(event.data, nonce);
+        if (rejected) saveToast.show(rejected, "failed");
+        return;
+      }
       if (parsed.message.action === "bookmark") {
         // The trusted worker owns durable storage. It acknowledges only after
         // the handoff is persisted or has reached the durable native outbox.
         const message = { ...parsed.message, mutationId: parsed.message.mutationId ?? crypto.randomUUID() };
-        const forward = async () => {
-          try {
-            const result = await browser.runtime.sendMessage({
+        void deliverWithConfirmation({
+          send: () =>
+            browser.runtime.sendMessage({
               anansi: "native-handoff",
               action: "store",
               messageVersion: MESSAGE_PROTOCOL_VERSION,
               message,
-            });
-            if (result?.ok) return;
-          } catch { /* the worker may be restarting */ }
-          setTimeout(() => void forward(), 2_000);
-        };
-        void forward();
+            }),
+          notify: (outcome) => saveToast.show(message.bookmarkAction, outcome),
+          retryLater: (again) => void setTimeout(again, 2_000),
+        });
       } else void browser.runtime.sendMessage(parsed.message).catch(() => {});
     });
 

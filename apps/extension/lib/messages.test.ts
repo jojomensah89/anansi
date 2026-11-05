@@ -1,3 +1,4 @@
+import { nativeItemsFromPayload } from "./native-snapshot.ts";
 import { describe, expect, test } from "bun:test";
 import {
 	MESSAGE_PROTOCOL_VERSION,
@@ -128,6 +129,34 @@ describe("parseExtensionMessage", () => {
 				pageContext("https://x.com/i/bookmarks"),
 			),
 		).toMatchObject({ ok: false, error: { code: "invalid_message" } });
+	});
+
+	test("a real parsed post is accepted even though optional fields are undefined", () => {
+		const tweet = {
+			rest_id: "1788390000000000123",
+			legacy: { full_text: "Complete post text", created_at: "Thu Nov 05 10:00:00 +0000 2026", entities: {} },
+			core: { user_results: { result: { rest_id: "42", legacy: { screen_name: "author", name: "Author" } } } },
+		};
+		const [item] = nativeItemsFromPayload("x", { data: { tweet } }, 1_793_874_000);
+		expect(item).toBeDefined();
+		// The parser leaves these as undefined, and postMessage preserves that.
+		expect("saveOrder" in item!).toBe(true);
+		expect(item!.saveOrder).toBeUndefined();
+		const message = {
+			...pageEvent("x", "bookmark"),
+			bookmarkAction: "save",
+			externalId: item!.externalId,
+			mutationId: "mutation-1",
+			observedAt: 1_793_874_000,
+			normalizedItem: item,
+			canonicalUrl: item!.url,
+		};
+		expect(parseExtensionMessage(message, pageContext("https://x.com/home"))).toMatchObject({ ok: true, source: "x" });
+	});
+
+	test("undefined inside an array is still invalid, because JSON would change it", () => {
+		const page = { ...pageEvent("x", "page"), runId: "run-1", page: 1, items: 0, raw: { list: [undefined] } };
+		expect(parseExtensionMessage(page, pageContext("https://x.com/i/bookmarks"))).toMatchObject({ ok: false });
 	});
 
 	test("TikTok Favorites observations require a run and a TikTok tab", () => {

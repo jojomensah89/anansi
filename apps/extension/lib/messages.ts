@@ -307,6 +307,11 @@ function inspectPayload(
 			)
 				return "invalid";
 			if (SENSITIVE_KEYS.has(normalizedKey(key))) return "sensitive";
+			// An undefined property means absent. Parsers leave optional fields this
+			// way, postMessage preserves it, and delivery drops it, so rejecting it
+			// here would silently lose real saves. Required fields fail their shape
+			// checks, and undefined inside an array still reaches the check below.
+			if (descriptor.value === undefined) continue;
 			pending.push({ value: descriptor.value, depth: current.depth + 1 });
 		}
 	}
