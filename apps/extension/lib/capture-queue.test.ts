@@ -462,4 +462,100 @@ describe("CaptureQueue", () => {
 			EventCollisionError,
 		);
 	});
+	describe("import pages cannot wedge a source", () => {
+		const success = (r: OutboxRecord) => ({ kind: "success" as const, receipt: { eventId: r.eventId, itemId: "i", outcome: "created" as const } });
+		const page = (eventId: string, n: number, filler = ""): BookmarkCapture => ({
+			schemaVersion: 1, payloadType: "raw_page", eventId, source: "x", action: "snapshot",
+			observedAt, captureMethod: "platform_import", runId: "run", page: n, raw: { filler },
+		});
+
+		test("a permanently failed page does not block later pages from the same source", async () => {
+			const h = setup([{ kind: "http", status: 422 }, success, success]);
+			await h.queue.enqueue(page("bad", 1));
+			await h.queue.enqueue(page("next", 2));
+			await h.queue.enqueue(page("after", 3));
+			const status = await h.queue.retry();
+			expect(h.transport.calls.map((c) => c.eventId)).toEqual(["bad", "next", "after"]);
+			expect(status).toEqual({ queued: 0, uploading: 0, retrying: 0, failed: 1 });
+		});
+
+		test("a permanently failed page does not block a content-less save behind it", async () => {
+			const h = setup([{ kind: "http", status: 422 }, success]);
+			const bare = capture("bare-save", "x", { normalizedItem: undefined });
+			await h.queue.enqueue(page("bad", 1));
+			await h.queue.enqueue(bare);
+			await h.queue.retry();
+			expect(h.transport.calls.map((c) => c.eventId)).toEqual(["bad", "bare-save"]);
+		});
+
+		test("a page that keeps returning server errors eventually fails and releases the source", async () => {
+			const error = { kind: "http" as const, status: 500 };
+			const h = setup([...Array.from({ length: 12 }, () => error), success], { baseRetryMs: 1, maxRetryMs: 1 });
+			await h.queue.enqueue(page("poison", 1));
+			await h.queue.enqueue(page("next", 2));
+			for (let i = 0; i < 12; i++) {
+				h.clock.set(h.clock.now() + 10);
+				await h.queue.retry();
+			}
+			expect((await h.store.get("poison"))?.state).toBe("failed");
+			expect(h.transport.calls.at(-1)?.eventId).toBe("next");
+			expect(await h.store.get("next")).toBeNull();
+		});
+
+		test("gateway errors during an outage never fail a page", async () => {
+			const h = setup(Array.from({ length: 20 }, () => ({ kind: "http" as const, status: 503 })), { baseRetryMs: 1, maxRetryMs: 1 });
+			await h.queue.enqueue(page("outage", 1));
+			for (let i = 0; i < 20; i++) {
+				h.clock.set(h.clock.now() + 10);
+				await h.queue.retry();
+			}
+			expect((await h.store.get("outage"))?.state).toBe("retry_wait");
+		});
+
+		test("a different failure between server errors restarts the count", async () => {
+			const error = { kind: "http" as const, status: 500 };
+			const h = setup([...Array.from({ length: 11 }, () => error), { kind: "network" as const }, error], { baseRetryMs: 1, maxRetryMs: 1 });
+			await h.queue.enqueue(page("flaky", 1));
+			for (let i = 0; i < 13; i++) {
+				h.clock.set(h.clock.now() + 10);
+				await h.queue.retry();
+			}
+			expect((await h.store.get("flaky"))?.state).toBe("retry_wait");
+		});
+
+		test("network errors never fail a page, because they say nothing about the page", async () => {
+			const h = setup(Array.from({ length: 12 }, () => ({ kind: "network" as const })), { baseRetryMs: 1, maxRetryMs: 1 });
+			await h.queue.enqueue(page("offline", 1));
+			for (let i = 0; i < 12; i++) {
+				h.clock.set(h.clock.now() + 10);
+				await h.queue.retry();
+			}
+			expect((await h.store.get("offline"))?.state).toBe("retry_wait");
+		});
+
+		test("rate limiting never fails a page", async () => {
+			const h = setup(Array.from({ length: 12 }, () => ({ kind: "http" as const, status: 429 })), { baseRetryMs: 1, maxRetryMs: 1 });
+			await h.queue.enqueue(page("limited", 1));
+			for (let i = 0; i < 12; i++) {
+				h.clock.set(h.clock.now() + 10);
+				await h.queue.retry();
+			}
+			expect((await h.store.get("limited"))?.state).toBe("retry_wait");
+		});
+
+		test("import pages stop before live saves run out of room", async () => {
+			const h = setup([], { maxTotalBytes: 10_000, liveReserveBytes: 3_000 });
+			await h.queue.enqueue(page("fills-import-budget", 1, "x".repeat(6_500)));
+			await expect(h.queue.enqueue(page("over-budget", 2, "x".repeat(1_000)))).rejects.toMatchObject({ code: "queue_full" });
+			await expect(h.queue.enqueue(capture("live-still-fits"))).resolves.toMatchObject({ state: "queued", duplicate: false });
+		});
+
+		test("live saves are still limited by the total", async () => {
+			const size = new TextEncoder().encode(JSON.stringify(capture("first"))).byteLength;
+			const h = setup([], { maxTotalBytes: size * 2 + 50, liveReserveBytes: 50 });
+			await h.queue.enqueue(capture("first"));
+			await h.queue.enqueue(capture("secnd"));
+			await expect(h.queue.enqueue(capture("third"))).rejects.toBeInstanceOf(QueueLimitError);
+		});
+	});
 });
