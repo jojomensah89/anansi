@@ -11,8 +11,9 @@ Use this to prove stage 1 of the overhaul with real accounts, with Anansi and St
    ```
 
 2. Open `chrome://extensions` and press **Reload** on the Anansi card. Do not remove it or load a different folder, because its queued captures are stored with the extension's folder path.
-3. Refresh any open X, Reddit and GitHub tabs, so they run the new capture scripts.
-4. Open `http://127.0.0.1:8787/sources` and note the queue numbers.
+3. If the popup says older pending captures have no recorded server destination, press **Assign pending captures here**, as long as the Worker URL is your own library. This appears once for a queue created before PR #12.
+4. Refresh any open X, Reddit and GitHub tabs, so they run the new capture scripts.
+5. Open `http://127.0.0.1:8787/sources` and note the queue numbers.
 
 ## Backlog recovery
 
