@@ -78,8 +78,10 @@ export interface EnqueueResult {
 
 export interface RetryRequest {
 	eventId?: string;
-	/** Explicit user action: make permanently failed records eligible again. */
+	/** Explicit user action: make failed and backing-off records eligible again. */
 	includeFailed?: boolean;
+	/** The server is reachable again: resume retries caused by an outage. */
+	resetBackoff?: boolean;
 	/** Narrow that to one source, for a retry pressed on one row. */
 	source?: BookmarkCapture["source"];
 }
@@ -437,7 +439,7 @@ export function createCaptureQueue(
 		if (request?.includeFailed) {
 			const failed = (await store.list()).filter(
 				(record) =>
-					record.state === "failed" &&
+					(record.state === "failed" || record.state === "retry_wait") &&
 					(!request.source || record.source === request.source),
 			);
 			await Promise.all(
@@ -451,6 +453,19 @@ export function createCaptureQueue(
 						pageServerErrors: undefined,
 					}),
 				),
+			);
+		}
+		if (request?.resetBackoff) {
+			const now = clock.now();
+			await Promise.all(
+				(await store.list())
+					.filter(
+						(record) =>
+							record.state === "retry_wait" &&
+							record.nextAttemptAt > now &&
+							(record.lastError?.code === "network" || (record.lastError?.status ?? 0) >= 500),
+					)
+					.map((record) => store.put({ ...record, nextAttemptAt: now })),
 			);
 		}
 		if (request?.eventId) {

@@ -897,9 +897,7 @@ export default function App() {
                 ? `${(status[s.source]?.pages ?? 0).toLocaleString()} scanned, ${(status[s.source]?.items ?? 0).toLocaleString()} new`
                 : view.state === "synced"
                   ? "Up to date"
-                  : view.state === "failed"
-                    ? "Error"
-                    : view.text;
+                  : view.text;
             const actionLabel = view.actionLabel;
             const inProgressLabel =
               actionLabel === "Resume"

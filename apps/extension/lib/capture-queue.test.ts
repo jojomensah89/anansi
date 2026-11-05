@@ -559,6 +559,35 @@ describe("CaptureQueue", () => {
 			expect(await h.queue.hasImportRoom()).toBe(true);
 		});
 
+		test("an explicit retry also wakes captures waiting out a backoff", async () => {
+			const h = setup([{ kind: "network" }, success], { baseRetryMs: 3_600_000, maxRetryMs: 3_600_000 });
+			await h.queue.enqueue(capture("waiting"));
+			await h.queue.retry();
+			expect((await h.store.get("waiting"))?.state).toBe("retry_wait");
+			await h.queue.retry();
+			expect(h.transport.calls.length).toBe(1);
+			await h.queue.retry({ includeFailed: true });
+			expect(h.transport.calls.length).toBe(2);
+			expect(await h.store.get("waiting")).toBeNull();
+		});
+
+		test("a recovered server resumes outage retries but keeps rate-limit waits", async () => {
+			const h = setup(
+				[{ kind: "network" }, { kind: "http", status: 503 }, { kind: "http", status: 429, retryAfterMs: 3_600_000 }, success, success],
+				{ baseRetryMs: 3_600_000, maxRetryMs: 3_600_000 },
+			);
+			await h.queue.enqueue(capture("a", "x"));
+			await h.queue.enqueue(capture("b", "reddit"));
+			await h.queue.retry();
+			await h.queue.enqueue(capture("c", "github"));
+			await h.queue.retry();
+			expect((await h.store.get("c"))?.state).toBe("retry_wait");
+			await h.queue.retry({ resetBackoff: true });
+			expect(await h.store.get("a")).toBeNull();
+			expect(await h.store.get("b")).toBeNull();
+			expect((await h.store.get("c"))?.state).toBe("retry_wait");
+		});
+
 		test("live saves are still limited by the total", async () => {
 			const size = new TextEncoder().encode(JSON.stringify(capture("first"))).byteLength;
 			const h = setup([], { maxTotalBytes: size * 2 + 50, liveReserveBytes: 50 });

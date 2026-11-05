@@ -403,6 +403,12 @@ function heartbeat(): HeartbeatClient {
 				},
 			);
 			if (!response.ok) throw new Error("heartbeat rejected");
+			// The server answered, so captures waiting out an outage need not wait
+			// up to an hour for their next attempt.
+			void queue()
+				.getStatus()
+				.then((status) => (status.retrying > 0 ? queue().retry({ resetBackoff: true }) : undefined))
+				.catch(() => {});
 		},
 	});
 	return healthHeartbeat;
