@@ -131,10 +131,10 @@ describe("an import run", () => {
     expect(await rows(db)).toHaveLength(4);
   });
 
-  test("a page that parses to nothing is not acknowledged, so it can be retried", async () => {
+  test("a page in an unrecognized shape is not acknowledged, so it can be retried", async () => {
     const db = openTestDb();
 
-    const first = await send(db, redditPage("run-1:page:1", 1, []));
+    const first = await send(db, { ...redditPage("run-1:page:1", 1, []), raw: { data: { unexpected: [] } } });
     expect(first.status).toBe(422);
     expect(await db.select().from(captureEvents)).toHaveLength(0);
 

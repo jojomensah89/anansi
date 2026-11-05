@@ -79,6 +79,7 @@ export type {
   RawPageCapture,
 } from "./capture.ts";
 export { CAPTURE_SCHEMA_VERSION, parseBookmarkCapture } from "./capture.ts";
+export { isEmptyHistoryPage } from "./empty-page.ts";
 export type { ParseContext } from "./context.ts";
 export { parseBookmarksPage } from "./x/parse.ts";
 export { parseStarredPage, README_CHARS } from "./github/parse.ts";

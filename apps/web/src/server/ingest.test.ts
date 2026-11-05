@@ -200,6 +200,51 @@ describe("ingestCapture", () => {
 		expect(result.body).toMatchObject({ parsed: 1, outcome: "created" });
 	});
 
+	test.each([
+		["x", { data: { bookmark_timeline_v2: { timeline: { instructions: [{ entries: [{ entryId: "cursor-top-1", content: { value: "a" } }, { entryId: "cursor-bottom-1", content: { value: "b" } }] }] } } } }],
+		["x", { data: { bookmark_timeline_v2: { timeline: { instructions: [] } } } }],
+		["reddit", { data: { children: [] } }],
+		["tiktok", { itemList: [] }],
+		["tiktok", { statusCode: 0, hasMore: false }],
+		["github", { source: "extension", repositories: [] }],
+	] as const)("acknowledges an end-of-list %s page without storing anything", async (source, raw) => {
+		const db = openTestDb();
+		const capture: RawPageCapture = {
+			schemaVersion: 1,
+			payloadType: "raw_page",
+			eventId: `${source}-empty-${JSON.stringify(raw).length}`,
+			source,
+			action: "snapshot",
+			observedAt: now,
+			captureMethod: "platform_import",
+			runId: "run-empty",
+			page: 1,
+			raw,
+		};
+		const result = await ingestCapture(db, request(capture, capture.eventId));
+		expect(result.status).toBe(200);
+		expect(result.body).toMatchObject({ eventId: capture.eventId, itemId: null, outcome: "ignored_stale", parsed: 0 });
+		expect(await db.select().from(captureEvents)).toHaveLength(0);
+	});
+
+	test("does not acknowledge a page with posts it could not read", async () => {
+		const db = openTestDb();
+		const capture: RawPageCapture = {
+			schemaVersion: 1,
+			payloadType: "raw_page",
+			eventId: "x-drifted-page",
+			source: "x",
+			action: "snapshot",
+			observedAt: now,
+			captureMethod: "platform_import",
+			runId: "x-run-drift",
+			page: 1,
+			raw: { data: { bookmark_timeline_v2: { timeline: { instructions: [{ entries: [{ entryId: "post-new-shape-1", content: {} }] }] } } } },
+		};
+		const result = await ingestCapture(db, request(capture, capture.eventId));
+		expect(result.status).toBe(422);
+	});
+
 	test("does not acknowledge a raw page that parses to zero items", async () => {
 		const db = openTestDb();
 		const capture: RawPageCapture = {
@@ -212,7 +257,7 @@ describe("ingestCapture", () => {
 			captureMethod: "platform_import",
 			runId: "reddit-run-empty",
 			page: 1,
-			raw: { data: { children: [] } },
+			raw: { data: { unexpected: [] } },
 		};
 
 		const result = await ingestCapture(db, request(capture, capture.eventId));
