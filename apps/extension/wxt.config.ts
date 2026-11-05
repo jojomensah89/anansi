@@ -2,25 +2,39 @@ import { config as loadDotenv } from "dotenv";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "wxt";
-import { connectionForWxtConfig } from "./lib/connection.ts";
+import {
+	connectionForWxtConfig,
+	resolveExtensionBuildMode,
+} from "./lib/connection.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+// A private mode must be an explicit shell/package-script choice. Do not let a
+// repository .env file turn an otherwise public build into a private artifact.
+const requestedBuildMode = process.env.ANANSI_EXTENSION_BUILD_MODE;
 loadDotenv({ path: resolve(repoRoot, ".env"), quiet: true });
 
+const mode = resolveExtensionBuildMode(requestedBuildMode);
 const connection = connectionForWxtConfig(
 	process.env.ANANSI_EXTENSION_ORIGIN,
 	process.env.ANANSI_EXTENSION_INGEST_TOKEN,
 	process.argv[2],
+	mode,
 );
 
 export default defineConfig({
+	outDir: `.output/${mode}`,
 	modules: ["@wxt-dev/module-react"],
 	vite: () => ({
 		define: {
-			__ANANSI_EXTENSION_ORIGIN__: JSON.stringify(connection.origin),
-			__ANANSI_EXTENSION_INGEST_TOKEN__: JSON.stringify(connection.token),
+			__ANANSI_EXTENSION_ORIGIN__: JSON.stringify(connection?.origin ?? ""),
+			__ANANSI_EXTENSION_INGEST_TOKEN__: JSON.stringify(connection?.token ?? ""),
 		},
 	}),
+	zip: {
+		name: "anansi",
+		artifactTemplate: `{{name}}-{{packageVersion}}-{{browser}}-${mode}.zip`,
+		zipSources: false,
+	},
 	manifest: {
 		name: "Anansi",
 		action: { default_title: "Anansi" },
@@ -57,11 +71,13 @@ export default defineConfig({
 			"https://github.com/*",
 			"https://www.tiktok.com/*",
 			"https://tiktok.com/*",
-			...(connection.origin ? [`${connection.origin}/*`] : []),
+			...(connection?.origin ? [`${connection.origin}/*`] : []),
 		],
 		optional_host_permissions: [
 			"https://*/*",
+			"http://localhost/*",
 			"http://127.0.0.1/*",
+			"http://[::1]/*",
 		],
 	},
 });

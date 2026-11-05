@@ -14,7 +14,7 @@ export const PLATFORM_CAPTURE_ADAPTERS = {
 } satisfies { [S in ExtensionPlatformSource]: PlatformCaptureAdapter<S> };
 
 export function captureAdapter<S extends ExtensionPlatformSource>(source: S): PlatformCaptureAdapter<S> {
-	return PLATFORM_CAPTURE_ADAPTERS[source] as PlatformCaptureAdapter<S>;
+	return PLATFORM_CAPTURE_ADAPTERS[source] as unknown as PlatformCaptureAdapter<S>;
 }
 
 export function captureSourceFromUrl(value: string): ExtensionPlatformSource | null {

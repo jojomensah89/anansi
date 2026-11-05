@@ -5,11 +5,21 @@ export interface ExtensionConnection {
 	readonly token: string;
 }
 
+export type ExtensionBuildMode = "public" | "private";
+
+const CONNECTION_KEY = "anansiConnection";
+const DISCONNECTED_KEY = "anansiConnectionExplicitlyDisconnected";
+
+export interface ExtensionConnectionStorage {
+	get(keys: string | string[]): Promise<Record<string, unknown>>;
+	set(values: Record<string, unknown>): Promise<void>;
+	remove(keys: string | string[]): Promise<void>;
+	setAccessLevel?(options: { accessLevel: "TRUSTED_CONTEXTS" }): Promise<void>;
+}
+
 /**
- * Validate the two values embedded into a private extension build.
- *
- * Error messages identify the setting, never its value: this function runs
- * during the build too, where an exception may end up in CI or terminal logs.
+ * Validate a connection entered at runtime or supplied to an explicit private
+ * build. Error messages identify the setting, never its value.
  */
 export function validateExtensionConnection(
 	originValue: unknown,
@@ -19,105 +29,159 @@ export function validateExtensionConnection(
 		typeof originValue === "string" ? normalizeServerOrigin(originValue) : null;
 	if (!origin) {
 		throw new Error(
-			"ANANSI_EXTENSION_ORIGIN must be an HTTPS origin (or loopback HTTP for local development)",
+			"Server origin must be an HTTPS origin (or loopback HTTP for local development)",
 		);
 	}
 
 	const token = typeof tokenValue === "string" ? tokenValue.trim() : "";
 	if (token.length < 16) {
-		throw new Error(
-			"ANANSI_EXTENSION_INGEST_TOKEN must be set to the deployed INGEST_TOKEN",
-		);
+		throw new Error("Ingest token must contain at least 16 characters");
 	}
 
 	return Object.freeze({ origin, token });
 }
 
-export async function getExtensionConnection(): Promise<ExtensionConnection | null> {
-	try {
-		if (typeof browser !== "undefined" && browser.storage?.local) {
-			const stored = await browser.storage.local.get("anansiConnection");
-			const conn = (stored as { anansiConnection?: unknown })?.anansiConnection as { origin?: unknown; token?: unknown } | undefined;
-			if (conn && typeof conn.origin === "string" && typeof conn.token === "string") {
-				return validateExtensionConnection(conn.origin, conn.token);
-			}
-		}
-	} catch {
-		// Storage unavailable or unparseable
-	}
+export function resolveExtensionBuildMode(value: unknown): ExtensionBuildMode {
+	if (value === undefined || value === "" || value === "public") return "public";
+	if (value === "private") return "private";
+	throw new Error("ANANSI_EXTENSION_BUILD_MODE must be public or private");
+}
 
+/**
+ * Public output is always unconfigured, even when the repository .env contains
+ * a private deployment. Private output is available only through an explicit
+ * build mode. WXT's prepare command stays credential-free when no connection
+ * has been explicitly supplied.
+ */
+export function connectionForWxtConfig(
+	originValue: unknown,
+	tokenValue: unknown,
+	command: unknown,
+	modeValue: unknown = "public",
+): ExtensionConnection | null {
+	const mode = resolveExtensionBuildMode(modeValue);
+	if (mode === "public") return null;
+
+	if (typeof command === "string" && command.toLowerCase() === "prepare") {
+		try {
+			return validateExtensionConnection(originValue, tokenValue);
+		} catch {
+			return null;
+		}
+	}
+	return validateExtensionConnection(originValue, tokenValue);
+}
+
+function privateBuildConnection(): ExtensionConnection | null {
 	try {
 		if (
-			typeof __ANANSI_EXTENSION_ORIGIN__ !== "undefined" &&
-			typeof __ANANSI_EXTENSION_INGEST_TOKEN__ !== "undefined" &&
-			__ANANSI_EXTENSION_ORIGIN__ &&
-			__ANANSI_EXTENSION_INGEST_TOKEN__
+			typeof __ANANSI_EXTENSION_ORIGIN__ === "undefined" ||
+			typeof __ANANSI_EXTENSION_INGEST_TOKEN__ === "undefined" ||
+			!__ANANSI_EXTENSION_ORIGIN__ ||
+			!__ANANSI_EXTENSION_INGEST_TOKEN__
 		) {
-			return validateExtensionConnection(
-				__ANANSI_EXTENSION_ORIGIN__,
-				__ANANSI_EXTENSION_INGEST_TOKEN__,
-			);
+			return null;
 		}
+		return validateExtensionConnection(
+			__ANANSI_EXTENSION_ORIGIN__,
+			__ANANSI_EXTENSION_INGEST_TOKEN__,
+		);
 	} catch {
-		// Build-time placeholders
+		return null;
 	}
+}
 
-	return null;
+/**
+ * Restrict local storage to trusted extension contexts where the browser
+ * exposes that control. Popup and service-worker contexts remain authorized;
+ * content scripts cannot read the stored ingest token in Chrome.
+ */
+export function createExtensionConnectionStore(
+	storage: ExtensionConnectionStorage,
+	fallback: () => ExtensionConnection | null = privateBuildConnection,
+) {
+	let accessLevelSetup: Promise<void> | undefined;
+	const restrictStorage = async (): Promise<void> => {
+		if (!storage.setAccessLevel) return;
+		accessLevelSetup ??= storage.setAccessLevel({
+			accessLevel: "TRUSTED_CONTEXTS",
+		});
+		await accessLevelSetup;
+	};
+
+	return {
+		async get(): Promise<ExtensionConnection | null> {
+			await restrictStorage();
+			const stored = await storage.get([CONNECTION_KEY, DISCONNECTED_KEY]);
+			if (stored[DISCONNECTED_KEY] === true) return null;
+
+			const value = stored[CONNECTION_KEY];
+			if (value !== undefined) {
+				if (!value || typeof value !== "object" || Array.isArray(value)) {
+					return null;
+				}
+				const record = value as Record<string, unknown>;
+				try {
+					return validateExtensionConnection(record.origin, record.token);
+				} catch {
+					return null;
+				}
+			}
+			return fallback();
+		},
+
+		async save(
+			originValue: string,
+			tokenValue: string,
+		): Promise<ExtensionConnection> {
+			const connection = validateExtensionConnection(originValue, tokenValue);
+			await restrictStorage();
+			// Write credentials first, then re-enable retrieval. An interrupted save
+			// remains disconnected instead of restoring a private build fallback.
+			await storage.set({ [CONNECTION_KEY]: connection });
+			await storage.remove(DISCONNECTED_KEY);
+			return connection;
+		},
+
+		async clear(): Promise<void> {
+			await restrictStorage();
+			// The marker is durable before the credential is removed, so a private
+			// build cannot silently reconnect if removal is interrupted.
+			await storage.set({ [DISCONNECTED_KEY]: true });
+			await storage.remove(CONNECTION_KEY);
+		},
+	};
+}
+
+function browserConnectionStore() {
+	if (typeof browser === "undefined" || !browser.storage?.local) return null;
+	return createExtensionConnectionStore(browser.storage.local);
+}
+
+export async function getExtensionConnection(): Promise<ExtensionConnection | null> {
+	const store = browserConnectionStore();
+	if (!store) return privateBuildConnection();
+	try {
+		return await store.get();
+	} catch {
+		// Fail closed when storage is unavailable or access could not be restricted.
+		return null;
+	}
 }
 
 export async function saveExtensionConnection(
 	originValue: string,
 	tokenValue: string,
 ): Promise<ExtensionConnection> {
-	const conn = validateExtensionConnection(originValue, tokenValue);
-	if (typeof browser !== "undefined" && browser.storage?.local) {
-		await browser.storage.local.set({ anansiConnection: conn });
+	const store = browserConnectionStore();
+	if (!store) {
+		throw new Error("Extension storage is unavailable");
 	}
-	return conn;
+	return store.save(originValue, tokenValue);
 }
 
 export async function clearExtensionConnection(): Promise<void> {
-	if (typeof browser !== "undefined" && browser.storage?.local) {
-		await browser.storage.local.remove("anansiConnection");
-	}
-}
-
-/** Immutable connection compiled into this private extension artifact, or fallback. */
-export function extensionConnection(): ExtensionConnection {
-	try {
-		return validateExtensionConnection(
-			__ANANSI_EXTENSION_ORIGIN__,
-			__ANANSI_EXTENSION_INGEST_TOKEN__,
-		);
-	} catch {
-		return Object.freeze({
-			origin: "http://127.0.0.1:3001",
-			token: "unconfigured-placeholder-token",
-		});
-	}
-}
-
-const PREPARE_CONNECTION: ExtensionConnection = Object.freeze({
-	origin: "http://127.0.0.1",
-	token: "prepare-only-placeholder",
-});
-
-/**
- * WXT imports its config during dependency installation to generate types.
- * That command emits no installable artifact, so it may use inert placeholders;
- * every dev/build/zip command still requires the real private connection.
- */
-export function connectionForWxtConfig(
-	originValue: unknown,
-	tokenValue: unknown,
-	command: unknown,
-): ExtensionConnection {
-	if (typeof command === "string" && command.toLowerCase() === "prepare") {
-		try {
-			return validateExtensionConnection(originValue, tokenValue);
-		} catch {
-			return PREPARE_CONNECTION;
-		}
-	}
-	return validateExtensionConnection(originValue, tokenValue);
+	const store = browserConnectionStore();
+	if (!store) return;
+	await store.clear();
 }

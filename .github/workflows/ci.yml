@@ -3,6 +3,9 @@ name: ci
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -10,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.1"
+          bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       - run: bun test
       - run: bun run typecheck
@@ -22,23 +25,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.1"
+          bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
-      - run: bun run --cwd apps/web build
+      - run: bun run --cwd apps/web build:cloudflare
 
   build-extension:
     runs-on: ubuntu-latest
     needs: test
-    # This job validates the artifact build only; it never publishes the
-    # bundle, so use inert values instead of embedding a production secret.
-    env:
-      ANANSI_EXTENSION_ORIGIN: https://ci.invalid
-      ANANSI_EXTENSION_INGEST_TOKEN: ci-build-placeholder-0123456789
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.1"
+          bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       - run: bun run --cwd apps/extension compile
       - run: bun run --cwd apps/extension build
+      - run: bun run --cwd apps/extension zip
+      - run: bun run --cwd apps/extension check:public-artifact

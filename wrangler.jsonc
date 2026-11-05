@@ -7,6 +7,13 @@
   "observability": {
     "enabled": true
   },
+  // Per-Cloudflare-location protection; separate budgets preserve import retries.
+  // Change namespace IDs if another Worker uses them in this account.
+  "ratelimits": [
+    { "name": "LOGIN_RATE_LIMITER", "namespace_id": "10971001", "simple": { "limit": 20, "period": 60 } },
+    { "name": "INGEST_RATE_LIMITER", "namespace_id": "10971002", "simple": { "limit": 600, "period": 60 } },
+    { "name": "MCP_RATE_LIMITER", "namespace_id": "10971003", "simple": { "limit": 120, "period": 60 } }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

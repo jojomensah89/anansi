@@ -55,7 +55,7 @@ Two paths, same library: run it locally or host it in your own Cloudflare accoun
 
 ### A. Local
 
-Requirements: [Bun](https://bun.sh/) 1.3+, Chromium-based browser. Local D1 tables are created automatically by the dev command.
+Requirements: [Bun](https://bun.sh/) 1.4.2+, Chrome. The local Worker uses emulated D1/R2; `bun run dev` builds the app, applies local SQL migrations and starts the compiled Worker.
 
 ```bash
 bun install
@@ -79,7 +79,7 @@ Build the extension:
 bun run --cwd apps/extension build
 ```
 
-Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `apps/extension/.output/chrome-mv3`. If already installed, click **Reload** on its extension card after each rebuild, then refresh provider tabs so their capture scripts update. Click the Anansi icon and verify its server is `http://127.0.0.1:8787` (or your hosted URL). A previously saved popup connection overrides the build settings: disconnect it and reconnect with the current URL and `ANANSI_SECRET` if needed. This private artifact embeds its connection secret; do not distribute it.
+Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `apps/extension/.output/public/chrome-mv3`. Click the Anansi icon, enter your local Worker URL (`http://127.0.0.1:8787` or hosted URL) and `INGEST_TOKEN` if configured (otherwise `ANANSI_SECRET`), and click **Connect**. Public builds contain no deployment credentials. Configured owner-only builds require the explicit `build:private` command; never distribute them.
 
 GitHub first import: sign in to GitHub in the same browser profile → popup → **Import** beside GitHub. It walks your stars pages in the worker (no tabs open), persists the pagination cursor, and resumes after interruptions. Unstarring hides from current-star view without deleting history; re-starring restores it.
 
@@ -128,7 +128,7 @@ enabled in Settings.
 
 During setup, enter your master secret when Cloudflare prompts for it:
 
-- `ANANSI_SECRET` — master secret protecting library sign-in, Chrome extension ingestion, and MCP clients. (Legacy `LIBRARY_TOKEN`, `INGEST_TOKEN`, and `MCP_TOKEN` remain supported if configured individually).
+- `ANANSI_SECRET` — master secret protecting library sign-in, Chrome extension ingestion, and MCP clients. Optional `LIBRARY_TOKEN`, `INGEST_TOKEN`, and `MCP_TOKEN` override it for their respective roles. A distinct `INGEST_TOKEN` limits the extension key to extension endpoints.
 
 Generate with `openssl rand -hex 32`. Both Cloudflare AI features start off; enable
 Semantic search or Automatic tags from `/settings` only when you want to use
@@ -159,7 +159,7 @@ search requests that cannot be embedded fall back to keyword results. You can
 change the cap in Settings.
 
 After the first successful deploy, open the Worker project’s **Settings → Build
-→ Build Variables and Secrets** and add `BUN_VERSION=1.3.1` for subsequent
+→ Build Variables and Secrets** and add `BUN_VERSION=1.4.2` for subsequent
 builds. The first button build uses Cloudflare's default Bun version and must
 pass the clean-account acceptance check before this button is announced as
 ready.
@@ -168,9 +168,9 @@ After deployment returns `https://<worker>.workers.dev`:
 
 1. Open the URL and sign in with `ANANSI_SECRET`.
 2. In the Chrome extension (either from the Chrome Web Store or unpacked build), click the Anansi icon in the toolbar.
-3. Enter your deployed Worker URL and `ANANSI_SECRET`, and click **Connect**.
+3. Enter your deployed Worker URL and `INGEST_TOKEN` if configured (otherwise `ANANSI_SECRET`), and click **Connect**. Public builds contain no owner's credentials.
 4. Sign into each provider (X, GitHub, Reddit, TikTok) in the same Chrome profile before its first import.
-5. Add the Worker URL and `ANANSI_SECRET` to any remote MCP client you want to use (`Authorization: Bearer <ANANSI_SECRET>`).
+5. Add the Worker URL and `MCP_TOKEN` if configured (otherwise `ANANSI_SECRET`) to your remote MCP client using bearer authorization.
 
 The Worker is the only public origin: the library is `/`, the API is `/api/*`,
 and MCP is `/mcp`. New schema changes start with `packages/db/src/schema.ts`

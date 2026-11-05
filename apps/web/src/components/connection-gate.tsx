@@ -45,7 +45,7 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
       <GateFrame>
         <h1 style={titleStyle}>Library access is not configured</h1>
         <p style={copyStyle}>
-          Set <span className="mono">ANANSI_SECRET</span> on this Anansi server, then reload this page.
+          Set <span className="mono">LIBRARY_TOKEN</span> or <span className="mono">ANANSI_SECRET</span> on this Anansi server, then reload this page.
         </p>
       </GateFrame>
     );
@@ -61,7 +61,7 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
       <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 12, background: "var(--accent)", color: "var(--ink)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 18 }}>A</div>
       <h1 style={titleStyle}>Connect to your library</h1>
       <p style={copyStyle}>
-        Enter the <span className="mono">ANANSI_SECRET</span> configured on this Anansi instance. It is exchanged for a secure browser session and is not stored in the page.
+        Enter the <span className="mono">LIBRARY_TOKEN</span> when one is configured; otherwise use <span className="mono">ANANSI_SECRET</span>. It is exchanged for a secure browser session and is not stored in the page.
       </p>
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
         <label htmlFor="library-token" style={{ fontSize: 12, color: "var(--muted)" }}>Secret key</label>

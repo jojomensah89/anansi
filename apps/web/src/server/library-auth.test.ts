@@ -2,8 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { handleApi } from "./api.ts";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import type { AnansiDb } from "@anansi/db";
+import { resolveServerCredentials } from "./credentials.ts";
 const local = openLocalDb(":memory:"); migrateLocalDb(local);
-const env = {db:local as unknown as AnansiDb,libraryToken:"test-library-secret",ingestToken:"test-ingest-secret"};
+const env = {
+  db: local as unknown as AnansiDb,
+  ...resolveServerCredentials({
+    ANANSI_SECRET: "test-shared-secret",
+    LIBRARY_TOKEN: "test-library-secret",
+    INGEST_TOKEN: "test-ingest-secret",
+    MCP_TOKEN: "test-mcp-secret",
+  }),
+};
 const origin="https://anansi.test";
 const request=(path:string,init?:RequestInit)=>new Request(origin+path,init);
 describe("whole-library authentication",()=>{

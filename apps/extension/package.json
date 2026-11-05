@@ -6,11 +6,15 @@
 	"type": "module",
 	"scripts": {
 		"dev": "wxt",
+		"dev:private": "bun scripts/private-wxt.ts dev",
 		"dev:firefox": "wxt -b firefox",
 		"build": "wxt build",
+		"build:private": "bun scripts/private-wxt.ts build",
 		"build:firefox": "wxt build -b firefox",
 		"zip": "wxt zip",
+		"zip:private": "bun scripts/private-wxt.ts zip",
 		"zip:firefox": "wxt zip -b firefox",
+		"check:public-artifact": "bun scripts/check-public-artifact.mjs",
 		"compile": "tsc --noEmit",
 		"postinstall": "wxt prepare"
 	},
