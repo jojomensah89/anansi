@@ -24,6 +24,20 @@ function plural(count: number, word: string): string {
 	return `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
 }
 
+const ERROR_TEXT: Record<string, string> = {
+	not_signed_in: "Sign in required",
+	queue_full: "Capture queue is full, delivery is catching up",
+	rate_limited: "Rate limited, will retry later",
+};
+
+/** Say what went wrong; a count of zero failures is not a description. */
+function failureText(runtime: SourceRow["runtime"]): string {
+	const named = runtime?.lastErrorCode ? ERROR_TEXT[runtime.lastErrorCode] : undefined;
+	if (named) return named;
+	if (runtime && runtime.failed > 0) return `${plural(runtime.failed, "capture")} failed`;
+	return "Last capture failed";
+}
+
 export function sourcePresentation(
 	source: SourceRow,
 	extension: ExtensionHealth,
@@ -61,11 +75,7 @@ export function sourcePresentation(
 		return { state: "paused", text: "Import paused", tone: "muted" };
 	}
 	if ((runtime?.failed ?? 0) > 0 || runtime?.lastErrorCode) {
-		const text =
-			runtime?.lastErrorCode === "not_signed_in"
-				? "Sign in required"
-				: `${plural(runtime?.failed ?? 1, "capture")} failed`;
-		return { state: "failed", text, tone: "warn" };
+		return { state: "failed", text: failureText(runtime), tone: "warn" };
 	}
 	if ((runtime?.retrying ?? 0) > 0) {
 		return {

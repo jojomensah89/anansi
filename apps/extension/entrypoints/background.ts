@@ -315,6 +315,7 @@ function queue(): CaptureQueue {
 		},
 	});
 	durableQueue = {
+		hasImportRoom: () => underlying.hasImportRoom(),
 		async enqueue(capture) {
 			const admission = await destinationGuard!.beginEnqueue();
 			if (!admission.ok) throw new Error(admission.error);
@@ -427,6 +428,11 @@ async function wakeDurableQueue(
 			? { includeFailed: true, ...(source ? { source } : {}) }
 			: undefined,
 	);
+	if (await queue().hasImportRoom()) {
+		await Promise.all(
+			CAPTURE_SOURCES.map((platform) => persistentState().runs.clearError(platform, "queue_full")),
+		);
+	}
 	requestHeartbeat();
 	return status;
 }

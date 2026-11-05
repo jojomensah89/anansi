@@ -87,6 +87,8 @@ export interface RetryRequest {
 export interface CaptureQueue {
 	enqueue(capture: BookmarkCapture): Promise<EnqueueResult>;
 	getStatus(): Promise<CaptureQueueStatus>;
+	/** Whether import pages can be admitted again, so a full-queue error can clear. */
+	hasImportRoom(): Promise<boolean>;
 	/** Drain due work, with optional explicit requeueing of visible failures. */
 	retry(request?: RetryRequest): Promise<CaptureQueueStatus>;
 }
@@ -547,6 +549,11 @@ export function createCaptureQueue(
 		async getStatus() {
 			await ensureRecovered();
 			return countStatus(await store.list());
+		},
+		async hasImportRoom() {
+			await ensureRecovered();
+			const total = (await store.list()).reduce((sum, record) => sum + record.sizeBytes, 0);
+			return total < Math.max(0, config.maxTotalBytes - config.liveReserveBytes);
 		},
 		retry,
 	};

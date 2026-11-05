@@ -550,6 +550,15 @@ describe("CaptureQueue", () => {
 			await expect(h.queue.enqueue(capture("live-still-fits"))).resolves.toMatchObject({ state: "queued", duplicate: false });
 		});
 
+		test("reports when import pages can be admitted again", async () => {
+			const h = setup([success, success], { maxTotalBytes: 10_000, liveReserveBytes: 3_000 });
+			await h.queue.enqueue(page("large", 1, "x".repeat(6_500)));
+			await h.queue.enqueue(capture("live"));
+			expect(await h.queue.hasImportRoom()).toBe(false);
+			await h.queue.retry();
+			expect(await h.queue.hasImportRoom()).toBe(true);
+		});
+
 		test("live saves are still limited by the total", async () => {
 			const size = new TextEncoder().encode(JSON.stringify(capture("first"))).byteLength;
 			const h = setup([], { maxTotalBytes: size * 2 + 50, liveReserveBytes: 50 });

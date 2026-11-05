@@ -78,6 +78,17 @@ describe("sourcePresentation", () => {
 				extension(),
 			).state,
 		).toBe("failed");
+		const failure = (lastErrorCode: string | undefined, failed: number) =>
+			sourcePresentation(
+				row({
+					runtime: { phase: "idle", queued: 0, uploading: 0, retrying: 0, failed, ...(lastErrorCode ? { lastErrorCode } : {}) },
+				}),
+				extension(),
+			).text;
+		expect(failure("queue_full", 0)).toBe("Capture queue is full, delivery is catching up");
+		expect(failure("capture_failed", 0)).toBe("Last capture failed");
+		expect(failure("not_signed_in", 0)).toBe("Sign in required");
+		expect(failure(undefined, 2)).toBe("2 captures failed");
 		expect(
 			sourcePresentation(
 				row({

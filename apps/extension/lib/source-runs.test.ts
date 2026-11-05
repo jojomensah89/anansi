@@ -450,6 +450,16 @@ describe("initial import completion", () => {
 		);
 	});
 
+	test("clearing one error code leaves any other error in place", async () => {
+		const { runs } = setup();
+		await runs.begin("github");
+		await runs.noteError("github", "queue_full");
+		await runs.clearError("github", "not_signed_in");
+		expect((await runs.current("github")).lastErrorCode).toBe("queue_full");
+		await runs.clearError("github", "queue_full");
+		expect((await runs.current("github")).lastErrorCode).toBeUndefined();
+	});
+
 	test("failure, pause, and re-enable do not fabricate completion", async () => {
 		const { runs } = setup();
 		await runs.begin("github");

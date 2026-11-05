@@ -109,6 +109,8 @@ export interface SourceRuns {
 	setHandle(source: CaptureSource, handle: string): Promise<void>;
 	/** Record why a run ended badly, so the popup can offer the right fix. */
 	noteError(source: CaptureSource, code: string): Promise<void>;
+	/** Clear one error once its condition has passed, leaving any other error alone. */
+	clearError(source: CaptureSource, code: string): Promise<void>;
 	/** Run-id fenced error note; stale callbacks cannot annotate a replacement. */
 	noteErrorForRun(
 		source: CaptureSource,
@@ -491,6 +493,14 @@ export function createSourceRuns(
 			return serialize(source, async () => {
 				const current = await read(source);
 				await write({ ...current, lastErrorCode: code, updatedAt: now() });
+			});
+		},
+
+		clearError(source, code) {
+			return serialize(source, async () => {
+				const current = await read(source);
+				if (current.lastErrorCode !== code) return;
+				await write({ ...current, lastErrorCode: undefined, updatedAt: now() });
 			});
 		},
 
