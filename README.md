@@ -55,17 +55,23 @@ Two paths, same library: run it locally or host it in your own Cloudflare accoun
 
 ### A. Local
 
-Requirements: [Bun](https://bun.sh/) 1.3+, Chromium-based browser. SQLite DB is created automatically.
+Requirements: [Bun](https://bun.sh/) 1.3+, Chromium-based browser. Local D1 tables are created automatically by the dev command.
 
 ```bash
 bun install
-cp .dev.vars.example .dev.vars
-# Edit .dev.vars and set your master secret:
+cp .env.example .env
+# Edit .env and set your master secret:
 #   ANANSI_SECRET=your-random-secret
+# For this private extension build, also set ANANSI_EXTENSION_INGEST_TOKEN
+# to that same secret. Keep ANANSI_EXTENSION_ORIGIN=http://127.0.0.1:8787.
 bun run dev
 ```
 
 Open `http://127.0.0.1:8787`. This is the one public local origin: the library is at `/`, JSON endpoints are under `/api`, and MCP is at `/mcp`.
+
+`bun dev` first applies the SQL migrations, then starts Vite with the Cloudflare and TanStack plugins. Local D1 and R2 use `.wrangler/state` at the repository root. This Worker development path does not read the older `data/anansi.db` SQLite library. To apply local migrations separately, run `bun run db:migrate:local`.
+
+Use `.env` for this local setup. If `.dev.vars` exists, Wrangler uses it instead of `.env`; keep its secret aligned or remove that duplicate secrets file.
 
 Build the extension:
 
@@ -73,7 +79,7 @@ Build the extension:
 bun run --cwd apps/extension build
 ```
 
-Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `apps/extension/.output/chrome-mv3`. Click the Anansi icon in the toolbar, enter your local Worker URL (`http://127.0.0.1:8787` or hosted URL) and `ANANSI_SECRET`, and click **Connect**. The extension validates the connection and saves your bookmarks seamlessly. (You can also pre-bake secrets in `.env` for private builds).
+Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** → choose `apps/extension/.output/chrome-mv3`. If already installed, click **Reload** on its extension card after each rebuild, then refresh provider tabs so their capture scripts update. Click the Anansi icon and verify its server is `http://127.0.0.1:8787` (or your hosted URL). A previously saved popup connection overrides the build settings: disconnect it and reconnect with the current URL and `ANANSI_SECRET` if needed. This private artifact embeds its connection secret; do not distribute it.
 
 GitHub first import: sign in to GitHub in the same browser profile → popup → **Import** beside GitHub. It walks your stars pages in the worker (no tabs open), persists the pagination cursor, and resumes after interruptions. Unstarring hides from current-star view without deleting history; re-starring restores it.
 
@@ -183,7 +189,7 @@ bun run deploy
 ```
 
 `bun run deploy` applies remote D1 migrations and publishes the Worker output created by `bun run build`.
-Local development runs through `bun run dev` (powered by Wrangler with local D1 emulation).
+Local development runs through `bun run dev` (Vite with the Cloudflare plugin, local D1 migrations, and a fixed `http://127.0.0.1:8787` origin).
 
 ## 🧠 Ask it from your agent (MCP)
 

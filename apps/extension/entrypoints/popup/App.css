@@ -10,33 +10,89 @@
   max-height: 580px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  color-scheme: dark;
+  --anansi-ink: #0b0e11;
+  --anansi-card: #12161a;
+  --anansi-raised: #171d23;
+  --anansi-line: #1f262d;
+  --anansi-edge: #232a31;
+  --anansi-text: #e6ebef;
+  --anansi-muted: #8d9aa6;
+  --anansi-faint: #5d6874;
+  --anansi-faintest: #414a53;
+  --anansi-accent: #e4a33c;
+  --anansi-ok: #4fbf8b;
+  --anansi-warn: #e0714f;
+  --anansi-focus-ring: var(--anansi-accent);
+  --anansi-scrollbar-thumb: #232a31;
+  --anansi-warning-surface: rgba(224, 113, 79, 0.1);
+  --anansi-mirror-surface: #2a3f36;
+  --anansi-mirror-border: #3d6353;
+  --anansi-provider-highlight: #171d23;
+  --anansi-provider-muted: #8d9aa6;
+  --anansi-provider-running: #e4a33c;
+  --anansi-provider-error: #e0714f;
+  --anansi-btn-bg: #12161a;
+  --anansi-btn-text: #e6ebef;
+  --anansi-btn-border: #232a31;
+  --anansi-btn-hover-bg: #171d23;
+  --anansi-btn-stop-bg: #171d23;
+  --anansi-btn-stop-text: #8d9aa6;
+}
+
+@media (prefers-color-scheme: light) {
+  .anansi-popup {
+    color-scheme: light;
+    --anansi-ink: #ffffff;
+    --anansi-card: #ffffff;
+    --anansi-raised: #f1f1f2;
+    --anansi-line: #d2d2d7;
+    --anansi-edge: #d2d2d7;
+    --anansi-text: #171717;
+    --anansi-muted: #6e6e73;
+    --anansi-faint: #8c8c91;
+    --anansi-faintest: #b8b8bd;
+    --anansi-accent: #343434;
+    --anansi-ok: #176b4d;
+    --anansi-warn: #985600;
+    --anansi-focus-ring: #343434;
+    --anansi-scrollbar-thumb: #d2d2d7;
+    --anansi-warning-surface: #fff2f0;
+    --anansi-mirror-surface: #edf7f1;
+    --anansi-mirror-border: #c0dfcd;
+    --anansi-provider-highlight: #f1f1f2;
+    --anansi-provider-muted: #6e6e73;
+    --anansi-provider-running: #985600;
+    --anansi-provider-error: #b42318;
+    --anansi-btn-bg: #f1f1f2;
+    --anansi-btn-text: #171717;
+    --anansi-btn-border: #d2d2d7;
+    --anansi-btn-hover-bg: #e5e5ea;
+    --anansi-btn-stop-bg: #ffffff;
+    --anansi-btn-stop-text: #6e6e73;
+  }
+}
+
+.anansi-provider-row {
+  transition: background-color 120ms ease;
+}
+
+.anansi-provider-row:hover,
+.anansi-provider-row:focus-within,
+.anansi-provider-row[data-state="running"],
+.anansi-provider-row[data-state="failed"] {
+  background: var(--anansi-provider-highlight);
 }
 
 /* Only for keyboard focus, so a mouse press does not leave a ring behind. */
 .anansi-popup :focus-visible {
-  outline: 2px solid #e4a33c;
+  outline: 2px solid var(--anansi-focus-ring);
   outline-offset: 2px;
   border-radius: 5px;
 }
 
 .anansi-popup button:focus:not(:focus-visible) {
   outline: none;
-}
-
-.anansi-spinner {
-  width: 11px;
-  height: 11px;
-  margin-right: 6px;
-  border: 1.5px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  display: inline-block;
-  vertical-align: -1px;
-  animation: anansi-spin 0.75s linear infinite;
-}
-
-@keyframes anansi-spin {
-  to { transform: rotate(360deg); }
 }
 
 .anansi-sources {
@@ -59,6 +115,6 @@
 }
 
 .anansi-popup ::-webkit-scrollbar-thumb {
-  background: #232a31;
+  background: var(--anansi-scrollbar-thumb);
   border-radius: 4px;
 }

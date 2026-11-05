@@ -17,6 +17,7 @@ import {
   type PlatformSource,
 } from "../lib/messages.ts";
 import { createRelayHandshake } from "../lib/relay-handshake.ts";
+import { captureSourceFromUrl } from "../lib/platforms/registry.ts";
 
 export default defineContentScript({
   matches: [
@@ -101,11 +102,8 @@ export default defineContentScript({
     // The page script starts with no nonce or watched operations. Ask the
     // background for its current source config as soon as this relay loads;
     // an already-open SPA tab may never get another tabs.onUpdated event.
-    const host = window.location.hostname;
-    const source = host === "x.com" || host === "twitter.com" ? "x"
-      : host === "github.com" ? "github"
-      : host === "tiktok.com" || host === "www.tiktok.com" ? "tiktok"
-      : "reddit";
+    const source = captureSourceFromUrl(window.location.href);
+    if (!source) return;
     {
       void browser.runtime.sendMessage({
         anansi: "page-event",

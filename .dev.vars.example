@@ -1,3 +1,6 @@
+# Optional Worker-only alternative to .env. Wrangler prefers .dev.vars over .env.
+# Use one runtime secrets file to avoid accidentally running with an old secret.
+# Extension builds read .env, so their token must match the Worker secret here.
 # Master secret protecting library sign-in, extension ingestion, and MCP access.
 ANANSI_SECRET=
 

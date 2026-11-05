@@ -1,7 +1,11 @@
-import { isSource, SOURCE_IDS, type Source } from "./capabilities.ts";
+import {
+	SHIPPED_CAPTURE_SOURCES,
+	type ShippedCaptureSource,
+} from "./capabilities.ts";
 import type { CaptureQueueStatus } from "./capture.ts";
 
-type CaptureSource = Source;
+type CaptureSource = ShippedCaptureSource;
+const SHIPPED_CAPTURE_SOURCE_IDS = new Set<string>(SHIPPED_CAPTURE_SOURCES);
 
 export const HEARTBEAT_SCHEMA_VERSION = 1 as const;
 
@@ -128,12 +132,12 @@ export function parseExtensionHeartbeat(value: unknown): HeartbeatParseResult {
 	if (
 		!queue(value.queue) ||
 		!record(value.sources) ||
-		Object.keys(value.sources).length > SOURCE_IDS.length
+		Object.keys(value.sources).length > SHIPPED_CAPTURE_SOURCES.length
 	) {
 		return fail("invalid_heartbeat", "heartbeat state is invalid");
 	}
 	for (const [source, state] of Object.entries(value.sources)) {
-		if (!isSource(source) || !sourceState(state)) {
+		if (!SHIPPED_CAPTURE_SOURCE_IDS.has(source) || !sourceState(state)) {
 			return fail("invalid_heartbeat", "source heartbeat state is invalid");
 		}
 	}

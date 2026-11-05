@@ -85,6 +85,12 @@ export { parseStarredPage, README_CHARS } from "./github/parse.ts";
 export type { StarredRawPage } from "./github/parse.ts";
 export { parseSavedListing, savedListingCursor } from "./reddit/parse.ts";
 export { parseItemList } from "./tiktok/parse.ts";
+export {
+	INSTAGRAM_DOM_SNAPSHOT_SCHEMA_VERSION,
+	parseInstagramDomSnapshot,
+	parseInstagramDomSnapshots,
+} from "./instagram/parse.ts";
+export type { InstagramDomSnapshot } from "./instagram/parse.ts";
 export { canonicalizeWebUrl, webExternalId } from "./web/canonical-url.ts";
 export type {
   ExtensionHeartbeat,

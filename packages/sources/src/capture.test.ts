@@ -93,10 +93,44 @@ describe("parseBookmarkCapture", () => {
 		expect(parseBookmarkCapture({ ...itemEvent, schemaVersion: 2 }).ok).toBe(
 			false,
 		);
-		expect(parseBookmarkCapture({ ...itemEvent, source: "instagram" }).ok).toBe(
+		expect(parseBookmarkCapture({ ...itemEvent, source: "not-a-source" }).ok).toBe(
 			false,
 		);
 		expect(parseBookmarkCapture({ ...itemEvent, action: "delete" }).ok).toBe(
+			false,
+		);
+	});
+
+	test("accepts retained Instagram event methods without shipping them", () => {
+		const instagramItem: NormalizedItem = {
+			source: "instagram",
+			externalId: "AbC123_xyz",
+			url: "https://www.instagram.com/p/AbC123_xyz/",
+			kind: "post",
+			authorHandle: "anansi",
+			body: "A synthetic DTO contract example",
+			savedAt: 1_788_390_000,
+			savedAtIsExact: false,
+			metrics: {},
+			media: [],
+			links: [],
+			raw: { snapshotSchemaVersion: 1 },
+		};
+		const capture = {
+			...itemEvent,
+			eventId: "event-instagram-save-1",
+			source: "instagram",
+			externalId: instagramItem.externalId,
+			canonicalUrl: instagramItem.url,
+			captureMethod: "platform_event",
+			normalizedItem: instagramItem,
+		};
+
+		expect(parseBookmarkCapture(capture).ok).toBe(true);
+		expect(
+			parseBookmarkCapture({ ...capture, captureMethod: "platform_import" }).ok,
+		).toBe(true);
+		expect(parseBookmarkCapture({ ...capture, captureMethod: "toolbar" }).ok).toBe(
 			false,
 		);
 	});

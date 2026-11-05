@@ -6,7 +6,8 @@
     "build": "vite build",
     "build:cloudflare": "vite build --config vite.cloudflare.config.ts",
     "serve": "vite preview",
-    "dev:bare": "vite dev"
+    "dev:bare": "vite dev",
+    "dev:cloudflare": "vite dev --config vite.cloudflare.config.ts --host 127.0.0.1 --port 8787 --strictPort"
   },
   "dependencies": {
     "@anansi/db": "workspace:*",

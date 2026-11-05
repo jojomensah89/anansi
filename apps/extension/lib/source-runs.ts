@@ -1,6 +1,6 @@
-import type { ShippedCaptureSource } from "@anansi/sources";
+import { isExtensionPlatformSource, type ShippedCaptureSource } from "@anansi/sources";
 import type { SyncStateRecord } from "./idb-outbox.ts";
-import { validatedGitHubStarsPageUrl } from "./platforms/github.ts";
+import { isExpectedPlatformImportTab } from "./platforms/registry.ts";
 
 /** Current extension capture identities, including manual Web capture. */
 export type CaptureSource = ShippedCaptureSource;
@@ -775,34 +775,7 @@ export function isExpectedImportTab(
 	source: CaptureSource,
 	value: string,
 ): boolean {
-	try {
-		const url = new URL(value);
-		const host = url.hostname.toLowerCase();
-		if (source === "x") {
-			return (
-				(host === "x.com" || host === "twitter.com") &&
-				url.pathname.replace(/\/+$/, "") === "/i/bookmarks"
-			);
-		}
-		if (source === "reddit") {
-			return (
-				(host === "reddit.com" || host.endsWith(".reddit.com")) &&
-				/^\/user\/[^/]+\/saved\/?$/.test(url.pathname)
-			);
-		}
-		if (source === "github") {
-			return (
-				host === "github.com" &&
-				validatedGitHubStarsPageUrl(value, value) !== null
-			);
-		}
-		if (source === "tiktok") {
-			return host === "tiktok.com" || host === "www.tiktok.com";
-		}
-		return false;
-	} catch {
-		return false;
-	}
+	return isExtensionPlatformSource(source) && isExpectedPlatformImportTab(source, value);
 }
 
 /** One source selects one delivery owner; there is no dual-write state. */

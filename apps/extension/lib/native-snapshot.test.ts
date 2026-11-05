@@ -14,6 +14,16 @@ test("X provider object produces a full snapshot and rejects truncated content",
 	}, 100)[0]).toMatchObject({ externalId: "123", body: "Complete long post text" });
 });
 
+test("native provider traversal finds X and TikTok records nested in arrays", () => {
+	const tweet = { rest_id: "321", legacy: { full_text: "Nested X post" } };
+	const [xItem] = nativeItemsFromPayload("x", { data: [{ instructions: [[tweet]] }] }, 100);
+	expect(xItem).toMatchObject({ externalId: "321", body: "Nested X post" });
+
+	const itemStruct = { id: "654", desc: "Nested TikTok caption", author: { uniqueId: "alice" }, video: { cover: "https://example.com/cover.jpg" } };
+	const [tiktokItem] = nativeItemsFromPayload("tiktok", { itemList: [[itemStruct]] }, 100);
+	expect(tiktokItem).toMatchObject({ externalId: "654", body: "Nested TikTok caption" });
+});
+
 test("X snapshots discard provider payload metadata after normalizing the text", () => {
 	const tweet = {
 		rest_id: "123",

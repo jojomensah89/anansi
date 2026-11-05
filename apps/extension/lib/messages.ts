@@ -1,11 +1,11 @@
 import {
 	parseBookmarkCapture,
 	type NormalizedItem,
-	EXTENSION_PLATFORM_SOURCES,
 	isExtensionPlatformSource,
 	type ExtensionPlatformSource,
 } from "@anansi/sources";
 import { completeNativeItem } from "./native-snapshot.ts";
+import { captureAdapter, captureSourceFromUrl, isPlatformExternalId, isPlatformSourceUrl } from "./platforms/registry.ts";
 
 /**
  * Pure validation for the extension's three message directions.
@@ -204,27 +204,6 @@ const ERROR_MESSAGES: Record<MessageValidationError["code"], string> = {
 		"message contains a forbidden credential or configuration field",
 };
 
-const SOURCE_HOSTS: Record<PlatformSource, ReadonlySet<string>> = {
-	x: new Set(["x.com", "twitter.com"]),
-	reddit: new Set(["www.reddit.com", "old.reddit.com", "reddit.com"]),
-	github: new Set(["github.com"]),
-	tiktok: new Set(["www.tiktok.com", "tiktok.com"]),
-};
-
-const PAGE_EVENT_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
-	x: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
-	reddit: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
-	github: new Set(["ready", "saved", "page", "done", "bookmark", "error"]),
-	tiktok: new Set(["ready", "saved", "observed", "identified", "scanned", "bookmark", "error"]),
-};
-
-const PAGE_COMMAND_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
-	x: new Set(["configure", "backfill"]),
-	reddit: new Set(["ready", "configure", "backfill"]),
-	github: new Set(["ready", "configure", "backfill"]),
-	tiktok: new Set(["ready", "configure", "identify", "scan"]),
-};
-
 const ERROR_CODES = new Set([
 	"platform_request_failed",
 	"not_signed_in",
@@ -345,16 +324,7 @@ function serializedBytes(value: unknown): number | null {
 }
 
 function deriveSource(urlValue: string): PlatformSource | null {
-	try {
-		const url = new URL(urlValue);
-		if (url.protocol !== "https:" || url.username || url.password) return null;
-		for (const source of EXTENSION_PLATFORM_SOURCES) {
-			if (SOURCE_HOSTS[source].has(url.hostname.toLowerCase())) return source;
-		}
-	} catch {
-		// A malformed URL is simply not an allowed page origin.
-	}
-	return null;
+	return captureSourceFromUrl(urlValue);
 }
 
 function hasOnlyKeys(
@@ -383,18 +353,7 @@ function isSource(value: unknown): value is PlatformSource {
  * becoming one.
  */
 function isSourceUrl(value: unknown, source: PlatformSource): boolean {
-	if (typeof value !== "string" || value.length > 2_000) return false;
-	try {
-		const url = new URL(value);
-		return (
-			url.protocol === "https:" &&
-			url.username === "" &&
-			url.password === "" &&
-			SOURCE_HOSTS[source].has(url.hostname.toLowerCase())
-		);
-	} catch {
-		return false;
-	}
+	return isPlatformSourceUrl(value, source);
 }
 
 /** A platform handle, which becomes part of a URL the background opens. */
@@ -403,12 +362,7 @@ function isHandle(value: unknown): value is string {
 }
 
 function isExternalId(value: unknown, source: PlatformSource): value is string {
-	if (typeof value !== "string") return false;
-	return source === "github"
-		? /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9._-]{1,100}$/.test(
-				value,
-			)
-		: /^[A-Za-z0-9_-]{1,64}$/.test(value);
+	return isPlatformExternalId(value, source);
 }
 
 function isNonce(value: unknown): value is string {
@@ -435,13 +389,14 @@ function validatePageEventShape(
 	const value = candidate;
 	if (value.anansi !== "page-event" || typeof value.action !== "string")
 		return false;
-	if (!PAGE_EVENT_ACTIONS[source].has(value.action)) return false;
+	const rules = captureAdapter(source).protocol.events;
+	if (!rules.actions.some((action) => action === value.action)) return false;
 
 	const base = ["anansi", "messageVersion", "source", "nonce", "action"];
 	switch (value.action) {
 		case "ready":
 			return (
-				(source === "x" || value.relay === true && value.queryId === null) &&
+				(rules.ready === "query-or-relay" || value.relay === true && value.queryId === null) &&
 				hasOnlyKeys(value, [...base, "queryId", "relay"]) &&
 				(value.queryId === null || typeof value.queryId === "string") &&
 				(value.relay === undefined || value.relay === true)
@@ -449,7 +404,7 @@ function validatePageEventShape(
 		case "saved":
 			return hasOnlyKeys(value, base);
 		case "scanned":
-			return source === "tiktok" && hasOnlyKeys(value, [...base, "runId"]) && isRunId(value.runId);
+			return hasOnlyKeys(value, [...base, "runId"]) && isRunId(value.runId);
 		case "bookmark":
 			return (
 				hasOnlyKeys(value, [
@@ -478,7 +433,7 @@ function validatePageEventShape(
 		case "page":
 			return (
 				hasOnlyKeys(value, [...base, "runId", "raw", "page", "items", "cursor"]) &&
-				(source !== "x" || isRunId(value.runId)) &&
+				(!rules.pageRequiresRunId || isRunId(value.runId)) &&
 				Object.hasOwn(value, "raw") &&
 				isPositiveInteger(value.page) &&
 				isNonNegativeInteger(value.items) &&
@@ -489,7 +444,7 @@ function validatePageEventShape(
 			);
 		case "observed":
 			return (
-				source === "tiktok" && hasOnlyKeys(value, [...base, "runId", "operation", "raw", "items"]) && isRunId(value.runId) &&
+				hasOnlyKeys(value, [...base, "runId", "operation", "raw", "items"]) && isRunId(value.runId) &&
 				typeof value.operation === "string" &&
 				value.operation.length > 0 &&
 				value.operation.length <= 1_000 &&
@@ -497,11 +452,11 @@ function validatePageEventShape(
 				isNonNegativeInteger(value.items)
 			);
 		case "identified":
-			return source === "tiktok" && hasOnlyKeys(value, [...base, "runId", "handle"]) && isRunId(value.runId) && isHandle(value.handle);
+			return hasOnlyKeys(value, [...base, "runId", "handle"]) && isRunId(value.runId) && isHandle(value.handle);
 		case "done":
 			return (
 				hasOnlyKeys(value, [...base, "runId", "pages", "items", "state"]) &&
-				(source !== "x" || isRunId(value.runId)) &&
+				(!rules.doneRequiresRunId || isRunId(value.runId)) &&
 				isNonNegativeInteger(value.pages) &&
 				isNonNegativeInteger(value.items) &&
 				(value.state === undefined ||
@@ -512,7 +467,7 @@ function validatePageEventShape(
 		case "error":
 			return (
 				hasOnlyKeys(value, [...base, "runId", "errorCode"]) &&
-				(source !== "x" && source !== "tiktok" || isRunId(value.runId)) &&
+				(!rules.errorRequiresRunId || isRunId(value.runId)) &&
 				typeof value.errorCode === "string" &&
 				ERROR_CODES.has(value.errorCode)
 			);
@@ -547,10 +502,11 @@ function validatePageCommandShape(
 ): candidate is PageCommandMessage {
 	if (!isRecord(candidate)) return false;
 	const value = candidate;
+	const rules = captureAdapter(source).protocol.commands;
 	if (
 		value.anansi !== "page-command" ||
 		typeof value.action !== "string" ||
-		!PAGE_COMMAND_ACTIONS[source].has(value.action) ||
+		!rules.actions.some((action) => action === value.action) ||
 		!hasOnlyKeys(value, [
 			"anansi",
 			"messageVersion",
@@ -565,10 +521,9 @@ function validatePageCommandShape(
 	) {
 		return false;
 	}
-	const runIdValid =
-		source === "x" && value.action === "backfill"
-			? isRunId(value.runId)
-			: value.runId === undefined || isRunId(value.runId);
+	const runIdValid = rules.requiredRunIdActions.some((action) => action === value.action)
+		? isRunId(value.runId)
+		: value.runId === undefined || isRunId(value.runId);
 	return (
 		runIdValid &&
 		(value.config.source === undefined || value.config.source === source)

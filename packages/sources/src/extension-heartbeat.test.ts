@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+	type ExtensionHeartbeat,
 	HEARTBEAT_SCHEMA_VERSION,
 	parseExtensionHeartbeat,
-	type ExtensionHeartbeat,
 } from "./extension-heartbeat.ts";
 
 const valid = (): ExtensionHeartbeat => ({
@@ -46,11 +46,17 @@ describe("parseExtensionHeartbeat", () => {
 		).toBe(false);
 	});
 
-	test("accepts GitHub source health", () => {
+	test("accepts shipped GitHub and Web source health", () => {
 		expect(
 			parseExtensionHeartbeat({
 				...valid(),
 				sources: { github: valid().sources.x },
+			}).ok,
+		).toBe(true);
+		expect(
+			parseExtensionHeartbeat({
+				...valid(),
+				sources: { web: valid().sources.x },
 			}).ok,
 		).toBe(true);
 	});

@@ -40,10 +40,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "dev": "wrangler dev",
+    "dev": "bun run db:migrate:local && bun run --filter web dev:cloudflare",
     "build": "bun run --filter web build:cloudflare",
     "db:generate": "bun run --filter @anansi/db db:generate",
     "db:studio": "bun run --filter @anansi/db db:studio",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc --persist-to .wrangler/state",
     "deploy": "bun run db:migrate:remote && wrangler deploy --config apps/web/dist/server/wrangler.json",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "cf-typegen": "wrangler types",

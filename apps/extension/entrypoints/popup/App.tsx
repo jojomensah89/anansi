@@ -50,18 +50,18 @@ import "./App.css";
  * that silently vanishes reads as a bug rather than as a setting.
  */
 const S = {
-  ink: "#0b0e11",
-  card: "#12161a",
-  raised: "#171d23",
-  line: "#1f262d",
-  edge: "#232a31",
-  text: "#e6ebef",
-  muted: "#8d9aa6",
-  faint: "#5d6874",
-  faintest: "#414a53",
-  accent: "#e4a33c",
-  ok: "#4fbf8b",
-  warn: "#e0714f",
+  ink: "var(--anansi-ink)",
+  card: "var(--anansi-card)",
+  raised: "var(--anansi-raised)",
+  line: "var(--anansi-line)",
+  edge: "var(--anansi-edge)",
+  text: "var(--anansi-text)",
+  muted: "var(--anansi-muted)",
+  faint: "var(--anansi-faint)",
+  faintest: "var(--anansi-faintest)",
+  accent: "var(--anansi-accent)",
+  ok: "var(--anansi-ok)",
+  warn: "var(--anansi-warn)",
   mono: "ui-monospace, 'IBM Plex Mono', monospace",
 };
 
@@ -115,6 +115,11 @@ const NAMES: Record<string, string> = {
   tiktok: "TikTok favorites",
 };
 
+const SOURCE_LABELS: Record<string, string> = {
+  github: "GitHub",
+  reddit: "Reddit",
+};
+
 const command = (message: Record<string, unknown>) =>
   browser.runtime
     .sendMessage({
@@ -152,6 +157,7 @@ export default function App() {
   const [mirroring, setMirroring] = useState<boolean | null>(null);
   const [mirrorNote, setMirrorNote] = useState<string | null>(null);
   const [startingSources, setStartingSources] = useState<Set<string>>(() => new Set());
+  const [isRetrying, setIsRetrying] = useState(false);
 
   useEffect(() => {
     void mirror("mirror-status").then((r) => setMirroring(r?.mirroring ?? false));
@@ -368,6 +374,15 @@ export default function App() {
     }
     if (settled.size !== startingSources.size) setStartingSources(settled);
   }, [snapshot, startingSources]);
+
+  // Safety fallback: if starting state does not settle within 6 seconds, clear it so buttons don't stay locked
+  useEffect(() => {
+    if (startingSources.size === 0) return;
+    const timer = setTimeout(() => {
+      setStartingSources(new Set());
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [startingSources]);
   const queue = snapshot?.queue ?? EMPTY_QUEUE;
   const outbox = describeQueue(queue);
 
@@ -425,7 +440,8 @@ export default function App() {
     const due = initialImport.due;
     setStartingSources((previous) => new Set([...previous, ...due]));
     void command({ action: "import-all" }).then((response) => {
-      if (!(response as { ok?: boolean } | undefined)?.ok) {
+      const ok = (response as { ok?: boolean } | undefined)?.ok;
+      if (!ok) {
         setStartingSources((previous) => {
           const next = new Set(previous);
           for (const source of due) next.delete(source);
@@ -499,7 +515,7 @@ export default function App() {
               marginLeft: "auto",
               background: "transparent",
               border: "none",
-              color: showSettings ? S.accent : S.muted,
+              color: S.muted,
               cursor: "pointer",
               padding: "4px 6px",
               display: "flex",
@@ -544,13 +560,8 @@ export default function App() {
             gap: 12,
           }}
         >
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-              {connection ? "Connection Settings" : "Connect to Anansi"}
-            </div>
-            <div style={{ fontSize: 11, color: S.muted, lineHeight: 1.4 }}>
-              Enter your deployed Cloudflare Worker URL and secret key to sync bookmarks.
-            </div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>
+            {connection ? "Connection Settings" : "Connect to Anansi"}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -605,7 +616,7 @@ export default function App() {
             <div
               style={{
                 padding: "8px 10px",
-                background: "rgba(224, 113, 79, 0.1)",
+                background: "var(--anansi-warning-surface)",
                 border: `1px solid ${S.warn}`,
                 borderRadius: 6,
                 color: S.warn,
@@ -624,14 +635,10 @@ export default function App() {
               style={{
                 ...button,
                 flex: 1,
-                background: S.accent,
-                color: S.ink,
-                fontWeight: 600,
-                border: "none",
                 opacity: isConnecting ? 0.7 : 1,
               }}
             >
-              {isConnecting ? "Connecting…" : connection ? "Save & Reconnect" : "Connect"}
+              {isConnecting ? "Connecting…" : "Connect"}
             </button>
             {connection && (
               <button
@@ -640,10 +647,8 @@ export default function App() {
                 style={{
                   ...button,
                   background: S.raised,
-                  color: S.warn,
-                  borderColor: S.edge,
-                  fontSize: 11,
-                  padding: "0 10px",
+                  color: S.muted,
+                  padding: "0 12px",
                 }}
               >
                 Disconnect
@@ -713,16 +718,27 @@ export default function App() {
           {outbox.canRetry && (
             <button
               type="button"
-              onClick={() => void retry().then(refresh)}
+              disabled={isRetrying}
+              aria-busy={isRetrying}
+              onClick={async () => {
+                setIsRetrying(true);
+                try {
+                  await retry();
+                  refresh();
+                } finally {
+                  setIsRetrying(false);
+                }
+              }}
               style={{
                 ...button,
                 marginLeft: "auto",
                 height: 23,
                 padding: "0 8px",
                 fontSize: 10,
+                opacity: isRetrying ? 0.6 : 1,
               }}
             >
-              Retry all
+              {isRetrying ? "Retrying…" : "Retry all"}
             </button>
           )}
         </div>
@@ -754,16 +770,22 @@ export default function App() {
               aria-busy={importAllStarting}
               style={{
                 ...button,
-                height: 28,
-                padding: "0 10px",
-                fontSize: 11,
-                opacity: importAllStarting ? 0.65 : 1,
+                height: 27,
+                padding: "0 12px",
+                fontSize: 11.5,
+                fontWeight: 500,
+                borderRadius: 5,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                whiteSpace: "nowrap",
+                opacity: importAllStarting ? 0.6 : 1,
                 cursor: importAllStarting ? "default" : "pointer",
               }}
             >
-              {importAllStarting && <span className="anansi-spinner" aria-hidden="true" />}
               {importAllStarting
-                ? "Starting…"
+                ? "Importing…"
                 : initialImport.completed > 0
                   ? "Import remaining history"
                   : "Import all history"}
@@ -776,31 +798,47 @@ export default function App() {
           {rows.map((s) => {
             const view = viewOf(s);
             const isStarting = startingSources.has(s.source) && view.action === "import";
+            const sourceName = SOURCE_LABELS[s.source] ?? NAMES[s.source] ?? s.host;
+            const statusText =
+              view.state === "running"
+                ? `${(status[s.source]?.pages ?? 0).toLocaleString()} scanned, ${(status[s.source]?.items ?? 0).toLocaleString()} new`
+                : view.state === "synced"
+                  ? "Up to date"
+                  : view.state === "failed"
+                    ? "Error"
+                    : view.text;
+            const actionLabel = view.actionLabel;
+            const inProgressLabel =
+              actionLabel === "Resume"
+                ? "Resuming…"
+                : actionLabel === "Try again"
+                  ? "Retrying…"
+                  : "Importing…";
             return (
             <div
               key={s.source}
+              className="anansi-provider-row"
+              data-state={view.state}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 11,
                 padding: "11px 16px",
                 borderTop: `1px solid ${S.line}`,
+                boxSizing: "border-box",
               }}
             >
               <span
                 style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: 7,
-                  background: S.raised,
+                  width: 20,
+                  height: 20,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   flexShrink: 0,
-                  color: S.muted,
                 }}
               >
-                <SourceMark source={s.source} size={14} muted decorative />
+                <SourceMark source={s.source} size={20} decorative />
               </span>
               <span
                 style={{
@@ -811,39 +849,55 @@ export default function App() {
                   flex: 1,
                 }}
               >
-                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{NAMES[s.source] ?? s.host}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{sourceName}</span>
                 <span
                   style={{
                     fontSize: 11,
-                    color: TONES[view.tone],
+                    color:
+                      view.state === "failed"
+                        ? "var(--anansi-provider-error)"
+                        : view.state === "running"
+                          ? "var(--anansi-provider-running)"
+                          : view.state === "synced"
+                            ? "var(--anansi-provider-muted)"
+                            : TONES[view.tone],
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {view.text}
+                  {statusText}
                 </span>
               </span>
               <button
                 type="button"
                 disabled={!s.configured || view.action === "none" || isStarting}
                 onClick={() => act(s, view.action)}
-                aria-label={`${isStarting ? "Starting" : view.actionLabel} ${NAMES[s.source] ?? s.host}`}
+                aria-label={`${isStarting ? inProgressLabel.replace("…", "") : actionLabel} ${sourceName}`}
                 aria-busy={isStarting}
                 style={{
                   ...button,
+                  minWidth: 59,
+                  width: "auto",
                   height: 27,
                   padding: "0 12px",
                   fontSize: 11.5,
+                  fontWeight: 500,
                   flexShrink: 0,
-                  opacity: !s.configured || view.action === "none" || isStarting ? 0.65 : 1,
+                  borderRadius: 5,
+                  border: `1px solid ${S.edge}`,
+                  opacity: !s.configured || view.action === "none" || isStarting ? 0.6 : 1,
                   cursor: !s.configured || view.action === "none" || isStarting ? "default" : "pointer",
                   background: view.action === "pause" ? S.raised : S.card,
-                  color: view.action === "pause" ? S.faint : S.text,
+                  color: view.action === "pause" ? S.muted : S.text,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  whiteSpace: "nowrap",
                 }}
               >
-                {isStarting && <span className="anansi-spinner" aria-hidden="true" />}
-                {isStarting ? "Starting…" : view.actionLabel}
+                {isStarting ? inProgressLabel : actionLabel}
               </button>
             </div>
           );
@@ -918,6 +972,7 @@ export default function App() {
           <button
             type="button"
             disabled={saving === "saving"}
+            aria-busy={saving === "saving"}
             onClick={async () => {
               setSaving("saving");
               const result = (await savePage()) as
@@ -945,7 +1000,7 @@ export default function App() {
               flexShrink: 0,
             }}
           >
-            Save
+            {saving === "saving" ? "Saving…" : "Save"}
           </button>
         </div>
 
@@ -1040,8 +1095,8 @@ export default function App() {
               display: "flex",
               alignItems: "center",
               justifyContent: mirroring ? "flex-end" : "flex-start",
-              background: mirroring ? "#2a3f36" : S.raised,
-              border: `1px solid ${mirroring ? "#3d6353" : S.edge}`,
+              background: mirroring ? "var(--anansi-mirror-surface)" : S.raised,
+              border: `1px solid ${mirroring ? "var(--anansi-mirror-border)" : S.edge}`,
               cursor: mirroring === null ? "default" : "pointer",
             }}
           >
@@ -1120,11 +1175,18 @@ export default function App() {
 }
 
 const button: React.CSSProperties = {
-  height: 31,
+  height: 27,
   borderRadius: 5,
   border: `1px solid ${S.edge}`,
   background: S.card,
   color: S.text,
-  fontSize: 12.5,
+  fontSize: 11.5,
+  fontWeight: 500,
   cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  whiteSpace: "nowrap",
+  boxSizing: "border-box",
 };

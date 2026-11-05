@@ -20,9 +20,6 @@ import {
 	EXTENSION_PLATFORM_SOURCES,
 	isExtensionPlatformSource,
 	parseExtensionConfig,
-	parseSavedListing,
-	parseStarredPage,
-	parseItemList,
 	SHIPPED_CAPTURE_SOURCES,
 } from "@anansi/sources";
 import { type CaptureQueue, createCaptureQueue } from "../lib/capture-queue.ts";
@@ -62,9 +59,7 @@ import {
 	UNSUPPORTED_MESSAGES,
 } from "../lib/page-capture.ts";
 import { createLiveCapture } from "../lib/live-capture.ts";
-import { nativeItemsFromPayload } from "../lib/native-snapshot.ts";
-import { tweetUrl } from "../lib/platforms/x.ts";
-import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
+import { captureAdapter, isSessionCaptureSource, platformCanonicalUrl, platformEntryUrl, platformTabPatterns, shouldRefreshTopOnResume } from "../lib/platforms/registry.ts";
 import {
 	SYNC_ALARM,
 	scheduleDailyCatchUp,
@@ -87,7 +82,6 @@ import {
 	type CaptureSource,
 	captureDeliveryMode,
 	createSourceRuns,
-	isExpectedImportTab,
 	type SourceRuns,
 } from "../lib/source-runs.ts";
 
@@ -127,7 +121,7 @@ const SOURCE_RUN_RECOVERY_ALARM_PREFIX = "anansi-source-run-recovery:";
 const CAPTURE_SOURCES = EXTENSION_PLATFORM_SOURCES;
 const HEARTBEAT_SOURCES = SHIPPED_CAPTURE_SOURCES;
 const tabNonces = new Map<number, string>();
-const identifiedTikTokRuns = new Map<string, string>();
+const identifiedPageRuns = new Map<string, string>();
 
 let cached: ServerCache<RemoteConfig> | null = null;
 let cachedToken: string | null = null;
@@ -523,24 +517,13 @@ function liveCapture() {
 	return nativeCaptures;
 }
 
-function platformUrl(source: CaptureSource, externalId: string): string {
-	return source === "github" ? `https://github.com/${externalId}`
-		: source === "tiktok" ? `https://www.tiktok.com/video/${externalId}`
-		: source === "reddit" ? `https://www.reddit.com/comments/${externalId.replace(/^t[13]_/, "")}`
-		: tweetUrl(externalId);
+function platformUrl(source: PlatformSource, externalId: string): string {
+	return platformCanonicalUrl(source, externalId);
 }
 
-function contentFromPage(source: CaptureSource, raw: unknown): NormalizedItem[] {
-	const context = { importedAt: Math.floor(Date.now() / 1000) };
-	try {
-		switch (source) {
-			case "x": return nativeItemsFromPayload("x", raw, context.importedAt);
-			case "reddit": return parseSavedListing(raw, context);
-			case "github": return parseStarredPage(raw, context);
-			case "tiktok": return parseItemList(raw, context);
-			default: return [];
-		}
-	} catch { return []; }
+function contentFromPage(source: PlatformSource, raw: unknown): NormalizedItem[] {
+	try { return captureAdapter(source).parsePage(raw, Math.floor(Date.now() / 1000)); }
+	catch { return []; }
 }
 
 let recoveringHandoffs: Promise<void> | null = null;
@@ -567,7 +550,7 @@ async function recoverNativeHandoffs(): Promise<void> {
 	try { await recoveringHandoffs; } finally { recoveringHandoffs = null; }
 }
 
-async function reportNativePending(source: CaptureSource, state: { pending: number; needsContent: boolean }) {
+async function reportNativePending(source: PlatformSource, state: { pending: number; needsContent: boolean }) {
 	if (state.pending) {
 		await patchStatus(source, { message: state.needsContent
 			? "saved on the platform; fetching post content automatically"
@@ -578,7 +561,7 @@ async function reportNativePending(source: CaptureSource, state: { pending: numb
 }
 
 async function recordNativeMutation(
-	source: CaptureSource, action: "save" | "unsave", externalId: string,
+	source: PlatformSource, action: "save" | "unsave", externalId: string,
 	canonicalUrl?: string, raw?: unknown, normalizedItem?: NormalizedItem,
 	mutationId?: string, observedAt?: number,
 ) {
@@ -606,7 +589,7 @@ async function handleBookmarkMutation(...args: Parameters<typeof recordNativeMut
 }
 
 /** Migrate old id-only pending saves once, then preserve their new identity. */
-async function migratePendingSaves(source: CaptureSource): Promise<void> {
+async function migratePendingSaves(source: PlatformSource): Promise<void> {
 	const runs = persistentState().runs;
 	const run = await runs.current(source);
 	for (const externalId of run.pendingSaves) {
@@ -617,12 +600,12 @@ async function migratePendingSaves(source: CaptureSource): Promise<void> {
 	}
 }
 
-async function hydrateNativeCaptures(source: CaptureSource, raw: unknown): Promise<void> {
+async function hydrateNativeCaptures(source: PlatformSource, raw: unknown): Promise<void> {
 	await migratePendingSaves(source);
 	await reportNativePending(source, await liveCapture().hydrate(source, contentFromPage(source, raw)));
 }
 
-async function flushPendingSaves(source: CaptureSource): Promise<void> {
+async function flushPendingSaves(source: PlatformSource): Promise<void> {
 	await migratePendingSaves(source);
 	await reportNativePending(source, await liveCapture().retry(source));
 }
@@ -864,33 +847,13 @@ const MENUS: MenuSpec[] = [
 	},
 ];
 
-/** Where to open a tab when there isn't one, per source. */
-const ENTRY_URLS: Record<string, string> = {
-	x: "https://x.com/i/bookmarks",
-	reddit: "https://www.reddit.com/user/me/saved/",
-	github: "https://github.com/stars",
-	tiktok: "https://www.tiktok.com/",
-};
-
-const HOST_PATTERNS: Record<string, string[]> = {
-	x: ["https://x.com/*", "https://twitter.com/*"],
-	reddit: [
-		"https://www.reddit.com/*",
-		"https://old.reddit.com/*",
-		"https://reddit.com/*",
-	],
-	github: ["https://github.com/*"],
-	tiktok: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
-};
-
-async function findTab(source: CaptureSource, expectedUrl?: string) {
-	const patterns = HOST_PATTERNS[source];
-	if (!patterns) return undefined;
+async function findTab(source: PlatformSource, expectedUrl?: string) {
+	const patterns = platformTabPatterns(source);
 	const tabs = await browser.tabs.query({ url: patterns });
 	return tabs.find(
 		(tab) =>
 			tab.url &&
-			isExpectedImportTab(source, tab.url) &&
+			captureAdapter(source).isExpectedImportTab(tab.url) &&
 			(!expectedUrl || tab.url === expectedUrl),
 	);
 }
@@ -902,11 +865,10 @@ async function findTab(source: CaptureSource, expectedUrl?: string) {
  * and closed again afterwards if we were the ones who opened it.
  */
 async function openTab(
-	source: CaptureSource,
+	source: PlatformSource,
 	preferredUrl?: string,
 ): Promise<{ id: number; ours: boolean } | null> {
-	const url = preferredUrl ?? ENTRY_URLS[source];
-	if (!url) return null;
+	const url = preferredUrl ?? platformEntryUrl(source);
 	const tab = await browser.tabs.create({ url, active: false });
 	if (!tab.id) return null;
 
@@ -928,21 +890,22 @@ async function openTab(
 	return { id, ours: true };
 }
 
-async function waitForTikTokHandle(runId: string, timeoutMs = 12_000): Promise<string | null> {
+async function waitForPageIdentity(runId: string, timeoutMs = 12_000): Promise<string | null> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		const handle = identifiedTikTokRuns.get(runId);
-		if (handle) return handle;
+		const identity = identifiedPageRuns.get(runId);
+		if (identity) { identifiedPageRuns.delete(runId); return identity; }
 		await new Promise((resolve) => setTimeout(resolve, 250));
 	}
+	identifiedPageRuns.delete(runId);
 	return null;
 }
 
-async function navigateTikTokTab(tabId: number, url: string): Promise<boolean> {
+async function navigateTab(tabId: number, url: string): Promise<boolean> {
 	try {
 		await browser.tabs.update(tabId, { url });
 		await new Promise<void>((resolve, reject) => {
-			const timer = setTimeout(() => { browser.tabs.onUpdated.removeListener(onUpdated); reject(new Error("TikTok navigation timed out")); }, 25_000);
+			const timer = setTimeout(() => { browser.tabs.onUpdated.removeListener(onUpdated); reject(new Error("page navigation timed out")); }, 25_000);
 			function onUpdated(id: number, info: { status?: string }) {
 				if (id !== tabId || info.status !== "complete") return;
 				clearTimeout(timer);
@@ -998,17 +961,17 @@ async function expireOwnedRun(
 }
 
 /**
- * GitHub and Reddit use credentialed worker requests. X still uses a page
- * script and opens an inactive tab when it needs one.
+ * Session-import adapters use credentialed worker requests; page-import
+ * adapters open an inactive platform tab when they need one.
  */
 async function startCapture(
 	source: string,
 	quiet = false,
 	live = false,
 ): Promise<void> {
-	if (!isCaptureSource(source)) return;
+	if (!isExtensionPlatformSource(source)) return;
 	if (
-		(source === "github" || source === "reddit") &&
+		isSessionCaptureSource(source) &&
 		sessionImports.has(source)
 	)
 		return;
@@ -1052,7 +1015,7 @@ async function startCapture(
 		return;
 	}
 
-	if (source === "github" || source === "reddit") {
+	if (isSessionCaptureSource(source)) {
 		const controller = new AbortController();
 		const task = importWithoutTab(
 			source,
@@ -1151,24 +1114,22 @@ async function startCapture(
 			return;
 		}
 
-		if (source === "tiktok") {
-			await patchStatusForRun(source, runId, { message: "finding your favorites…" });
-			await talk(tab.id, { anansi: "page-command", messageVersion: MESSAGE_PROTOCOL_VERSION, source, runId, action: "identify", config: entry });
-			const handle = await waitForTikTokHandle(runId);
-			identifiedTikTokRuns.delete(runId);
-			const destination = handle && profileUrl(handle);
-			if (!destination) {
-				await applyImportEffects((await sourceImportLifecycle().fail({ source, runId, tabId: tab.id, code: "capture_failed" })).effects);
-				await patchStatusForRun(source, runId, { startedAt: null, message: "could not identify your TikTok account; reload TikTok and retry" });
+		const preparePageImport = captureAdapter(source).preparePageImport;
+		if (preparePageImport) {
+			const prepared = await preparePageImport({
+				setMessage: (message) => patchStatusForRun(source, runId, { message }),
+				identify: async () => {
+					await talk(tab.id, { anansi: "page-command", messageVersion: MESSAGE_PROTOCOL_VERSION, source, runId, action: "identify", config: entry });
+				},
+				waitForIdentity: () => waitForPageIdentity(runId),
+				currentUrl: async () => (await browser.tabs.get(tab.id).catch(() => null))?.url ?? null,
+				navigate: (url) => navigateTab(tab.id, url),
+				configure,
+			});
+			if (!prepared.ready) {
+				await applyImportEffects((await sourceImportLifecycle().fail({ source, runId, tabId: tab.id, code: prepared.code })).effects);
+				await patchStatusForRun(source, runId, { startedAt: null, message: prepared.message });
 				return;
-			}
-			const current = await browser.tabs.get(tab.id).catch(() => null);
-			if (!current?.url || !isProfileView(current.url, handle)) {
-				if (!(await navigateTikTokTab(tab.id, destination)) || !(await configure())) {
-					await applyImportEffects((await sourceImportLifecycle().fail({ source, runId, tabId: tab.id, code: "platform_request_failed" })).effects);
-					await patchStatusForRun(source, runId, { startedAt: null, message: "could not open your TikTok Favorites page" });
-					return;
-				}
 			}
 		}
 
@@ -1229,7 +1190,7 @@ async function startCapture(
 			{
 				...entry,
 				...(begun.run.cursor ? { resumeCursor: begun.run.cursor } : {}),
-				...(source === "x" && begun.run.cursor ? { refreshTop: true } : {}),
+				...(shouldRefreshTopOnResume(source) && begun.run.cursor ? { refreshTop: true } : {}),
 			};
 	await patchStatusForRun(source, runId, {
 		startedAt: begun.run.startedAt,
@@ -1282,11 +1243,17 @@ async function startCapture(
 }
 
 /** Fan out the existing full-import path without creating an aggregate run. */
-async function startAllCaptures(): Promise<void> {
+async function startAllCaptures(): Promise<BackgroundResult> {
 	const config = await loadConfig(true);
+	if (!config?.enabled) {
+		return { ok: false, error: "capture disabled on server" };
+	}
 	const sources = await initialImportSources(config, (source) =>
 		persistentState().runs.initialImportDue(source),
 	);
+	if (sources.length === 0) {
+		return { ok: false, error: "no sources due for import" };
+	}
 	void runImportAll(sources, async (source) => {
 		try {
 			await startCapture(source, true);
@@ -1306,6 +1273,7 @@ async function startAllCaptures(): Promise<void> {
 			});
 		}
 	});
+	return { ok: true };
 }
 
 async function importWithoutTab(
@@ -1658,8 +1626,7 @@ async function handlePopupCommand(
 		case "queue-status":
 			return { ok: true, snapshot: await durableSnapshot() };
 		case "import-all":
-			await startAllCaptures();
-			return { ok: true };
+			return await startAllCaptures();
 		case "reschedule":
 			await rescheduleAlarm();
 			return { ok: true };
@@ -1691,7 +1658,7 @@ async function handlePopupCommand(
 			return { ok: true };
 		}
 		case "stop": {
-			if (msg.source === "github" || msg.source === "reddit") {
+			if (isSessionCaptureSource(msg.source)) {
 				const importing = sessionImports.get(msg.source);
 				importing?.controller.abort();
 				await importing?.task;
@@ -1717,7 +1684,7 @@ async function handlePageEvent(
 	// Import results for these sources are owned by the worker. Old content
 	// scripts in already-open tabs must not advance or finish its run.
 	if (
-		(source === "github" || source === "reddit") &&
+		isSessionCaptureSource(source) &&
 		["page", "done", "error", "scanned"].includes(msg.action)
 	) {
 		return {
@@ -1821,7 +1788,7 @@ async function handlePageEvent(
 			return { ok: true };
 		case "identified":
 			if ((await persistentState().runs.current(source)).runId === msg.runId) {
-				identifiedTikTokRuns.set(msg.runId, msg.handle);
+				identifiedPageRuns.set(msg.runId, msg.handle);
 				await persistentState().runs.setHandle(source, msg.handle);
 			}
 			return { ok: true };
