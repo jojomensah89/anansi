@@ -1,5 +1,6 @@
 import { isExtensionPlatformSource, type ExtensionPlatformSource, type NormalizedItem } from "@anansi/sources";
 import { captureAdapter } from "./platforms/registry.ts";
+import { xhrResponseJson } from "./xhr-response.ts";
 import { completeNativeItemWithAdapter, nativeItemsFromPayloadWithAdapter } from "./platforms/native-snapshot-core.ts";
 
 export function completeNativeItem(item: NormalizedItem): boolean {
@@ -51,5 +52,26 @@ export function createNativeSnapshotCache(source: ExtensionPlatformSource) {
 		}).catch(() => {});
 		return response;
 	}, originalFetch);
+	// Platforms load posts over XMLHttpRequest too. Without this, a long post has
+	// no full text to save, because its page text is cut off behind "Show more".
+	if (typeof XMLHttpRequest !== "undefined") {
+		const originalSend = XMLHttpRequest.prototype.send;
+		XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ...args: Parameters<XMLHttpRequest["send"]>) {
+			this.addEventListener("load", () => {
+				try {
+					if (this.status < 200 || this.status >= 300) return;
+					if (!this.getResponseHeader("content-type")?.includes("json")) return;
+					if (Number(this.getResponseHeader("content-length")) > 2_000_000) return;
+					if ((this.responseType === "" || this.responseType === "text") && this.responseText.length > 2_000_000) return;
+					const body = xhrResponseJson(this);
+					// Later than the page's own handlers, so a large response cannot delay them.
+					setTimeout(() => {
+						try { collect(body); } catch { /* Ignore unrelated responses. */ }
+					}, 0);
+				} catch { /* Observation must never affect the page. */ }
+			});
+			return originalSend.apply(this, args);
+		};
+	}
 	return { get, collect };
 }

@@ -190,3 +190,72 @@ test("GitHub visible snapshots require a recognized description field, including
 	const { document: empty } = parseHTML('<article><a href="https://github.com/alice/repo">alice/repo</a><p itemprop="description"></p></article>');
 	expect(nativeItemFromDocument("github", "alice/repo", empty, 100)).toMatchObject({ title: "alice/repo", body: "", kind: "repo" });
 });
+
+test("a long post seen in an XMLHttpRequest response is ready when it is saved", async () => {
+	const id = "1788390000000000999";
+	const fullText = "A long post whose full text only exists in the network response ".repeat(8).trim();
+	const tweet = {
+		rest_id: id,
+		legacy: { full_text: "A long post whose full...", truncated: true, created_at: "Thu Nov 05 10:00:00 +0000 2026", entities: {} },
+		note_tweet: { note_tweet_results: { result: { text: fullText } } },
+		core: { user_results: { result: { rest_id: "42", legacy: { screen_name: "author", name: "Author" } } } },
+	};
+	class FakeXhr {
+		static sendCalls = 0;
+		responseType: XMLHttpRequestResponseType = "";
+		responseText = "";
+		response: unknown = null;
+		status = 200;
+		private listeners: Array<() => void> = [];
+		addEventListener(name: string, run: () => void) {
+			if (name === "load") this.listeners.push(run);
+		}
+		getResponseHeader(name: string) {
+			return name.toLowerCase() === "content-type" ? "application/json; charset=utf-8" : null;
+		}
+		send() {
+			FakeXhr.sendCalls++;
+		}
+		finish(body: unknown, responseType: XMLHttpRequestResponseType = "") {
+			this.responseType = responseType;
+			if (responseType === "json") this.response = body;
+			else this.responseText = JSON.stringify(body);
+			for (const run of this.listeners) run();
+		}
+	}
+	const { document, window } = parseHTML("<!doctype html><html><body></body></html>");
+	const priors = { document: globalThis.document, window: globalThis.window, Element: globalThis.Element, XMLHttpRequest: globalThis.XMLHttpRequest };
+	const define = (name: string, value: unknown) => {
+		if (value === undefined) Reflect.deleteProperty(globalThis, name);
+		else Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+	};
+	define("document", document);
+	define("window", window);
+	define("Element", window.Element);
+	define("XMLHttpRequest", FakeXhr);
+	try {
+		const snapshots = createNativeSnapshotCache("x");
+		const text = new FakeXhr();
+		(text as unknown as { send(): void }).send();
+		text.finish({ data: { tweet } });
+		await Bun.sleep(1);
+		expect(snapshots.get(id)?.body).toBe(fullText);
+		expect(FakeXhr.sendCalls).toBe(1);
+
+		const jsonId = "1788390000000000998";
+		const json = new FakeXhr();
+		(json as unknown as { send(): void }).send();
+		json.finish({ data: { tweet: { ...tweet, rest_id: jsonId } } }, "json");
+		await Bun.sleep(1);
+		expect(snapshots.get(jsonId)?.body).toBe(fullText);
+
+		const failed = new FakeXhr();
+		failed.status = 500;
+		(failed as unknown as { send(): void }).send();
+		failed.finish({ data: { tweet: { ...tweet, rest_id: "1788390000000000997" } } });
+		await Bun.sleep(1);
+		expect(snapshots.get("1788390000000000997")).toBeUndefined();
+	} finally {
+		for (const [name, value] of Object.entries(priors)) define(name, value);
+	}
+});
