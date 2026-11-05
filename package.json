@@ -40,7 +40,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "dev": "bun run build && bun run db:migrate:local && wrangler dev --config apps/web/dist/server/wrangler.json",
+    "dev": "bun run build && bun run db:migrate:local && wrangler dev --config apps/web/dist/server/wrangler.json --persist-to .wrangler/state",
     "build": "bun run --filter web build:cloudflare",
     "db:generate": "bun run --filter @anansi/db db:generate",
     "db:studio": "bun run --filter @anansi/db db:studio",
