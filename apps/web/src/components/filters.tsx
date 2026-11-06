@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, sourceLabel, type Creator, type ItemQuery } from "../lib/api.ts";
+import { api, LIBRARY_SOURCES, sourceLabel, type Creator, type ItemQuery } from "../lib/api.ts";
 import { SourceMark } from "./sourcemark.tsx";
 import { storedAvatarSource } from "./avatar.tsx";
 
@@ -57,12 +57,10 @@ interface Field {
  * ever return nothing is not worth a row in a menu — so this is the full set
  * and the count decides what appears.
  */
-const SOURCES: { value: string; label: string }[] = [
-  { value: "x", label: sourceLabel("x") },
-  { value: "github", label: sourceLabel("github") },
-  { value: "reddit", label: sourceLabel("reddit") },
-  { value: "web", label: sourceLabel("web") },
-];
+const SOURCES: { value: string; label: string }[] = LIBRARY_SOURCES.map((value) => ({
+  value,
+  label: sourceLabel(value),
+}));
 
 const MEDIA: Option[] = [
   { value: "any", label: "Has media" },

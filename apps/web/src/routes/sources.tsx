@@ -416,8 +416,9 @@ function SourceCard({
 				>
 					{row.note}
 				</p>
-				<Status text={status.text} tone={status.tone} />
-				{row.source === "tiktok" && (
+				{/* The extension card above already reports a lost connection once. */}
+				{status.state !== "disconnected" && <Status text={status.text} tone={status.tone} />}
+				{row.source === "tiktok" && row.items === 0 && status.state === "failed" && (
 					<p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--accent-text)" }}>
 						Sign in to TikTok, then open the Anansi extension and press Import.
 					</p>

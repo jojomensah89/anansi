@@ -318,6 +318,9 @@ function itemParams(opts: ItemQuery): URLSearchParams {
   return q;
 }
 
+/** Display order for every source the library shows. A test keeps it complete. */
+export const LIBRARY_SOURCES = ["x", "github", "reddit", "tiktok", "web"] as const;
+
 export function sourceLabel(source: string): string {
   return ({
     x: "X bookmarks",

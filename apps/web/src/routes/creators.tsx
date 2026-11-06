@@ -11,17 +11,12 @@ import {
 	useSlowLoad,
 } from "../components/skeleton.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
-import { api, sourceLabel } from "../lib/api.ts";
+import { api, LIBRARY_SOURCES, sourceLabel } from "../lib/api.ts";
 import { useCreatorsQuery } from "../lib/creators-query.ts";
 import { libraryKeys } from "../lib/library-query.ts";
 
 /** The same source vocabulary the library uses. */
-const PLATFORMS = [
-	{ value: "x", label: sourceLabel("x") },
-	{ value: "github", label: sourceLabel("github") },
-	{ value: "reddit", label: sourceLabel("reddit") },
-	{ value: "web", label: sourceLabel("web") },
-];
+const PLATFORMS = LIBRARY_SOURCES.map((value) => ({ value, label: sourceLabel(value) }));
 
 export const Route = createFileRoute("/creators")({ component: Creators });
 

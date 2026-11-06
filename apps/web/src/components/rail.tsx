@@ -16,7 +16,7 @@ import {
 import { CountBone, useSlowLoad } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 import { ExtensionIcon } from "./extension-icon.tsx";
-import { api, sourceLabel, type ExtensionHealth } from "../lib/api.ts";
+import { api, LIBRARY_SOURCES, sourceLabel, type ExtensionHealth } from "../lib/api.ts";
 import { extensionLabel } from "../lib/source-state.ts";
 import { GITHUB_URL, X_URL } from "../lib/links.ts";
 
@@ -143,7 +143,7 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 					<SidebarGroupLabel className="anansi-rail-sources mono">Sources</SidebarGroupLabel>
 					<SidebarGroupContent>
 						<SidebarMenu>
-							{(["x", "github", "reddit", "web"] as const).map((source) => {
+							{LIBRARY_SOURCES.map((source) => {
 								return (
 									<SidebarMenuItem key={source}>
 										<SidebarMenuButton render={<Link to="/" search={{ source: [source] }} />} tooltip={sourceLabel(source)} aria-label={sourceLabel(source)}>
