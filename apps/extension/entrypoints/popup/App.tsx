@@ -1,3 +1,4 @@
+import { SAVE_CONFIRMATION_SETTING } from "../../lib/save-toast.ts";
 import type {
   ExtensionRemoteConfig,
   ExtensionSourceConfig,
@@ -162,9 +163,16 @@ export default function App() {
   const [mirrorNote, setMirrorNote] = useState<string | null>(null);
   const [startingSources, setStartingSources] = useState<Set<string>>(() => new Set());
   const [isRetrying, setIsRetrying] = useState(false);
+  const [saveConfirmations, setSaveConfirmations] = useState(false);
 
   useEffect(() => {
     void mirror("mirror-status").then((r) => setMirroring(r?.mirroring ?? false));
+  }, []);
+
+  useEffect(() => {
+    void browser.storage.local
+      .get(SAVE_CONFIRMATION_SETTING)
+      .then((stored) => setSaveConfirmations(stored[SAVE_CONFIRMATION_SETTING] === true));
   }, []);
 
   useEffect(() => {
@@ -475,10 +483,11 @@ export default function App() {
   /** Everything one row needs, entirely from persisted state. */
   const viewOf = (s: ExtensionSourceConfig & { enabled: boolean; configured: boolean }) => {
     if (!s.configured && config === null) {
+      // The header reports the connection once; it is not a fact about this source.
       return {
         state: "ready" as const,
-        text: connectionState.message,
-        tone: connectionState.kind === "loading" ? ("faint" as const) : ("warn" as const),
+        text: "",
+        tone: "faint" as const,
         action: "none" as const,
         actionLabel: "Import",
         settled: false,
@@ -691,7 +700,7 @@ export default function App() {
             />
           </div>
 
-          {connectError && (
+          {connectError && !legacyQueueNeedsDecision && (
             <div
               style={{
                 padding: "8px 10px",
@@ -1197,6 +1206,56 @@ export default function App() {
                 height: 14,
                 borderRadius: "50%",
                 background: mirroring ? S.ok : S.faint,
+              }}
+            />
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            padding: "11px 16px",
+            borderTop: `1px solid ${S.line}`,
+          }}
+        >
+          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Save confirmations</span>
+            <span style={{ fontSize: 11, color: S.muted }}>
+              {saveConfirmations ? "Shown beside the button" : "Off. Problems are still shown"}
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={saveConfirmations}
+            aria-label="Show save confirmations"
+            onClick={() => {
+              const next = !saveConfirmations;
+              setSaveConfirmations(next);
+              void browser.storage.local.set({ [SAVE_CONFIRMATION_SETTING]: next });
+            }}
+            style={{
+              width: 36,
+              height: 20,
+              flexShrink: 0,
+              borderRadius: 10,
+              padding: "0 2px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: saveConfirmations ? "flex-end" : "flex-start",
+              background: saveConfirmations ? "var(--anansi-mirror-surface)" : S.raised,
+              border: `1px solid ${saveConfirmations ? "var(--anansi-mirror-border)" : S.edge}`,
+              cursor: "pointer",
+            }}
+          >
+            <span
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: "50%",
+                background: saveConfirmations ? S.ok : S.faint,
               }}
             />
           </button>

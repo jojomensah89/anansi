@@ -96,7 +96,7 @@ describe("rejectedSaveAction", () => {
 });
 
 describe("deliverWithConfirmation", () => {
-	const run = (results: Array<{ ok: boolean; error?: string } | Error>) => {
+	const run = (results: Array<{ ok: boolean; error?: string; confirm?: boolean } | Error>) => {
 		const notified: SaveOutcome[] = [];
 		const retries: Array<() => void> = [];
 		let index = 0;
@@ -113,14 +113,30 @@ describe("deliverWithConfirmation", () => {
 	};
 
 	test("confirms once when the worker stores the save", async () => {
-		const h = run([{ ok: true }]);
+		const h = run([{ ok: true, confirm: true }]);
 		await h.started;
 		expect(h.notified).toEqual(["stored"]);
 		expect(h.retries.length).toBe(0);
 	});
 
+	test("stays silent on success when confirmations are off", async () => {
+		const h = run([{ ok: true, confirm: false }]);
+		await h.started;
+		expect(h.notified).toEqual([]);
+	});
+
+	test("failures still show with confirmations off, and a later success corrects them", async () => {
+		const h = run([new Error("down"), new Error("down"), { ok: true, confirm: false }]);
+		await h.started;
+		for (let i = 0; i < 2; i++) {
+			h.retries[i]?.();
+			await Bun.sleep(0);
+		}
+		expect(h.notified).toEqual(["failed", "stored"]);
+	});
+
 	test("a worker restart stays silent if the retry succeeds", async () => {
-		const h = run([new Error("worker restarting"), { ok: true }]);
+		const h = run([new Error("worker restarting"), { ok: true, confirm: true }]);
 		await h.started;
 		expect(h.notified).toEqual([]);
 		h.retries[0]?.();
@@ -129,7 +145,7 @@ describe("deliverWithConfirmation", () => {
 	});
 
 	test("reports failure on the second miss, keeps retrying, and corrects itself", async () => {
-		const h = run([new Error("down"), new Error("down"), new Error("down"), { ok: true }]);
+		const h = run([new Error("down"), new Error("down"), new Error("down"), { ok: true, confirm: true }]);
 		await h.started;
 		for (let i = 0; i < 3; i++) {
 			h.retries[i]?.();
@@ -139,7 +155,7 @@ describe("deliverWithConfirmation", () => {
 	});
 
 	test("says the extension is disconnected straight away", async () => {
-		const h = run([{ ok: false, error: "connect to Anansi before capturing" }, { ok: true }]);
+		const h = run([{ ok: false, error: "connect to Anansi before capturing" }, { ok: true, confirm: true }]);
 		await h.started;
 		expect(h.notified).toEqual(["disconnected"]);
 		h.retries[0]?.();

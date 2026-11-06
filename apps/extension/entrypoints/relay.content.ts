@@ -119,7 +119,7 @@ export default defineContentScript({
     // an already-open SPA tab may never get another tabs.onUpdated event.
     const source = captureSourceFromUrl(window.location.href);
     if (!source) return;
-    {
+    const announce = () =>
       void browser.runtime.sendMessage({
         anansi: "page-event",
         messageVersion: MESSAGE_PROTOCOL_VERSION,
@@ -129,6 +129,10 @@ export default defineContentScript({
         queryId: null,
         relay: true,
       }).catch(() => {});
-    }
+    announce();
+    // A page restored from history resumes with this relay and its old nonce.
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) announce();
+    });
   },
 });

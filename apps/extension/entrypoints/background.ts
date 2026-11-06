@@ -61,6 +61,9 @@ import {
 } from "../lib/page-capture.ts";
 import { createLiveCapture } from "../lib/live-capture.ts";
 import { captureAdapter, isSessionCaptureSource, platformCanonicalUrl, platformEntryUrl, platformTabPatterns, shouldRefreshTopOnResume } from "../lib/platforms/registry.ts";
+import { createDocumentNonces } from "../lib/document-nonces.ts";
+import { createRunDeadlines } from "../lib/run-deadline.ts";
+import { SAVE_CONFIRMATION_SETTING } from "../lib/save-toast.ts";
 import {
 	nativeHandoffStorageKey,
 	parseNativeHandoffStoreRequest,
@@ -123,9 +126,16 @@ const ALARM = SYNC_ALARM;
 const OUTBOX_ALARM = "anansi-outbox";
 const HEARTBEAT_ALARM = "anansi-heartbeat";
 const SOURCE_RUN_RECOVERY_ALARM_PREFIX = "anansi-source-run-recovery:";
+/** Long enough to sit out TikTok's rate limit between two pages. */
+const OBSERVED_RUN_STALL_MS = 150_000;
+const PAGE_RUN_STALL_MS = 180_000;
+const runDeadlines = createRunDeadlines<ReturnType<typeof setTimeout>>({
+	schedule: (run, ms) => setTimeout(run, ms),
+	cancel: (timer) => clearTimeout(timer),
+});
 const CAPTURE_SOURCES = EXTENSION_PLATFORM_SOURCES;
 const HEARTBEAT_SOURCES = SHIPPED_CAPTURE_SOURCES;
-const tabNonces = new Map<number, string>();
+const documentNonces = createDocumentNonces();
 const identifiedPageRuns = new Map<string, string>();
 
 let cached: ServerCache<RemoteConfig> | null = null;
@@ -713,7 +723,8 @@ async function handleNativeHandoffStore(
 		await scheduleEarliestAlarm(browser.alarms, NATIVE_CAPTURE_ALARM, Date.now() + 30_000);
 	}
 	await wakeDurableQueue().catch(() => {});
-	return { ok: true };
+	const setting = await browser.storage.local.get(SAVE_CONFIRMATION_SETTING);
+	return { ok: true, confirm: setting[SAVE_CONFIRMATION_SETTING] === true };
 }
 
 /** Migrate old id-only pending saves once, then preserve their new identity. */
@@ -1163,7 +1174,9 @@ async function startCapture(
 	}
 
 	let target: { id: number; ours: boolean } | null = null;
-	const existing = await findTab(source);
+	// An import that navigates must not take over a tab the person is using, and
+	// only a tab it opened is one it may close afterward.
+	const existing = captureAdapter(source).ownsImportTab ? undefined : await findTab(source);
 	if (existing?.id) target = { id: existing.id, ours: false };
 	else {
 		await patchStatus(source, { message: `opening ${entry.host}…` });
@@ -1299,7 +1312,7 @@ async function startCapture(
 			return;
 		}
 		if (target.ours) {
-			setTimeout(() => void expireOwnedRun(source, tab.id, runId), 90_000);
+			runDeadlines.start(runId, OBSERVED_RUN_STALL_MS, () => void expireOwnedRun(source, tab.id, runId));
 		}
 		return;
 	}
@@ -1366,9 +1379,9 @@ async function startCapture(
 		return;
 	}
 
-	// Close a tab we opened once the run reports in, or after a ceiling.
+	// Close a tab we opened once the run reports in, or when it stops progressing.
 	if (target.ours) {
-		setTimeout(() => void expireOwnedRun(source, tab.id, runId), 180_000);
+		runDeadlines.start(runId, PAGE_RUN_STALL_MS, () => void expireOwnedRun(source, tab.id, runId));
 	}
 }
 
@@ -1685,11 +1698,14 @@ type BackgroundResult =
 			snapshot?: Awaited<ReturnType<typeof durableSnapshot>>;
 			/** Whether Chrome bookmark mirroring is on and still permitted. */
 			mirroring?: boolean;
+			/** Whether the page should confirm this save to the person. */
+			confirm?: boolean;
 	  }
 	| { ok: false; error: string };
 
 interface RuntimeMessageSender {
 	url?: string;
+	documentId?: string;
 	tab?: { id?: number; url?: string };
 }
 
@@ -1720,16 +1736,17 @@ function validateRuntimeMessage(
 		});
 	}
 
-	// On a service-worker restart the map is empty. The first event can seed it
-	// because only our isolated-world relay can call runtime.sendMessage; the
-	// page itself can only reach that relay, which already checked the nonce.
-	const expectedNonce = tabNonces.get(tabId as number) ?? claimedNonce(message);
+	// The first event from a document can seed its nonce because only our
+	// isolated-world relay can call runtime.sendMessage; the page itself can only
+	// reach that relay, which already checked the nonce.
+	const document = { tabId: tabId as number, ...(sender.documentId ? { documentId: sender.documentId } : {}) };
+	const expectedNonce = documentNonces.expected(document, message, claimedNonce(message));
 	const parsed = parseExtensionMessage(message, {
 		path: "runtime-to-background",
 		sender: { kind: "tab", url: senderUrl },
 		expectedNonce,
 	});
-	if (parsed.ok) tabNonces.set(tabId as number, expectedNonce);
+	if (parsed.ok) documentNonces.remember(document, expectedNonce);
 	return parsed;
 }
 
@@ -1902,6 +1919,7 @@ async function handlePageEvent(
 				}
 				if (accepted.kind === "ignored-stale" || accepted.kind === "disabled")
 					return { ok: true };
+				if (msg.runId) runDeadlines.progress(msg.runId);
 			}
 			await patchStatusForRun(source, msg.runId ?? "", {
 				pages: msg.page,
@@ -1929,6 +1947,7 @@ async function handlePageEvent(
 			await applyImportEffects(accepted.effects);
 			if (accepted.kind === "queue-failed") return { ok: false, error: accepted.errorCode ?? "capture queue rejected the page" };
 			if (accepted.kind !== "accepted-page") return { ok: true };
+			runDeadlines.progress(msg.runId);
 			const current = await readStatus(source);
 			await patchStatusForRun(source, msg.runId, {
 				lastRun: Date.now(),

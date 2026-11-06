@@ -140,6 +140,9 @@ export function rejectedSaveAction(data: unknown, nonce: string): SaveAction | n
 	return message.bookmarkAction === "save" || message.bookmarkAction === "unsave" ? message.bookmarkAction : null;
 }
 
+/** Off by default. Failures are always shown, because they mean a lost save. */
+export const SAVE_CONFIRMATION_SETTING = "anansiShowSaveConfirmations";
+
 const NOT_CONNECTED = "connect to Anansi before capturing";
 
 /**
@@ -149,7 +152,7 @@ const NOT_CONNECTED = "connect to Anansi before capturing";
  * the person, and a later success corrects that message.
  */
 export function deliverWithConfirmation(deps: {
-	send: () => Promise<{ ok?: boolean; error?: string } | undefined>;
+	send: () => Promise<{ ok?: boolean; error?: string; confirm?: boolean } | undefined>;
 	notify: (outcome: SaveOutcome) => void;
 	retryLater: (again: () => void) => void;
 }): Promise<void> {
@@ -164,7 +167,8 @@ export function deliverWithConfirmation(deps: {
 		try {
 			const result = await deps.send();
 			if (result?.ok) {
-				tell("stored");
+				// Always correct a failure already on screen, even with confirmations off.
+				if (result.confirm || last !== null) tell("stored");
 				return;
 			}
 			if (result?.error === NOT_CONNECTED) tell("disconnected");

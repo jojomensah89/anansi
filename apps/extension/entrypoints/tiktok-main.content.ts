@@ -35,6 +35,8 @@ import {
   readHandle,
   readAccountInfo,
   readHandleFromProfileHref,
+  isEndOfFavourites,
+  nextFavouritesUrl,
   readItemList,
   readFavouriteMutation,
   isSuccessfulMutationResponse,
@@ -97,14 +99,26 @@ export default defineContentScript({
     let sawFavoritesResponse = false;
     /** Set by any observed Favourites page that said there is more. */
     let moreToLoad = true;
+    /** TikTok's own Favourites request, reused for later pages. */
+    let favouritesUrl: string | null = null;
+    let nextCursor: string | null = null;
+    let favouritesResponses = 0;
 
     /** Only pass on a Favourites payload that actually carries items. */
     const forward = (operation: string, raw: unknown) => {
+      if (isEndOfFavourites(raw)) {
+        sawFavoritesResponse = true;
+        moreToLoad = false;
+        favouritesResponses++;
+        return;
+      }
       if (!raw || typeof raw !== "object" ||
         (!Array.isArray((raw as { itemList?: unknown }).itemList) && !Array.isArray((raw as { items?: unknown }).items))) return;
       sawFavoritesResponse = true;
       const page = readItemList(raw);
       moreToLoad = page.hasMore;
+      nextCursor = page.cursor;
+      favouritesResponses++;
       if (page.count === 0) return;
       if (activeRunId) send({ action: "observed", operation, raw, items: page.count, runId: activeRunId });
     };
@@ -317,6 +331,7 @@ export default defineContentScript({
       try {
         const operation = matchUrl(url);
         if (operation) {
+          favouritesUrl = url;
           res.clone().json().then((raw) => forward(operation, raw)).catch(() => {});
         }
         if (mutationRequest && capturePromise) {
@@ -363,6 +378,7 @@ export default defineContentScript({
         requestUrls.set(this, String(url));
         const operation = matchUrl(String(url));
         if (operation) {
+          favouritesUrl = String(url);
           this.addEventListener("load", () => {
             try {
               forward(operation, xhrResponseJson(this));
@@ -526,6 +542,34 @@ export default defineContentScript({
       }
     };
 
+    /**
+     * Ask for each remaining page directly.
+     *
+     * A background tab barely scrolls or lazy-loads, so scrolling stopped after
+     * TikTok's first page. These requests go through the page's own fetch, and
+     * the observers above receive each response exactly as they do TikTok's.
+     */
+    const pageThroughFavourites = async () => {
+      const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      for (let wait = 0; wait < 40 && !sawFavoritesResponse; wait++) await delay(250);
+      let limited = 0;
+      for (let step = 0; step < 400 && moreToLoad && nextCursor && favouritesUrl && activeRunId; step++) {
+        const url = nextFavouritesUrl(favouritesUrl, nextCursor);
+        if (!url) return;
+        const seen = favouritesResponses;
+        const res = await window.fetch(url, { credentials: "include" });
+        if (res.status === 429 && limited++ < 5) {
+          await delay(60_000);
+          continue;
+        }
+        if (!res.ok) return;
+        for (let wait = 0; wait < 20 && favouritesResponses === seen; wait++) await delay(150);
+        // No usable response: leave the rest to the scroll fallback.
+        if (favouritesResponses === seen) return;
+        await delay(1_500);
+      }
+    };
+
     // ---- commands from the relay ------------------------------------------
 
     window.addEventListener("message", (event) => {
@@ -568,6 +612,7 @@ export default defineContentScript({
         scanning = true;
         moreToLoad = true;
         sawFavoritesResponse = false;
+        nextCursor = null;
         void (async () => {
           /**
            * Whatever happens, say so and let the next run start.
@@ -587,7 +632,8 @@ export default defineContentScript({
               if (activeRunId) send({ action: "error", errorCode: "capture_failed", runId: activeRunId });
               return;
             }
-            await scan();
+            await pageThroughFavourites().catch(() => {});
+            if (moreToLoad) await scan();
             if (sawFavoritesResponse && !moreToLoad && activeRunId) send({ action: "scanned", runId: activeRunId });
             else if (activeRunId) send({ action: "error", errorCode: "capture_failed", runId: activeRunId });
           } catch {

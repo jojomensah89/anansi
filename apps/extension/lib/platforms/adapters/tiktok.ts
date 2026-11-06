@@ -71,6 +71,7 @@ export const tiktokCaptureAdapter = {
 	tabPatterns: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
 	entryUrl: "https://www.tiktok.com/",
 	importMode: "page",
+	ownsImportTab: true,
 	isExternalId: (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value),
 	canonicalUrl: (id: string) => `https://www.tiktok.com/video/${id}`,
 	parsePage: (raw: unknown, importedAt: number) => parseItemList(raw, { importedAt }),
