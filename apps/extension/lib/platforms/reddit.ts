@@ -112,19 +112,21 @@ export function readSaveMutation(url: string, body: unknown): SaveMutation | nul
 	const path = pathnameOf(url);
 	if (path === "/svc/shreddit/graphql") {
 		const request = readJsonRecord(body);
-		if (request?.operation !== "UpdatePostSaveState") return null;
-		const input = (request.variables as Record<string, unknown> | undefined)?.input;
+		const operation = request?.operation;
+		if (operation !== "UpdatePostSaveState" && operation !== "UpdateCommentSaveState") return null;
+		const isPost = operation === "UpdatePostSaveState";
+		const input = (request?.variables as Record<string, unknown> | undefined)?.input;
 		if (!isRecord(input)) return null;
-		const id = input.postId;
+		const id = isPost ? input.postId : input.commentId;
 		if (typeof id !== "string" || !FULLNAME.test(id)) return null;
 		const fullname = id.toLowerCase();
-		if (!fullname.startsWith("t3_")) return null;
+		if (!fullname.startsWith(isPost ? "t3_" : "t1_")) return null;
 		const saveState = input.saveState;
-		if (saveState !== "SAVED" && saveState !== "NONE") return null;
+		if (saveState !== "SAVED" && saveState !== "UNSAVED" && saveState !== "NONE") return null;
 		return {
 			action: saveState === "SAVED" ? "save" : "unsave",
 			fullname,
-			kind: "post",
+			kind: isPost ? "post" : "comment",
 			transport: "shreddit-graphql",
 		};
 	}
@@ -157,11 +159,17 @@ function hasNoErrors(value: unknown): boolean {
 /** A response can confirm a save even when the page-owned request body is unreadable. */
 export function isRedditGraphqlSaveResponseAccepted(responseBody: unknown): boolean {
 	const response = readJsonRecord(responseBody);
-	if (!response || (response.operation !== undefined && response.operation !== "UpdatePostSaveState")) {
+	if (
+		!response ||
+		(response.operation !== undefined &&
+			response.operation !== "UpdatePostSaveState" &&
+			response.operation !== "UpdateCommentSaveState")
+	) {
 		return false;
 	}
 	if (!hasNoErrors(response.errors)) return false;
-	const payload = (response.data as Record<string, unknown> | undefined)?.updatePostSaveState;
+	const data = response.data as Record<string, unknown> | undefined;
+	const payload = data?.updatePostSaveState ?? data?.updateCommentSaveState;
 	return isRecord(payload) && payload.ok === true && hasNoErrors(payload.errors);
 }
 
