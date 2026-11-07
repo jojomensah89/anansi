@@ -66,7 +66,10 @@ export interface PlatformCaptureAdapter<S extends ExtensionPlatformSource> {
 	readonly entryUrl: string;
 	readonly importMode: "page" | "session";
 	readonly refreshTopOnResume?: boolean;
-	/** The import navigates, so it always opens and later closes its own tab. */
+	/**
+	 * The import navigates and needs a rendered page, so it opens its own small
+	 * window and closes it afterward.
+	 */
 	readonly ownsImportTab?: boolean;
 	readonly isExternalId: (value: unknown) => value is string;
 	readonly canonicalUrl: (externalId: string) => string;

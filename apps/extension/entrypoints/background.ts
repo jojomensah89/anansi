@@ -62,6 +62,7 @@ import {
 import { createLiveCapture } from "../lib/live-capture.ts";
 import { captureAdapter, isSessionCaptureSource, platformCanonicalUrl, platformEntryUrl, platformTabPatterns, shouldRefreshTopOnResume } from "../lib/platforms/registry.ts";
 import { createDocumentNonces } from "../lib/document-nonces.ts";
+import { importWindowBounds } from "../lib/import-window.ts";
 import { createRunDeadlines } from "../lib/run-deadline.ts";
 import { SAVE_CONFIRMATION_SETTING } from "../lib/save-toast.ts";
 import {
@@ -1003,13 +1004,32 @@ async function findTab(source: PlatformSource, expectedUrl?: string) {
  * Opened inactive, so an import does not yank you out of what you were doing,
  * and closed again afterwards if we were the ones who opened it.
  */
+/** Falls back to a tab, which still captures the first page of a list. */
+async function openImportWindow(url: string) {
+	try {
+		const anchor = await browser.windows.getLastFocused().catch(() => null);
+		const opened = await browser.windows.create({
+			url,
+			type: "popup",
+			// Opened unfocused it lands behind the browser, where it counts as hidden.
+			focused: true,
+			...importWindowBounds(anchor),
+		});
+		return opened?.tabs?.[0] ?? null;
+	} catch {
+		return await browser.tabs.create({ url, active: false });
+	}
+}
+
 async function openTab(
 	source: PlatformSource,
 	preferredUrl?: string,
 ): Promise<{ id: number; ours: boolean } | null> {
 	const url = preferredUrl ?? platformEntryUrl(source);
-	const tab = await browser.tabs.create({ url, active: false });
-	if (!tab.id) return null;
+	const tab = captureAdapter(source).ownsImportTab
+		? await openImportWindow(url)
+		: await browser.tabs.create({ url, active: false });
+	if (!tab?.id) return null;
 
 	const id = tab.id;
 	await new Promise<void>((resolve) => {
@@ -1024,6 +1044,13 @@ async function openTab(
 			if (tabId === id && info.status === "complete") finish();
 		}
 		browser.tabs.onUpdated.addListener(onUpdated);
+		// A fast page can finish before the listener above was attached.
+		void browser.tabs
+			.get(id)
+			.then((current) => {
+				if (current.status === "complete" && current.url && current.url !== "about:blank") finish();
+			})
+			.catch(() => {});
 	});
 
 	return { id, ours: true };

@@ -104,24 +104,6 @@ export function readItemList(raw: unknown): ItemListPage {
 	};
 }
 
-/**
- * The next Favourites request, built from one TikTok made itself.
- *
- * Its own account and device parameters are kept. Signatures are removed
- * because they cover the old cursor, and TikTok's page code adds fresh ones.
- */
-export function nextFavouritesUrl(template: string, cursor: string): string | null {
-	try {
-		const url = new URL(template, "https://www.tiktok.com");
-		if (url.protocol !== "https:" || (url.hostname !== "www.tiktok.com" && url.hostname !== "tiktok.com")) return null;
-		for (const name of ["X-Bogus", "X-Gnarly", "_signature"]) url.searchParams.delete(name);
-		url.searchParams.set("cursor", cursor);
-		return url.href;
-	} catch {
-		return null;
-	}
-}
-
 /** TikTok ends a list with a success response that may carry no list at all. */
 export function isEndOfFavourites(raw: unknown): boolean {
 	const root = raw as Any | null;

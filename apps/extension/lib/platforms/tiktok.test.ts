@@ -18,7 +18,6 @@ import {
 	readHandleFromProfileHref,
 	readItemList,
 	isEndOfFavourites,
-	nextFavouritesUrl,
 } from "./tiktok.ts";
 
 const CONFIG = { watchUrls: ["/api/user/collect/item_list"] };
@@ -31,24 +30,6 @@ test("reads the signed-in TikTok account response without mistaking an unknown r
 });
 
 describe("favourites paging", () => {
-	test("builds the next request from TikTok's own, without the old signature", () => {
-		const next = nextFavouritesUrl(
-			"https://www.tiktok.com/api/user/collect/item_list/?aid=1988&secUid=abc&count=30&cursor=0&msToken=t&X-Bogus=old&X-Gnarly=old",
-			"1730000000000",
-		);
-		const url = new URL(next!);
-		expect(url.searchParams.get("cursor")).toBe("1730000000000");
-		expect(url.searchParams.get("secUid")).toBe("abc");
-		expect(url.searchParams.get("X-Bogus")).toBeNull();
-		expect(url.searchParams.get("X-Gnarly")).toBeNull();
-	});
-
-	test("resolves a relative request and refuses other hosts", () => {
-		expect(nextFavouritesUrl("/api/user/collect/item_list/?cursor=0", "5")).toBe("https://www.tiktok.com/api/user/collect/item_list/?cursor=5");
-		expect(nextFavouritesUrl("https://evil.example/api/user/collect/item_list/", "5")).toBeNull();
-		expect(nextFavouritesUrl("http://www.tiktok.com/api/", "5")).toBeNull();
-	});
-
 	test("recognizes the empty response that ends a list", () => {
 		expect(isEndOfFavourites({ statusCode: 0, hasMore: false })).toBe(true);
 		expect(isEndOfFavourites({ statusCode: 0, hasMore: true })).toBe(false);
