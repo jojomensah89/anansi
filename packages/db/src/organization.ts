@@ -101,7 +101,7 @@ export async function restoreLibrary(db: AnansiDb, backup: LibraryExport): Promi
     ...backup.highlights.map((row) => tx.insert(highlights).values(row)),
     // Exported keys refer to a separate binary backup. Clearing them queues a
     // fresh download, rather than promising bytes this installation does not have.
-    ...backup.media.map((row) => tx.insert(media).values({ ...row, storedKey: null })),
+    ...backup.media.map((row) => tx.insert(media).values({ ...row, storedKey: null }).onConflictDoNothing({ target: [media.itemId, media.identity] })),
     ...backup.collections.map((row) => tx.insert(collections).values(row).onConflictDoNothing()),
   ]);
 }

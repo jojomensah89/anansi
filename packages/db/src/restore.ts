@@ -137,7 +137,7 @@ export async function writeLibraryRestoreChunk(db: AnansiDb, input: { backupId: 
         case "itemSourceLinks": return tx.insert(itemSourceLinks).values(row as typeof itemSourceLinks.$inferInsert);
         case "highlights": return tx.insert(highlights).values(row as typeof highlights.$inferInsert);
         // R2 objects are outside the JSON export. Never revive stale keys.
-        case "media": return tx.insert(media).values({ ...(row as typeof media.$inferInsert), storedKey: null });
+        case "media": return tx.insert(media).values({ ...(row as typeof media.$inferInsert), storedKey: null }).onConflictDoNothing({ target: [media.itemId, media.identity] });
         case "collections": return tx.insert(collections).values(row as typeof collections.$inferInsert);
       }
     }),

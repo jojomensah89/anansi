@@ -17,7 +17,7 @@ export async function limitPublicRequest(request: Request, env: SecurityBindings
   if (path === "/api/auth/session" && request.method === "POST") {
     limiter = env.LOGIN_RATE_LIMITER;
     group = "login";
-  } else if (path === "/api/ingest" || path.startsWith("/api/extension/")) {
+  } else if (path === "/api/connect/redeem" || path === "/api/ingest" || path.startsWith("/api/extension/")) {
     limiter = env.INGEST_RATE_LIMITER;
     group = "extension";
   } else if (path === "/mcp" && request.method === "POST") {

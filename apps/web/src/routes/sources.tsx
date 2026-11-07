@@ -1,4 +1,3 @@
-import { SyncControls } from "../components/sync-controls.tsx";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Rail } from "../components/rail.tsx";
@@ -141,6 +140,7 @@ function Sources() {
 				authors={stats.authors}
 				archived={stats.archived}
 				bySource={stats.bySource}
+                ready={data!==null}
 			/>
 
 			<main
@@ -151,8 +151,8 @@ function Sources() {
 					minWidth: 0,
 				}}
 			>
-				<SyncControls settings/>
-				<header
+
+				<header className="sources-header"
 					style={{
 						height: 52,
 						flexShrink: 0,
@@ -166,7 +166,7 @@ function Sources() {
 					<span style={{ fontSize: 14, fontWeight: 600 }}>Sources</span>
 					<span
 						className="mono"
-						style={{ fontSize: 11, color: "var(--faint)" }}
+						style={{ fontSize: 12, color: "var(--faint)" }}
 					>
 						capture and import status
 					</span>
@@ -250,7 +250,7 @@ function Tabs({
 						border: "none",
 						background: value === next ? "var(--raised)" : "transparent",
 						color: value === next ? "var(--text)" : "var(--muted)",
-						fontSize: 11.5,
+						fontSize: 12,
 						cursor: "pointer",
 						font: "inherit",
 					}}
@@ -319,7 +319,7 @@ function ExtensionBanner({ extension }: { extension: ExtensionHealth }) {
 						}}
 					/>
 				</span>
-				<span className="mono" style={{ fontSize: 10.5, color: tone.text }}>
+				<span className="mono" style={{ fontSize: 12, color: tone.text }}>
 					{extensionLabel(extension)}
 					{!connected && !neverConnected && extension.lastSeenAt
 						? ` · last seen ${ago(extension.lastSeenAt)}`
@@ -330,7 +330,7 @@ function ExtensionBanner({ extension }: { extension: ExtensionHealth }) {
 				className="mono"
 				style={{
 					marginLeft: "auto",
-					fontSize: 10.5,
+					fontSize: 12,
 					color: "var(--faint)",
 					textAlign: "right",
 				}}
@@ -362,6 +362,7 @@ function SourceCard({
 	const status = sourcePresentation(row, extension);
 	const tone = TONE[status.tone];
 	const manual = row.toolbar + row.contextMenu;
+ const check = extension.sources[row.source as keyof typeof extension.sources];
 
 	return (
 		<article
@@ -375,7 +376,8 @@ function SourceCard({
 				opacity: status.state === "disabled" ? 0.68 : 1,
 			}}
 		>
-			<div style={{ padding: "16px 16px 0", flex: 1 }}>
+
+<div style={{ padding: "16px 16px 0", flex: 1 }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 					<SourceBadge source={row.source} />
 					<span
@@ -389,7 +391,7 @@ function SourceCard({
 						<span style={{ fontSize: 13.5, fontWeight: 600 }}>{row.name}</span>
 						<span
 							className="mono"
-							style={{ fontSize: 10.5, color: "var(--faint)" }}
+							style={{ fontSize: 12, color: "var(--faint)" }}
 						>
 							{row.host}
 						</span>
@@ -411,7 +413,7 @@ function SourceCard({
 					style={{
 						margin: "12px 0 0",
 						minHeight: 37,
-						fontSize: 12,
+						fontSize: 14,
 						color: "var(--muted)",
 						lineHeight: 1.55,
 					}}
@@ -421,7 +423,7 @@ function SourceCard({
 				{/* The extension card above already reports a lost connection once. */}
 				{status.state !== "disconnected" && <Status text={status.text} tone={status.tone} />}
 				{row.source === "tiktok" && row.items === 0 && status.state === "failed" && (
-					<p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--accent-text)" }}>
+					<p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--accent-text)" }}>
 						Sign in to TikTok, then open the Anansi extension and press Import.
 					</p>
 				)}
@@ -431,7 +433,7 @@ function SourceCard({
 						className="mono"
 						style={{
 							marginBottom: 8,
-							fontSize: 9.5,
+							fontSize: 12,
 							letterSpacing: "0.08em",
 							textTransform: "uppercase",
 							color: "var(--fainter)",
@@ -460,7 +462,7 @@ function SourceCard({
 						className="mono"
 						style={{
 							margin: "13px 0 0",
-							fontSize: 10.5,
+							fontSize: 12,
 							lineHeight: 1.5,
 							color: "var(--faint)",
 						}}
@@ -483,9 +485,10 @@ function SourceCard({
 			>
 				<span
 					className="mono"
-					style={{ fontSize: 10.5, color: "var(--faint)" }}
+					style={{ fontSize: 12, color: "var(--faint)" }}
 				>
 					last capture {ago(row.lastCaptureAt)}
+          {["x", "reddit", "github", "tiktok"].includes(row.source) && <>{"; "}{check?.lastCheckedAt ? `checked ${ago(check.lastCheckedAt)}` : "not checked yet"}{check?.lastErrorCode ? "; check could not finish" : ""}</>}
 				</span>
 				{row.items > 0 && (
 					<Link
@@ -493,7 +496,7 @@ function SourceCard({
 						search={{ source: [row.source] }}
 						style={{
 							marginLeft: "auto",
-							fontSize: 11.5,
+							fontSize: 12,
 							color: "var(--accent-text)",
 						}}
 					>
@@ -521,7 +524,7 @@ function Status({ text, tone: toneName }: { text: string; tone: SourceTone }) {
 				border: `1px solid ${tone.border}`,
 				background: tone.background,
 				color: tone.text,
-				fontSize: 10.5,
+				fontSize: 12,
 			}}
 		>
 			<span
@@ -548,7 +551,7 @@ function Fact({ label, value }: { label: string; value: number }) {
 			>
 				{value.toLocaleString()}
 			</span>
-			<span style={{ fontSize: 10, color: "var(--faint)" }}>{label}</span>
+			<span style={{ fontSize: 12, color: "var(--faint)" }}>{label}</span>
 		</span>
 	);
 }
@@ -585,7 +588,7 @@ function ModeBadge({
 			className="mono"
 			style={{
 				marginLeft: push ? "auto" : undefined,
-				fontSize: 9.5,
+				fontSize: 12,
 				padding: "2px 6px",
 				borderRadius: 3,
 				border: "1px solid var(--edge)",
@@ -666,7 +669,7 @@ function LibraryPreference({
 					Hide items removed at the source
 				</span>
 				<span
-					style={{ fontSize: 11.5, color: "var(--faint)", lineHeight: 1.5 }}
+					style={{ fontSize: 12, color: "var(--faint)", lineHeight: 1.5 }}
 				>
 					Anansi keeps previously captured items. Turn this on when you want the
 					library to mirror only what remains saved on each platform.

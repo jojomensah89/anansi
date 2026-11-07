@@ -1,3 +1,4 @@
+import { retireSelf, authorizeClient, createClient, listClients, retired, retireLegacy, updateClient, redeemPairing } from "./clients.ts";
 import { checkPublicGithub } from "./public-github-sync.ts";
 import {
 	creatorPage,
@@ -25,7 +26,7 @@ import {
   clearSemanticIndex, consumeSemanticCredits, estimateSemanticBackfill, semanticIndexStats,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
-import { authorizeLibrary, sessionRoute, sameSecret, type LibraryAuthEnv } from "./library-auth.ts";
+import { authorizeLibrary, sessionRoute, type LibraryAuthEnv } from "./library-auth.ts";
 import {
 	EXTENSION_PLATFORM_SOURCES,
 	parseExtensionHeartbeat,
@@ -106,14 +107,7 @@ interface Route {
 	handle: (ctx: Ctx) => Response | Promise<Response>;
 }
 
-function authorizeExtension(env: ApiEnv, request: Request): Response | null {
-	if (!env.ingestToken)
-		return json({ error: "extension access is not configured" }, 503);
-	const auth = request.headers.get("authorization") ?? "";
-	return sameSecret(auth, `Bearer ${env.ingestToken}`)
-		? null
-		: json({ error: "unauthorized" }, 401);
-}
+const authorizeExtension = authorizeClient;
 
 /* --------------------------------------------------------- handlers --- */
 
@@ -307,7 +301,7 @@ const extensionHeartbeatRoute: Route = {
 	method: "POST",
 	path: "/api/extension/heartbeat",
 	handle: async ({ env, request }) => {
-		const denied = authorizeExtension(env, request);
+		const denied = await authorizeExtension(env, request);
 		if (denied) return denied;
 		const parsed = parseExtensionHeartbeat(
 			await request.json().catch(() => null),
@@ -598,7 +592,7 @@ const ingestRoute: Route = {
 	method: "POST",
 	path: "/api/ingest",
 	handle: async ({ env, request }) => {
-		const denied = authorizeExtension(env, request);
+		const denied = await authorizeExtension(env, request);
 		if (denied) return denied;
 
 		const result = await ingestCapture(env.db, request);
@@ -661,7 +655,7 @@ const collectionRoutes: Route[] = [
  * Matched in order. `/api/items` has to be tried before `/api/items/:id` only
  * because the second is a pattern; everything else is disjoint.
  */
-const ROUTES: Route[] = [
+export const ROUTES: Route[] = [
 	...(["/api/restore/start", "/api/restore/chunk", "/api/restore/finish", "/api/restore/abort"] as const).map((path): Route => ({ method: "POST", path, handle: ({ env, request }) => handleRestoreRequest(env, request) })),
 	{ method: "GET", path: "/api/restore", handle: ({ env, request }) => handleRestoreRequest(env, request) },
 	itemUpdateRoute, itemTagsRoute("POST"), itemTagsRoute("DELETE"), ...collectionRoutes,
@@ -712,8 +706,41 @@ export async function handleApi(
 	const path = url.pathname.replace(/\/+$/, "");
 
   if (path === "/api/auth/session") return sessionRoute(env, request);
+  if (path === "/api/connect/redeem" && request.method === "POST") {
+    // Browsers send the extension's own Origin on this POST. Web pages cannot claim that scheme.
+    const origin = request.headers.get("origin");
+    if (origin && !/^(chrome|moz)-extension:[/][/][a-z0-9-]+$/i.test(origin)) return json({error:"extension context required"},403);
+    const body = await request.json().catch(()=>null) as {code?: unknown} | null;
+    const result = typeof body?.code === "string" && body.code.length < 100 ? await redeemPairing(env.db,body.code) : null;
+    return Response.json(result ?? {error:"Invalid or expired code"},{status:result ? 200 : 401,headers:{"cache-control":"no-store"}});
+  }
+  if (path === "/api/extension/retire-self" && request.method === "POST") {
+    return await retireSelf(env.db,request) ? json({ok:true}) : json({error:"unauthorized"},401);
+  }
+  if (path === "/api/clients" || path.startsWith("/api/clients/")) {
+    if (request.headers.has("authorization") && await retired(env.db)) return json({error:"Use owner sign-in"},401);
+    const denied=authorizeLibrary(env,request); if (denied) return denied;
+    // Management always requires same-origin, even for explicit owner bearer requests.
+    if (request.method !== "GET" && request.headers.get("origin") !== url.origin) return json({error:"origin is not allowed"},403);
+    let result: unknown;
+    try {
+      if (request.method === "GET" && path === "/api/clients") result={clients:await listClients(env.db),legacyActive:!await retired(env.db)};
+      else if (request.method === "POST" && path === "/api/clients/retire-legacy") { await retireLegacy(env.db); result={ok:true}; }
+      else if (request.method === "POST" && path === "/api/clients") {
+        const body=await request.json() as {scopes?:unknown;kind: "api"|"extension"|"pairing";name:string};
+        if (body.scopes !== undefined || !["api","extension","pairing"].includes(body.kind)) return json({error:"Invalid permissions or kind"},400);
+        result=await createClient(env.db,body.name,body.kind);
+      } else if (["PATCH","DELETE"].includes(request.method) && path.startsWith("/api/clients/")) {
+        const name=request.method === "PATCH" ? (await request.json() as {name?:unknown}).name : undefined;
+        if (request.method === "PATCH" && typeof name !== "string") return json({error:"Invalid name"},400);
+        await updateClient(env.db,path.slice("/api/clients/".length),typeof name === "string" ? name : undefined); result={ok:true};
+      } else return json({error:"not found"},404);
+    } catch { return json({error:"Invalid client request"},400); }
+    return Response.json(result,{headers:{"cache-control":"no-store"}});
+  }
+  if (request.headers.has("authorization") && !path.startsWith("/api/extension/") && path !== "/api/ingest" && await retired(env.db)) return json({error:"Use owner sign-in"},401);
   const isExtension = path === "/api/ingest" || path.startsWith("/api/extension/");
-  const denied = isExtension ? authorizeExtension(env, request) : authorizeLibrary(env, request);
+  const denied = isExtension ? await authorizeExtension(env, request) : authorizeLibrary(env, request);
   if (denied) return denied;
 	if (request.method !== "GET" && !path.startsWith("/api/restore/")) {
 		const restore = await getLibraryRestore(env.db);

@@ -15,7 +15,7 @@ const FIELDS: Record<RestoreTable, { requiredString: string[]; optionalString: s
   itemTagOverrides: { requiredString: ["itemId", "tagId", "override"], optionalString: [], requiredNumber: [], optionalNumber: ["createdAt"] },
   itemSourceLinks: { requiredString: ["kind", "externalId", "itemId"], optionalString: [], requiredNumber: ["observedAt"], optionalNumber: ["present"] },
   highlights: { requiredString: ["id", "itemId", "text"], optionalString: [], requiredNumber: ["createdAt"], optionalNumber: [] },
-  media: { requiredString: ["id", "itemId", "kind", "originUrl"], optionalString: ["storedKey"], requiredNumber: [], optionalNumber: ["width", "height"] },
+  media: { requiredString: ["id", "itemId", "kind", "originUrl"], optionalString: ["storedKey", "identity"], requiredNumber: [], optionalNumber: ["width", "height"] },
   collections: { requiredString: ["id", "name", "filters"], optionalString: [], requiredNumber: ["createdAt", "updatedAt"], optionalNumber: [] },
 };
 const NON_NULL_OPTIONAL: Partial<Record<RestoreTable, readonly string[]>> = {

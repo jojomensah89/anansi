@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { join } from "node:path";
 import { claimMediaJobs, completeMediaJob, failMediaJob } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
@@ -5,6 +6,7 @@ import type { AnansiDb } from "@anansi/db";
 export interface MediaSource {
   bucket?: {
     get(key: string): Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null>;
+    delete?(key: string): Promise<unknown>;
     put?(key: string, bytes: ArrayBuffer, options?: { httpMetadata: { contentType: string } }): Promise<unknown>;
   };
   dir?: string;
@@ -174,6 +176,7 @@ export async function readMedia(source: MediaSource, key: string): Promise<Respo
 }
 export async function fetchPendingMedia(db: AnansiDb, source: MediaSource, limit=4): Promise<{stored:number;failed:number}> {
   if (!source.put && !source.bucket?.put && !source.dir) return {stored:0,failed:0};
+  await cleanupOrphanedMedia(db, source);
   const rows=await claimMediaJobs(db,limit);
   let stored=0,failed=0;
   await Promise.all(rows.map(async row=>{
@@ -207,4 +210,27 @@ function variant(originUrl: string): string {
     url.searchParams.set("format","webp");url.searchParams.set("name","small");
     return url.href;
   } catch { return originUrl; }
+}
+
+/** Only migration-recorded obsolete keys are eligible; no bucket scan or live uploads. */
+export async function cleanupOrphanedMedia(db: AnansiDb, source: MediaSource, limit = 10): Promise<number> {
+  if (!source.bucket?.delete && !source.dir) return 0;
+  const rows = await db.all<{ stored_key: string }>(sql`SELECT stored_key FROM media_orphan_objects ORDER BY stored_key LIMIT ${Math.min(20, Math.max(1, limit))}`);
+  let removed = 0;
+  for (const { stored_key: key } of rows) {
+    if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif)$/.test(key)) continue;
+    const refs = await db.all(sql`SELECT id FROM media WHERE stored_key = ${key} LIMIT 1`);
+    if (!refs.length) {
+      try {
+        if (source.bucket?.delete) await source.bucket.delete(key);
+        else if (source.dir) {
+          const { unlink } = await import("node:fs/promises");
+          await unlink(join(source.dir, key)).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
+        }
+      } catch { continue; } // Retain the queue entry for the next bounded attempt.
+      removed++;
+    }
+    await db.run(sql`DELETE FROM media_orphan_objects WHERE stored_key = ${key}`);
+  }
+  return removed;
 }

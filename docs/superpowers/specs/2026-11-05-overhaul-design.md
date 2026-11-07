@@ -113,11 +113,12 @@ Agent searches also prompt a sync through the same Worker request, with a 15-min
 
 - Add stored clients with names, permissions, last use and revocation.
 - Add the "Connect extension" flow and per-browser capture-only keys.
-- Add API keys and OAuth for MCP, with a maintained OAuth library chosen during this stage.
+- Stage 3A: named read-only API keys for MCP; OAuth is deferred to Stage 3B. Stored kind and scopes permit future OAuth clients.
+- Connect using a five-minute single-use code pasted into the popup after granting origin permission. Keys never enter page scripts. Explicit legacy retirement disables shared extension/MCP credentials.
 - Limit the master secret to owner sign-in and recovery.
 - Add the "Connected clients" screen.
 
-**Proof:** a capture key cannot read the library or call MCP, a revoked client stops working immediately, and at least one OAuth client and one API-key client both connect.
+**Stage 3A proof:** capture keys cannot read the library or call MCP; revocation takes effect on the next request; a read-only API key initializes MCP; key hashes, pairing, CSRF and legacy retirement have automated coverage. OAuth client proof belongs to Stage 3B.
 
 ### 4. Agent surface
 

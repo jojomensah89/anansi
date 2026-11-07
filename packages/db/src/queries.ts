@@ -231,7 +231,10 @@ export async function prepareUpsertItems(
     // An absent remote attachment is not a deletion request. Preserve existing IDs,
     // downloaded keys and job state; only add newly discovered attachments.
     for (let i = 0; i < mediaRows.length; i += CHUNK) {
-      pending.push(target.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoNothing());
+      pending.push(target.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoUpdate({
+        target: [media.itemId, media.identity],
+        set: { originUrl: sql`CASE WHEN ${media.storedKey} IS NULL THEN excluded.origin_url ELSE ${media.originUrl} END` },
+      }));
     }
     for (let i = 0; i < highlightRows.length; i += CHUNK) {
       pending.push(target.insert(highlights).values(highlightRows.slice(i, i + CHUNK)).onConflictDoNothing());

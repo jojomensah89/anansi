@@ -177,7 +177,11 @@ export async function saveExtensionConnection(
 	if (!store) {
 		throw new Error("Extension storage is unavailable");
 	}
-	return store.save(originValue, tokenValue);
+	const previous = await store.get();
+    if (previous && (previous.token !== tokenValue || previous.origin !== originValue)) {
+      await browser.storage.local.set({ anansiPreviousConnection: previous });
+    }
+    return store.save(originValue, tokenValue);
 }
 
 export async function clearExtensionConnection(): Promise<void> {

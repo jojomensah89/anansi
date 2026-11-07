@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { parseExtensionConfig } from "@anansi/sources";
+import { extensionClients } from "@anansi/db";
 import { aiEnrichmentJobs, applyAiTags, getAiSettings, itemTags, items, markSemanticChunksComplete, reconcileAiJobs, searchItemsPage, setAiSettings, stageSemanticChunks, startLibraryRestore, upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
@@ -400,6 +402,8 @@ describe("handleApi", () => {
 
 	test("extension config accepts the ingest credential and names the ingest url", async () => {
 		const body = await readJson(get("/api/extension/config"));
+		// The extension refuses a config it can't parse, so this is what it must read.
+		expect(parseExtensionConfig(body).ok).toBe(true);
 		expect(body.version).toBe(1);
 		expect(body.enabled).toBe(true);
 		expect(body.ingest).toEndWith("/api/ingest");
@@ -493,6 +497,14 @@ describe("handleApi", () => {
 			400,
 		);
 		expect((await send(heartbeat)).status).toBe(200);
+		expect((await send({ ...heartbeat, sources: { x: {
+			...heartbeat.sources.x, newerField: { enabled: true }, token: "must-never-be-stored",
+		} } })).status).toBe(200);
+		const stored = await db.select().from(extensionClients);
+		const client = stored.find(row => row.installationId === heartbeat.installationId);
+		expect(client).toBeDefined();
+		expect(JSON.parse(client!.sources)).toEqual(heartbeat.sources);
+		expect(JSON.stringify(client)).not.toContain("must-never-be-stored");
 
 		const sources = await readJson(get("/api/sources"));
 		expect(sources.extension).toMatchObject({

@@ -18,8 +18,8 @@
   --anansi-edge: #232a31;
   --anansi-text: #e6ebef;
   --anansi-muted: #8d9aa6;
-  --anansi-faint: #5d6874;
-  --anansi-faintest: #414a53;
+  --anansi-faint: #8d9aa6;
+  --anansi-faintest: #8d9aa6;
   --anansi-accent: #e4a33c;
   --anansi-ok: #4fbf8b;
   --anansi-warn: #e0714f;
@@ -96,9 +96,9 @@
 }
 
 .anansi-sources {
-  /* Room for roughly four rows before this scrolls on its own. */
-  max-height: 260px;
-  overflow-y: auto;
+  /* Only the outer popup scrolls; source rows remain in document flow. */
+  max-height: none;
+  overflow: visible;
 }
 
 .anansi-diagnostics summary {

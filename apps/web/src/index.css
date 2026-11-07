@@ -522,3 +522,78 @@ textarea::placeholder {
     padding-right: 12px !important;
   }
 }
+
+/* Connected access: a labelled inventory, with one deliberate reveal moment. */
+.clients-section,.sync-settings {font-size:14px;line-height:1.6;scroll-margin-top:24px}
+.client-section-head {display:flex;align-items:start;justify-content:space-between;gap:24px}
+.clients-section p,.sync-settings p {color:var(--muted);margin:8px 0 16px}
+.client-summary {font-variant-numeric:tabular-nums}
+.client-table-wrap {overflow-x:auto;margin-bottom:24px}
+.client-table {width:100%;border-collapse:collapse;text-align:left;font-size:14px}
+.client-table th {font-size:12px;font-weight:500;color:var(--muted);white-space:nowrap}
+.client-table td,.client-table th {padding:16px 12px;border-bottom:1px solid var(--edge)}
+.client-table td:first-child,.client-table th:first-child {padding-left:0}
+.client-table td {min-width:104px}
+.client-table td:first-child {min-width:168px}
+.client-table strong {font-weight:500}
+.client-actions {display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.clients-section [data-slot=button],.sync-settings [data-slot=button] {font-size:14px;min-height:36px;border-radius:4px}
+.client-panel {padding:24px;margin:24px 0;background:var(--card);border:1px solid var(--edge);border-radius:8px}
+.client-panel h3,.client-empty h3 {font-size:18px;font-weight:500;margin:0 0 8px}
+.client-panel label {display:block;margin-bottom:8px}
+.client-panel input {font-size:14px;min-height:40px;margin-bottom:16px}
+.client-reveal {border-color:var(--accent)}
+.client-reveal code {display:block;font-size:24px;overflow-wrap:anywhere;color:var(--accent-text);margin:24px 0;font-variant-numeric:tabular-nums}
+.client-reveal ol {padding-left:24px;margin:24px 0}
+.client-address {display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px;overflow-wrap:anywhere}
+.client-disclosure {margin:24px 0;color:var(--muted)}
+.client-disclosure summary {cursor:pointer;font-size:14px}
+.client-empty {padding:24px 0}
+.client-modal-backdrop {position:fixed;inset:0;background:rgb(0 0 0 / 70%);z-index:100;display:grid;place-items:center;padding:24px}
+.client-modal {max-width:480px;margin:0}
+.sync-toolbar {display:flex;gap:12px;align-items:center;font-size:12px;color:var(--muted)}
+.sync-toolbar button {background:var(--card);border:1px solid var(--edge);border-radius:4px;padding:4px 12px;color:var(--text);font:inherit;font-size:14px;cursor:pointer}
+.sync-feedback {max-width:280px}
+.source-check {font-size:12px;color:var(--muted);padding:12px 16px;border-top:1px solid var(--edge)}
+@media(max-width:600px){.client-section-head{flex-direction:column;gap:8px}.client-panel{padding:16px}.client-reveal code{font-size:20px}.sync-toolbar{flex-wrap:wrap}.sync-feedback{flex-basis:100%}}
+
+.anansi-settings-page > * {width:min(100%,960px)}
+.clients-section {padding:24px}
+.clients-section [data-slot=button] {transition-property:color,background-color,border-color}
+.clients-section > .client-section-head > [data-slot=button] {background:var(--accent);color:var(--ink)}
+.sync-settings input {background:var(--raised);border:1px solid var(--edge);border-radius:4px;color:var(--text);padding:8px;font:inherit}
+.sync-settings button:not([role=switch]) {background:var(--raised);border:1px solid var(--edge);border-radius:4px;color:var(--text);padding:8px 16px;font:inherit;cursor:pointer}
+@media(max-width:600px){.clients-section{padding:16px}.client-table thead{display:none}.client-table tr{display:grid;grid-template-columns:1fr 1fr;padding:16px 0;border-bottom:1px solid var(--edge);gap:8px}.client-table td{padding:0;border:0;min-width:0}.client-table td:first-child,.client-table td:last-child{grid-column:1/-1}.client-table td:nth-child(4){grid-column:1/-1;color:var(--muted)}.client-table td:first-child{padding-bottom:8px}}
+
+.anansi-shell {max-width:100vw;overflow-x:clip}
+.anansi-settings-page {--faint:var(--muted);--fainter:var(--muted);--faintest:var(--muted)}
+.anansi-settings-subtitle,.anansi-settings-description,.anansi-settings-progress {font-size:14px}
+.anansi-settings-badge {font-size:12px}
+.sync-settings .anansi-settings-copy p {display:block;margin:8px 0 0}
+.sync-settings .anansi-settings-copy {display:block}
+[data-sidebar=group-label] {font-size:12px!important;color:var(--muted)!important;text-transform:none!important;letter-spacing:0!important}
+
+.client-reveal ol {list-style:decimal}
+.anansi-settings-copy strong {font-size:14px;font-weight:600}
+.anansi-settings-icon {background:transparent;border:0}
+@media(max-width:600px){.library-toolbar-actions{flex-wrap:wrap;justify-content:flex-start;width:100%;margin-left:0!important}.library-toolbar-actions>button:first-child{flex:1;width:auto!important;min-width:120px}.sources-header{height:auto!important;min-height:56px;flex-wrap:wrap;padding:12px 20px!important;gap:12px!important}.sources-header>span:nth-child(2){display:none}}
+
+@media(min-width:601px) and (max-width:1000px){.client-table thead{display:none}.client-table tr{display:grid;grid-template-columns:1fr 1fr;padding:16px 0;border-bottom:1px solid var(--edge);gap:8px}.client-table td{padding:0;border:0;min-width:0}.client-table td:first-child,.client-table td:last-child{grid-column:1/-1}.client-table td:nth-child(4){grid-column:1/-1;color:var(--muted)}}
+
+/* Shared Settings edges and one unframed reveal surface. */
+.anansi-settings-section {padding:24px}
+.anansi-settings-heading {margin-left:0;margin-right:0}
+.client-section-head .client-actions {flex-shrink:0}
+.client-section-head .client-actions > button:first-child {background:var(--accent);color:var(--ink)}
+.client-reveal {border:0;border-radius:4px;background:var(--raised);scroll-margin:24px}
+.client-code {display:flex;align-items:center;gap:16px}
+.client-code code {min-width:0;flex:1}
+.client-code button {flex-shrink:0}
+.sync-username .anansi-settings-copy {width:100%}
+.sync-username label {display:block;margin-bottom:8px}
+.sync-username input {max-width:100%;margin-right:8px}
+.sync-settings > p:empty {display:none}
+@media(max-width:600px){.anansi-settings-section{padding:16px}.client-code{flex-wrap:wrap}.client-code code{flex-basis:100%;margin:16px 0 0}}
+
+@media(max-width:1000px){.client-section-head{flex-direction:column;gap:8px}.library-toolbar-actions{flex-wrap:wrap;justify-content:flex-start;width:100%;margin-left:0!important}.library-toolbar-actions button{white-space:nowrap;flex-shrink:0}.library-toolbar-actions>button:first-child{min-width:180px;flex:1}}
+.sources-header ~ .scroll {--faint:var(--muted);--fainter:var(--muted);--faintest:var(--muted)}

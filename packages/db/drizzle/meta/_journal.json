@@ -148,6 +148,20 @@
       "when": 1794090000000,
       "tag": "0020_platform_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1794100000000,
+      "tag": "0021_connected_clients",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1794110000000,
+      "tag": "0022_media_identity",
+      "breakpoints": true
     }
   ]
 }

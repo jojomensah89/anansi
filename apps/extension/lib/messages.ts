@@ -697,3 +697,8 @@ export function isLibrarySyncCommand(message: unknown, senderUrl: string | undef
       Object.keys(value).length === 2 && value.anansi === "library-sync-now" && value.messageVersion === MESSAGE_PROTOCOL_VERSION;
   } catch { return false; }
 }
+
+export function isLibraryConnectCommand(message: unknown, senderUrl: string | undefined, origin: string | undefined, frameId: number | undefined): message is {anansi:"library-connect";messageVersion:1;code:string} {
+ if(frameId!==0||!senderUrl||!origin||!isRecord(message))return false;
+ try{return new URL(senderUrl).origin===new URL(origin).origin&&hasOnlyKeys(message,["anansi","messageVersion","code"])&&message.anansi==="library-connect"&&message.messageVersion===1&&typeof message.code==="string"&&/^anansi_[A-Za-z0-9_-]{43}$/.test(message.code);}catch{return false;}
+}

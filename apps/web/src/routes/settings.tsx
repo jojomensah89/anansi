@@ -1,3 +1,5 @@
+import { ConnectedClients } from "../components/connected-clients.tsx";
+import { SyncControls } from "../components/sync-controls.tsx";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Rail } from "../components/rail.tsx";
@@ -8,6 +10,8 @@ import { useShowNsfw } from "../lib/settings.ts";
 export const Route = createFileRoute("/settings")({ component: Settings });
 
 function Settings() {
+  const [counts,setCounts]=useState<Awaited<ReturnType<typeof api.stats>>|null>(null);
+  useEffect(()=>{void api.stats().then(setCounts).catch(()=>undefined);},[]);
   const [showNsfw, setShowNsfw] = useShowNsfw();
   const [data, setData] = useState<AiSettingsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,14 +152,17 @@ function Settings() {
     }
   };
   return <div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
-    <Rail total={0} authors={0} bySource={{}} />
+    <Rail total={counts?.items ?? 0} authors={counts?.authors ?? 0} archived={counts?.archived ?? 0} bySource={counts?.bySource ?? {}} ready={counts !== null} />
     <main className="anansi-settings-page">
       <h1 className="anansi-settings-title">Settings</h1>
-      <p className="anansi-settings-subtitle">{data?.runtime === "ollama" ? "Local semantic search runs through Ollama on this machine; automatic tags remain separate." : "Optional AI features run in your Cloudflare account and never replace manual tags."}</p>
+      <p className="anansi-settings-subtitle">Manage access to your library, sync and preferences.</p>
+      <ConnectedClients />
+      <SyncControls settings />
       {error && <p role="alert" style={{ color: "var(--accent-text)" }}>{error}</p>}
       {!data ? (error ? null : slow ? <SettingsSkeleton /> : null) :
         <section className="anansi-settings-section">
           <h2 className="anansi-settings-heading">AI features</h2>
+      <p className="anansi-settings-subtitle">{data?.runtime === "ollama" ? "Local semantic search runs through Ollama on this machine; automatic tags remain separate." : "Optional AI features run in your Cloudflare account and never replace manual tags."}</p>
           {!data.available && <p className="anansi-settings-unavailable">AI bindings are unavailable in this environment. Keyword search and manual tags continue to work.</p>}
           {data.runtime === "ollama" && <p className="anansi-settings-unavailable">Local AI runs through Ollama on this machine. Start Ollama and pull the configured models; keyword search and manual tags continue to work while AI jobs warm or recover.</p>}
           <div className="anansi-settings-list">

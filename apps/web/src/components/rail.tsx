@@ -93,7 +93,9 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 		const controller = new AbortController();
 		api.sources(controller.signal).then((result) => setExtension(result.extension)).catch(() => setExtension(null));
 		api.tags(controller.signal).then((result) => setTags(result.tags)).catch(() => setTags([]));
-		return () => controller.abort();
+		const update = () => { void api.sources(controller.signal).then(result => setExtension(result.extension)).catch(() => {}); };
+        window.addEventListener("anansi-connection-updated", update);
+        return () => { controller.abort(); window.removeEventListener("anansi-connection-updated", update); };
 	}, []);
 	const topics = tags.filter((tag) => tag.kind === "topic" && tag.count > 0).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 	const extensionText = extension ? extensionLabel(extension) : "Extension status unavailable";

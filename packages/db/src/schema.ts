@@ -1,3 +1,4 @@
+import { MEDIA_IDENTITY_SQL } from "./media-identity.ts";
 import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
@@ -155,12 +156,13 @@ export const media = sqliteTable(
     /** 'image' | 'video_poster' | 'card' */
     kind: text("kind").notNull(),
     originUrl: text("origin_url").notNull(),
+    identity: text("identity").generatedAlwaysAs(sql.raw(MEDIA_IDENTITY_SQL)),
     /** R2 object key, null until fetched */
     storedKey: text("stored_key"),
     width: integer("width"),
     height: integer("height"),
   },
-  (t) => [uniqueIndex("media_item_origin").on(t.itemId, t.originUrl)],
+  (t) => [uniqueIndex("media_item_identity").on(t.itemId, t.identity)],
 );
 
 export const tags = sqliteTable("tags", {
@@ -385,4 +387,13 @@ export const syncSettings = sqliteTable("sync_settings", {
   githubCheckedAt: integer("github_checked_at"),
   githubError: text("github_error"),
   githubRetryAt: integer("github_retry_at").notNull().default(0),
+});
+
+export const connectedClients = sqliteTable("connected_clients", {
+ id: text("id").primaryKey(), kind: text("kind").notNull(), name: text("name").notNull(),
+ scopes: text("scopes").notNull(), keyHash: text("key_hash").notNull().unique(),
+ createdAt: integer("created_at").notNull(), lastUse: integer("last_use"), revokedAt: integer("revoked_at"),
+});
+export const clientSecurity = sqliteTable("client_security", {
+ id: integer("id").primaryKey(), retiredAt: integer("retired_at"),
 });

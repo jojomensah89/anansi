@@ -86,7 +86,6 @@ function queue(value: unknown): value is CaptureQueueStatus {
 function sourceState(value: unknown): value is HeartbeatSourceState {
 	return (
 		record(value) &&
-		exactKeys(value, SOURCE_KEYS) &&
 		queue({
 			queued: value.queued,
 			uploading: value.uploading,
@@ -109,7 +108,7 @@ function fail(
 	return { ok: false, error: { code, message } };
 }
 
-/** Strict, bounded validation. Errors never echo the supplied payload. */
+/** Strict envelope, forward-compatible source fields. Never return unknown data. */
 export function parseExtensionHeartbeat(value: unknown): HeartbeatParseResult {
 	if (!record(value) || !exactKeys(value, ROOT_KEYS)) {
 		return fail("invalid_heartbeat", "heartbeat shape is invalid");
@@ -144,5 +143,20 @@ export function parseExtensionHeartbeat(value: unknown): HeartbeatParseResult {
 			return fail("invalid_heartbeat", "source heartbeat state is invalid");
 		}
 	}
-	return { ok: true, heartbeat: value as unknown as ExtensionHeartbeat };
+	const sources: ExtensionHeartbeat["sources"] = {};
+	for (const [source, state] of Object.entries(value.sources)) {
+		// Validation above covers known fields. Project rather than returning the
+		// input: future fields (including credential-shaped fields) never reach D1.
+		const clean = Object.fromEntries(
+			Object.entries(state as Record<string, unknown>).filter(([key]) => SOURCE_KEYS.has(key)),
+		) as unknown as HeartbeatSourceState;
+		sources[source as CaptureSource] = clean;
+	}
+	return { ok: true, heartbeat: {
+		schemaVersion: HEARTBEAT_SCHEMA_VERSION,
+		installationId: value.installationId,
+		extensionVersion: value.extensionVersion,
+		queue: { ...value.queue },
+		sources,
+	} };
 }

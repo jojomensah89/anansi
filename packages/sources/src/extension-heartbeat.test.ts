@@ -24,6 +24,23 @@ const valid = (): ExtensionHeartbeat => ({
 });
 
 describe("parseExtensionHeartbeat", () => {
+	test("drops newer source fields, including credential-shaped data", () => {
+		const input = valid();
+		const result = parseExtensionHeartbeat({ ...input, sources: {
+			x: { ...input.sources.x, futureState: { enabled: true }, token: "never-store-this" },
+		} });
+		expect(result).toEqual({ ok: true, heartbeat: input });
+		expect(JSON.stringify(result)).not.toContain("never-store-this");
+	});
+
+	test("unknown fields do not bypass known-field validation", () => {
+		for (const invalid of [{ queued: -1 }, { phase: "finished" }, { paused: "yes" }, { lastCheckedAt: -1 }, { lastErrorCode: "Bearer secret" }]) {
+			expect(parseExtensionHeartbeat({ ...valid(), sources: {
+				x: { ...valid().sources.x, futureState: true, ...invalid },
+			} }).ok).toBe(false);
+		}
+	});
+
 	test("accepts the bounded operational envelope", () => {
 		expect(parseExtensionHeartbeat(valid())).toEqual({
 			ok: true,

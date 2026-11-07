@@ -227,7 +227,7 @@ function Library() {
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div className="scroll" style={{ flex: 1 }}>
-          <SyncControls/>
+
           {/*
             Glass, and therefore sticky inside the scroller rather than fixed
             above it. Blur over an empty background is just a tint; the header
@@ -272,7 +272,7 @@ function Library() {
             >
               <ViewTabs value={view} onChange={setView} />
 
-              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              <div className="library-toolbar-actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
                 <button
                   type="button"
                   onClick={() => setPaletteOpen(true)}
@@ -319,6 +319,7 @@ function Library() {
                 )}
                 {stats.isError && <button type="button" onClick={() => void stats.refetch()} style={{ border: "none", background: "transparent", color: "#f2a7a7", cursor: "pointer", font: "inherit" }}>Counts unavailable · retry</button>}
 
+                <SyncControls/>
                 <LibraryActions current={collectionFilters} onApply={applyCollection} />
 
                 <button

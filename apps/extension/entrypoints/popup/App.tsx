@@ -1,4 +1,5 @@
 import { TIKTOK_SYNC_SETTING } from "../../lib/library-sync.ts";
+import { retireOwnConnection } from "../../lib/library-connect.ts";
 import { SAVE_CONFIRMATION_SETTING } from "../../lib/save-toast.ts";
 import type {
   ExtensionRemoteConfig,
@@ -192,6 +193,8 @@ export default function App() {
   }, []);
 
   const [connection, setConnection] = useState<ExtensionConnection | null>(null);
+  const [showXRisk,setShowXRisk]=useState(false);
+  useEffect(()=>{if(!connection)return;void browser.storage.local.get("anansiXRiskSeen").then(state=>{if(!state.anansiXRiskSeen){setShowXRisk(true);void browser.storage.local.set({anansiXRiskSeen:true});}});},[connection]);
   const [connectionLoaded, setConnectionLoaded] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [urlInput, setUrlInput] = useState("");
@@ -206,8 +209,9 @@ export default function App() {
       setConnectionLoaded(true);
       if (conn) {
         setConnection(conn);
+        // The stored key never goes in the form: pasting a code into a masked,
+        // filled field joins the two, and resubmitting it can only fail.
         setUrlInput(conn.origin);
-        setTokenInput(conn.token);
       } else {
         setConnectionState(UNCONFIGURED_CONNECTION);
       }
@@ -325,7 +329,7 @@ export default function App() {
     let permissionOrigin: string | null = null;
     let connectionSucceeded = false;
     try {
-      const validated = validateExtensionConnection(urlInput, tokenInput);
+      let validated = validateExtensionConnection(urlInput, tokenInput);
       permissionOrigin = validated.origin;
       const previousSnapshot = await command({ action: "queue-status" });
       const currentSnapshot = (previousSnapshot as { snapshot?: DurableSnapshot } | undefined)?.snapshot;
@@ -344,13 +348,21 @@ export default function App() {
         validated.origin,
         browser.permissions,
       );
+      const redemption = await fetch(`${validated.origin}/api/connect/redeem`, {
+        method: "POST", headers: {"content-type":"application/json"},
+        body: JSON.stringify({code: validated.token}), redirect:"error", signal: AbortSignal.timeout(10_000),
+      });
+      if (redemption.ok) {
+        const issued = await redemption.json() as {key?:unknown};
+        validated = validateExtensionConnection(validated.origin, issued.key);
+      }
       const res = await fetch(`${validated.origin}/api/extension/config`, {
         headers: { Authorization: `Bearer ${validated.token}` },
         redirect: "error",
         signal: AbortSignal.timeout(10_000),
       });
       if (res.status === 401 || res.status === 403) {
-        setConnectError("Invalid secret key. Use INGEST_TOKEN when your Worker has one configured; otherwise use ANANSI_SECRET.");
+        setConnectError("That code or key isn't valid. It may have expired, been used or been revoked. In Anansi, go to Settings and press Connect extension for a new code.");
         setIsConnecting(false);
         return;
       }
@@ -432,6 +444,8 @@ export default function App() {
   };
 
   const handleDisconnect = async () => {
+    // Best effort, so a key this browser just gave up doesn't stay active.
+    if (connection) await retireOwnConnection(connection);
     await clearExtensionConnection();
     await command({ action: "connection-updated" });
     setConnection(null);
@@ -570,7 +584,7 @@ export default function App() {
         background: S.ink,
         color: S.text,
         fontFamily: "system-ui, sans-serif",
-        fontSize: 13,
+        fontSize: 14,
       }}
     >
       <div
@@ -608,7 +622,7 @@ export default function App() {
               padding: "4px 6px",
               display: "flex",
               alignItems: "center",
-              fontSize: 11,
+              fontSize: 12,
               borderRadius: 4,
             }}
           >
@@ -649,17 +663,17 @@ export default function App() {
           }}
         >
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
               {connection ? "Connection Settings" : "Connect to Anansi"}
             </div>
-            <div style={{ fontSize: 11, color: S.muted, lineHeight: 1.4 }}>
-              Enter your deployed Cloudflare Worker URL and secret key to sync bookmarks. Use INGEST_TOKEN when configured; otherwise use ANANSI_SECRET.
+            <div style={{ fontSize: 12, color: S.muted, lineHeight: 1.4 }}>
+              Enter your library address and the one-time connection code from Settings.
             </div>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <label htmlFor="anansi-worker-url" style={{ fontSize: 11, color: S.muted, fontWeight: 500 }}>
-              Worker URL
+            <label htmlFor="anansi-worker-url" style={{ fontSize: 12, color: S.muted, fontWeight: 500 }}>
+              Library address
             </label>
             <input
               id="anansi-worker-url"
@@ -674,7 +688,7 @@ export default function App() {
                 borderRadius: 6,
                 color: S.text,
                 padding: "7px 10px",
-                fontSize: 11.5,
+                fontSize: 12,
                 fontFamily: S.mono,
                 outline: "none",
               }}
@@ -682,15 +696,15 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <label htmlFor="anansi-worker-token" style={{ fontSize: 11, color: S.muted, fontWeight: 500 }}>
-              Secret Key (INGEST_TOKEN or ANANSI_SECRET)
+            <label htmlFor="anansi-worker-token" style={{ fontSize: 12, color: S.muted, fontWeight: 500 }}>
+              Connection code or capture key
             </label>
             <input
               id="anansi-worker-token"
               type="password"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
-              placeholder="At least 16 characters"
+              placeholder="Paste the code from Settings"
               required
               style={{
                 background: S.card,
@@ -698,7 +712,7 @@ export default function App() {
                 borderRadius: 6,
                 color: S.text,
                 padding: "7px 10px",
-                fontSize: 11.5,
+                fontSize: 12,
                 fontFamily: S.mono,
                 outline: "none",
               }}
@@ -713,7 +727,7 @@ export default function App() {
                 border: `1px solid ${S.warn}`,
                 borderRadius: 6,
                 color: S.warn,
-                fontSize: 11,
+                fontSize: 12,
                 lineHeight: 1.4,
               }}
             >
@@ -722,7 +736,7 @@ export default function App() {
           )}
 
           {legacyQueueNeedsDecision && connection && (
-            <div style={{ padding: "9px 10px", border: `1px solid ${S.warn}`, borderRadius: 6, color: S.muted, fontSize: 11, lineHeight: 1.4 }}>
+            <div style={{ padding: "9px 10px", border: `1px solid ${S.warn}`, borderRadius: 6, color: S.muted, fontSize: 12, lineHeight: 1.4 }}>
               Older pending captures have no recorded server destination. Delivery is paused. Assign them to {connection.origin} only if this is the library you want them added to.
               <button type="button" disabled={resolvingLegacyQueue} onClick={() => void adoptLegacyQueue()} style={{ ...button, display: "block", marginTop: 8, width: "100%" }}>
                 {resolvingLegacyQueue ? "Assigning…" : "Assign pending captures here"}
@@ -758,7 +772,7 @@ export default function App() {
             )}
           </div>
           {connection && (
-            <div style={{ fontSize: 10.5, color: S.muted, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 12, color: S.muted, lineHeight: 1.4 }}>
               Disconnect keeps pending captures on this device and pauses delivery until you reconnect.
             </div>
           )}
@@ -782,7 +796,7 @@ export default function App() {
             style={{
               marginLeft: "auto",
               fontFamily: S.mono,
-              fontSize: 11,
+              fontSize: 12,
               color: S.ok,
               border: `1px solid ${S.edge}`,
               borderRadius: 20,
@@ -797,7 +811,7 @@ export default function App() {
             style={{
               marginLeft: "auto",
               fontFamily: S.mono,
-              fontSize: 10.5,
+              fontSize: 12,
               color: connectionState.kind === "loading" ? S.faint : S.warn,
             }}
           >
@@ -817,7 +831,7 @@ export default function App() {
             alignItems: "center",
             gap: 8,
             color: TONES[outbox.tone],
-            fontSize: 10.5,
+            fontSize: 12,
             fontFamily: S.mono,
           }}
         >
@@ -841,7 +855,7 @@ export default function App() {
                 marginLeft: "auto",
                 height: 23,
                 padding: "0 8px",
-                fontSize: 10,
+                fontSize: 12,
                 opacity: isRetrying ? 0.6 : 1,
               }}
             >
@@ -866,7 +880,7 @@ export default function App() {
               <strong style={{ fontSize: 12.5 }}>
                 {initialImport.completed > 0 ? "Import remaining history" : "Import all history"}
               </strong>
-              <span style={{ fontSize: 10.5, color: S.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <span style={{ fontSize: 12, color: S.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {initialImport.due.map((source) => NAMES[source] ?? source).join(" · ")}
               </span>
             </span>
@@ -879,7 +893,7 @@ export default function App() {
                 ...button,
                 height: 27,
                 padding: "0 12px",
-                fontSize: 11.5,
+                fontSize: 12,
                 fontWeight: 500,
                 borderRadius: 5,
                 display: "inline-flex",
@@ -957,7 +971,7 @@ export default function App() {
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>{sourceName}</span>
                 <span
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     color:
                       view.state === "failed"
                         ? "var(--anansi-provider-error)"
@@ -986,7 +1000,7 @@ export default function App() {
                   width: "auto",
                   height: 27,
                   padding: "0 12px",
-                  fontSize: 11.5,
+                  fontSize: 12,
                   fontWeight: 500,
                   flexShrink: 0,
                   borderRadius: 5,
@@ -1060,7 +1074,7 @@ export default function App() {
             <span style={{ fontSize: 12.5, fontWeight: 600 }}>This page</span>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 color: saving === "saved" ? S.ok : saving && saving !== "saving" ? S.warn : S.muted,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -1101,7 +1115,7 @@ export default function App() {
               ...button,
               height: 27,
               padding: "0 12px",
-              fontSize: 11.5,
+              fontSize: 12,
               flexShrink: 0,
             }}
           >
@@ -1109,6 +1123,7 @@ export default function App() {
           </button>
         </div>
 
+      </div>
         {/*
             Chrome, kept separate from the sources above and from "This page".
             It is not a platform being watched and not a page being clipped —
@@ -1162,7 +1177,7 @@ export default function App() {
             <span style={{ fontSize: 12.5, fontWeight: 600 }}>Chrome bookmarks</span>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 color: mirrorNote ? S.warn : mirroring ? S.faint : S.muted,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -1227,7 +1242,7 @@ export default function App() {
         >
           <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
             <span style={{ fontSize: 12.5, fontWeight: 600 }}>Save confirmations</span>
-            <span style={{ fontSize: 11, color: S.muted }}>
+            <span style={{ fontSize: 12, color: S.muted }}>
               {saveConfirmations ? "Shown beside the button" : "Off. Problems are still shown"}
             </span>
           </span>
@@ -1276,8 +1291,8 @@ export default function App() {
         >
           <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
             <span style={{ fontSize: 12.5, fontWeight: 600 }}>Check TikTok when the library opens</span>
-            <span style={{ fontSize: 11, color: S.muted }}>
-              Opens a small TikTok window in front for a few seconds. Automated visits could draw TikTok's attention to your account.
+            <span style={{ fontSize: 12, color: S.muted }}>
+              Opens a visible TikTok window briefly. Automated visits can put your account at risk.
             </span>
           </span>
           <button
@@ -1307,10 +1322,10 @@ export default function App() {
             <span style={{ width: 14, height: 14, borderRadius: "50%", background: syncTiktok ? S.ok : S.faint }} />
           </button>
         </div>
-        <div style={{ padding: "0 16px 11px", fontSize: 11, color: S.muted }}>
-          Opening your library checks X, Reddit and GitHub for new saves. X may open a brief background tab, and automated visits could draw X's attention to your account.
+        <div style={{ padding: "0 16px 11px", fontSize: 12, color: S.muted }}>
+          Opening your library checks X, Reddit and GitHub for new saves.
+          {showXRisk && <div role="note">X checks may open a background tab. Automated visits can put your X account at risk. <button type="button" onClick={()=>{setShowXRisk(false);void browser.storage.local.set({anansiXRiskSeen:true});}}>Got it</button></div>}
         </div>
-      </div>
 
       <div
         style={{
@@ -1320,7 +1335,7 @@ export default function App() {
           borderTop: `1px solid ${S.line}`,
         }}
       >
-        <span className="mono" style={{ fontSize: 10.5, color: S.faintest, fontFamily: S.mono }}>
+        <span className="mono" style={{ fontSize: 12, color: S.faintest, fontFamily: S.mono }}>
           {summary}
         </span>
         <button
@@ -1335,7 +1350,7 @@ export default function App() {
             border: "none",
             cursor: connection ? "pointer" : "default",
             font: "inherit",
-            fontSize: 11.5,
+            fontSize: 12,
             color: S.accent,
             opacity: connection ? 1 : 0.5,
           }}
@@ -1346,7 +1361,7 @@ export default function App() {
 
       {diagnostics.length > 0 && (
         <details className="anansi-diagnostics" style={{ borderTop: `1px solid ${S.line}`, padding: "9px 16px 12px" }}>
-          <summary style={{ fontSize: 10.5, color: S.faint, fontFamily: S.mono }}>Details</summary>
+          <summary style={{ fontSize: 12, color: S.faint, fontFamily: S.mono }}>Details</summary>
           <div
             style={{
               marginTop: 7,
@@ -1359,7 +1374,7 @@ export default function App() {
               <div
                 key={line}
                 style={{
-                  fontSize: 10.5,
+                  fontSize: 12,
                   fontFamily: S.mono,
                   color: S.muted,
                   lineHeight: 1.45,
@@ -1384,7 +1399,7 @@ const button: React.CSSProperties = {
   border: `1px solid ${S.edge}`,
   background: S.card,
   color: S.text,
-  fontSize: 11.5,
+  fontSize: 12,
   fontWeight: 500,
   cursor: "pointer",
   display: "inline-flex",

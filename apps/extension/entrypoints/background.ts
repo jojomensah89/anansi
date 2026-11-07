@@ -1,3 +1,4 @@
+import { retirePreviousConnection, connectLibrary } from "../lib/library-connect.ts";
 import { isLibrarySyncCommand } from "../lib/messages.ts";
 /**
  * The background worker: the only part of the extension that knows a server
@@ -32,7 +33,7 @@ import {
 	toBookmarkCapture,
 } from "../lib/chrome-bookmarks.ts";
 import { cachedForServer, createPersistedConfigCache, type ServerCache } from "../lib/config-cache.ts";
-import { getExtensionConnection } from "../lib/connection.ts";
+import { saveExtensionConnection, getExtensionConnection } from "../lib/connection.ts";
 import {
 	createHeartbeatClient,
 	type HeartbeatClient,
@@ -1889,7 +1890,15 @@ async function handlePopupCommand(
 				await browser.storage.local.set({ anansiAuthorizedOrigin: current.server });
 				await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
 				await loadConfig(true);
-			} else {
+                const verified = await fetch(`${current.server}/api/extension/config`, {headers:{authorization:`Bearer ${current.token}`},redirect:"error",signal:AbortSignal.timeout(10000)});
+                if (verified.status !== 200) return {ok:false,error:"Connection verification failed"};
+                await heartbeat().send();
+                await wakeDurableQueue();
+                await armLibraryTabs();
+                const previous = (await browser.storage.local.get("anansiPreviousConnection")).anansiPreviousConnection as {origin:string;token:string} | undefined;
+                await retirePreviousConnection({origin:current.server,token:current.token},previous);
+                await browser.storage.local.remove("anansiPreviousConnection");
+            } else {
 				await browser.alarms.clear(OUTBOX_ALARM);
 				await browser.alarms.clear(NATIVE_CAPTURE_ALARM);
 				await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
@@ -2088,10 +2097,51 @@ async function handlePageEvent(
 	}
 }
 
+async function injectLibraryBridge(tabId: number) {
+        await browser.scripting.executeScript({target: {tabId}, func: () => {
+          const marker = "__anansiSyncBridge";
+          const state = globalThis as typeof globalThis & {__anansiSyncBridge?: (event: MessageEvent) => void};
+          if (state[marker]) window.removeEventListener("message",state[marker]);
+          state[marker] = event => {
+            if (event.source !== window || event.origin !== location.origin || !["library-sync-request","library-connect-request"].includes(event.data?.anansi) || typeof event.data.id !== "string" || event.data.id.length > 80) return;
+            const id = event.data.id;
+            const connecting=event.data.anansi === "library-connect-request";
+            const family=connecting?"library-connect-response":"library-sync-response";
+            void chrome.runtime.sendMessage(connecting?{anansi:"library-connect",messageVersion:1,code:event.data.code}:{anansi: "library-sync-now", messageVersion: 1}).then(result => {
+              window.postMessage({anansi: family, id, ok: result?.ok === true}, location.origin);
+            }).catch(() => window.postMessage({anansi: family, id, ok: false}, location.origin));
+          };
+          window.addEventListener("message",state[marker]);
+        }}).catch(() => {});
+
+}
+async function armLibraryTabs() {
+ const current=await settings();
+ if (!current) return;
+ for (const tab of await browser.tabs.query({})) {
+   if (tab.id && isLibraryPage(tab.url,current.server)) await injectLibraryBridge(tab.id);
+ }
+}
 async function handleRuntimeMessage(
 	message: unknown,
 	sender: RuntimeMessageSender,
 ): Promise<BackgroundResult> {
+ if ((message as {anansi?:string})?.anansi === "library-connect") {
+  const current=await settings();
+  const result=await connectLibrary(message,{senderUrl:sender.tab?sender.url:undefined,origin:current?.server,frameId:sender.frameId},async(code)=>{
+   const admission=await queueDestination().canConnectTo(current!.server);
+   if(!admission.ok)throw new Error("Connection failed");
+   const response=await fetch(`${current!.server}/api/connect/redeem`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({code}),redirect:"error",signal:AbortSignal.timeout(10000)});
+   if(!response.ok)throw new Error("Connection failed");
+   const issued=await response.json() as {key:string};
+   const verified=await fetch(`${current!.server}/api/extension/config`,{headers:{authorization:`Bearer ${issued.key}`},redirect:"error",signal:AbortSignal.timeout(10000)});
+   if(verified.status !== 200)throw new Error("Connection failed");
+   await saveExtensionConnection(current!.server,issued.key);
+   const updated=await handlePopupCommand({anansi:"popup-command",messageVersion:1,action:"connection-updated"});
+   if(!updated.ok)throw new Error("Connection failed");
+  });
+  return result.ok?{ok:true}:{ok:false,error:"Connection failed"};
+ }
 	if ((message as {anansi?: string})?.anansi === "library-sync-now") {
     const current = await settings();
     if (!isLibrarySyncCommand(message, sender.url, current?.server) || !sender.tab || sender.frameId !== 0) return {ok: false, error: "origin not allowed"};
@@ -2134,6 +2184,7 @@ export default defineBackground(() => {
 	 * every time — and a swallowed one is how a real error later gets missed.
 	 */
 	browser.runtime.onInstalled.addListener(() => {
+        void armLibraryTabs().catch(() => {});
 		browser.contextMenus.removeAll(() => {
 			for (const menu of MENUS) {
 				browser.contextMenus.create(menu);
@@ -2182,16 +2233,19 @@ export default defineBackground(() => {
 
 	// Earlier versions kept a daily catch-up alarm. Sync now follows the library.
 	void browser.alarms.clear(SYNC_ALARM);
+	void armLibraryTabs().catch(() => {});
 	void rescheduleHeartbeat();
 	void wakeDurableQueue().then(processPendingRefreshes);
 	requestHeartbeat();
 	// The worker restarts constantly; the listeners have to come back with it.
 	void startMirroring();
 	browser.runtime.onStartup.addListener(() => {
+        void armLibraryTabs().catch(() => {});
 		void wakeDurableQueue().then(processPendingRefreshes);
 		requestHeartbeat();
 	});
 	browser.runtime.onInstalled.addListener(() => {
+        void armLibraryTabs().catch(() => {});
 		void wakeDurableQueue().then(processPendingRefreshes);
 		void armOpenTabs();
 		requestHeartbeat();
@@ -2204,19 +2258,7 @@ export default defineBackground(() => {
 		void settings().then(async (current) => {
 			if (isLibraryPage(tab.url, current?.server)) {
         // The bridge only serves Sync now, so failing to add it must not stop this sync.
-        void browser.scripting.executeScript({target: {tabId}, func: () => {
-          const marker = "__anansiSyncBridge";
-          const state = globalThis as typeof globalThis & {__anansiSyncBridge?: boolean};
-          if (state[marker]) return;
-          state[marker] = true;
-          window.addEventListener("message", event => {
-            if (event.source !== window || event.origin !== location.origin || event.data?.anansi !== "library-sync-request" || typeof event.data.id !== "string" || event.data.id.length > 80) return;
-            const id = event.data.id;
-            void chrome.runtime.sendMessage({anansi: "library-sync-now", messageVersion: 1}).then(result => {
-              window.postMessage({anansi: "library-sync-response", id, ok: result?.ok === true}, location.origin);
-            }).catch(() => window.postMessage({anansi: "library-sync-response", id, ok: false}, location.origin));
-          });
-        }}).catch(() => {});
+        void injectLibraryBridge(tabId);
         return librarySync().libraryOpened();
       }
 		}).catch(() => {});

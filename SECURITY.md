@@ -25,7 +25,7 @@ Anansi is intentionally conservative about browser access:
 - No GitHub OAuth or personal access token for extension capture.
 - Library, extension and MCP access fail closed without credentials. Explicit
   `LIBRARY_TOKEN`, `INGEST_TOKEN` and `MCP_TOKEN` override `ANANSI_SECRET` for
-  their respective roles; otherwise the master secret is the fallback.
+  their respective roles during migration; otherwise the master secret is the fallback. Retiring legacy access disables these shared extension/MCP credentials.
 - The local database and media live under `data/` and must never be committed.
 
 Please do not submit reports asking for session-cookie exfiltration, token harvesting, or bypassing platform login — those are out of scope by design.
@@ -54,3 +54,7 @@ Capture relays run on provider pages. Same-page scripts are not trusted simply
 because they know the relay nonce: it correlates messages, not authenticates a
 provider. Source identity, bounded payloads and queue limits remain required.
 See PRIVACY.md for capture destinations and optional AI processing.
+
+## Connected clients
+Stored keys use 256 random bits and SHA-256 hashes. Revocation is checked each request; last use updates at most every five minutes. API keys permit read-only MCP. Legacy shared credentials work only for capture or MCP until explicitly retired in Connected clients; owner login remains available.
+First connection uses a five-minute single-use code pasted from the library into the popup. The popup requests optional origin permission and redeems directly. Requests with Origin are rejected so pages and subframes cannot redeem codes. Keys never pass through MAIN-world scripts or the page bridge. Keep codes private. Existing queue destination guards preserve captures during reconnect. OAuth is deferred.
