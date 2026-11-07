@@ -454,7 +454,9 @@ export function createSourceImportLifecycle(
 					return disabled(input.source, input.runId);
 				if (input.state === "cancelled")
 					return cancelRun(input.source, input.runId);
-				if (input.state === "limited") {
+				// A sync that reaches its page cap is finished, not a paused import.
+				const syncCapped = input.state === "limited" && run.runMode === "live";
+				if (input.state === "limited" && !syncCapped) {
 					const stopped = await runs.stopForRun(input.source, input.runId);
 					if (!stopped.stopped) return stale(input.source, input.runId);
 					return {
@@ -520,7 +522,9 @@ export function createSourceImportLifecycle(
 							lastRun: now(),
 							...(input.pages === undefined ? {} : { pages: input.pages }),
 							...(input.items === undefined ? {} : { items: input.items }),
-							message: null,
+							message: syncCapped
+								? "more new saves than one sync reads; press Import to fetch the rest"
+								: null,
 						},
 					},
 				];

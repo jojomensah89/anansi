@@ -134,6 +134,20 @@
       "when": 1790553600000,
       "tag": "0018_items_nsfw",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1794000000000,
+      "tag": "0019_sync_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1794090000000,
+      "tag": "0020_platform_sync",
+      "breakpoints": true
     }
   ]
 }

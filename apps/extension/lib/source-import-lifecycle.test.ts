@@ -279,6 +279,18 @@ describe("source import lifecycle", () => {
 		expect((await runs.current("x")).phase).toBe("idle");
 	});
 
+	test("a sync reaching its page cap finishes without pausing the source", async () => {
+		const { lifecycle, runs } = setup();
+		const runId = await begin(lifecycle, "live");
+		const outcome = await lifecycle.complete({ source: "x", runId, state: "limited" });
+		expect(outcome.kind).toBe("completed");
+		const run = await runs.current("x");
+		expect(run.phase).toBe("idle");
+		expect(run.paused).not.toBe(true);
+		expect(await runs.initialImportDue("x")).toBe(true);
+		expect(JSON.stringify(outcome.effects)).toContain("press Import");
+	});
+
 	test("disabled sources stop a running session and preserve history", async () => {
 		let enabled = true;
 		const { lifecycle, runs } = setup({ enabled: async () => enabled });

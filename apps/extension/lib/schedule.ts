@@ -1,4 +1,4 @@
-export const DAILY_SYNC_MINUTES = 24 * 60;
+/** Retired: only cleared, so old installs stop running a daily catch-up. */
 export const SYNC_ALARM = "anansi-sync";
 export const OUTBOX_RETRY_DELAY_MS = 2_500;
 
@@ -27,26 +27,4 @@ export function scheduleOutboxRetry(
 ): void {
 	if (alarms.get) void scheduleEarliestAlarm(alarms, name, now + OUTBOX_RETRY_DELAY_MS).catch(() => {});
 	else alarms.create(name, { when: now + OUTBOX_RETRY_DELAY_MS });
-}
-
-export interface AlarmScheduler {
-	get(name: string): Promise<{ periodInMinutes?: number } | undefined>;
-	clear(name: string): Promise<boolean>;
-	create(
-		name: string,
-		info: { periodInMinutes: number; delayInMinutes: number },
-	): void;
-}
-
-/** One recovery policy, rather than a preference hidden in the popup. */
-export async function scheduleDailyCatchUp(
-	alarms: AlarmScheduler,
-): Promise<void> {
-	const existing = await alarms.get(SYNC_ALARM);
-	if (existing?.periodInMinutes === DAILY_SYNC_MINUTES) return;
-	await alarms.clear(SYNC_ALARM);
-	alarms.create(SYNC_ALARM, {
-		periodInMinutes: DAILY_SYNC_MINUTES,
-		delayInMinutes: DAILY_SYNC_MINUTES,
-	});
 }

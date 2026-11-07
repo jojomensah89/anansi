@@ -1,3 +1,4 @@
+import { TIKTOK_SYNC_SETTING } from "../../lib/library-sync.ts";
 import { SAVE_CONFIRMATION_SETTING } from "../../lib/save-toast.ts";
 import type {
   ExtensionRemoteConfig,
@@ -164,6 +165,7 @@ export default function App() {
   const [startingSources, setStartingSources] = useState<Set<string>>(() => new Set());
   const [isRetrying, setIsRetrying] = useState(false);
   const [saveConfirmations, setSaveConfirmations] = useState(false);
+  const [syncTiktok, setSyncTiktok] = useState(false);
 
   useEffect(() => {
     void mirror("mirror-status").then((r) => setMirroring(r?.mirroring ?? false));
@@ -173,6 +175,9 @@ export default function App() {
     void browser.storage.local
       .get(SAVE_CONFIRMATION_SETTING)
       .then((stored) => setSaveConfirmations(stored[SAVE_CONFIRMATION_SETTING] === true));
+    void browser.storage.local
+      .get(TIKTOK_SYNC_SETTING)
+      .then((stored) => setSyncTiktok(stored[TIKTOK_SYNC_SETTING] === true));
   }, []);
 
   useEffect(() => {
@@ -1259,6 +1264,51 @@ export default function App() {
               }}
             />
           </button>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            padding: "11px 16px",
+            borderTop: `1px solid ${S.line}`,
+          }}
+        >
+          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Check TikTok when the library opens</span>
+            <span style={{ fontSize: 11, color: S.muted }}>
+              Opens a small TikTok window in front for a few seconds. Automated visits could draw TikTok's attention to your account.
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={syncTiktok}
+            aria-label="Check TikTok when the library opens"
+            onClick={() => {
+              const next = !syncTiktok;
+              setSyncTiktok(next);
+              void browser.storage.local.set({ [TIKTOK_SYNC_SETTING]: next });
+            }}
+            style={{
+              width: 36,
+              height: 20,
+              flexShrink: 0,
+              borderRadius: 10,
+              padding: "0 2px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: syncTiktok ? "flex-end" : "flex-start",
+              background: syncTiktok ? "var(--anansi-mirror-surface)" : S.raised,
+              border: `1px solid ${syncTiktok ? "var(--anansi-mirror-border)" : S.edge}`,
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ width: 14, height: 14, borderRadius: "50%", background: syncTiktok ? S.ok : S.faint }} />
+          </button>
+        </div>
+        <div style={{ padding: "0 16px 11px", fontSize: 11, color: S.muted }}>
+          Opening your library checks X, Reddit and GitHub for new saves. X may open a brief background tab, and automated visits could draw X's attention to your account.
         </div>
       </div>
 

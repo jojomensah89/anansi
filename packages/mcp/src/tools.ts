@@ -256,7 +256,7 @@ function listOptions(args: {
 }
 
 /** Register the same read-only surface for local stdio and a future D1 Worker. */
-export function registerTools(server: McpServer, db: AnansiDb): void {
+export function registerTools(server: McpServer, db: AnansiDb, beforeSearch?: () => Promise<unknown>): void {
 	server.registerTool(
 		MCP_TOOL_CATALOG[0].name,
 		{
@@ -291,12 +291,17 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 			},
 		},
 		async (args) => {
+			// Freshness is extra: a sync request that fails must not fail the search.
+			const freshness = beforeSearch
+				? await beforeSearch().catch(() => ({ unavailable: true }))
+				: undefined;
 			const result = await searchItemsPage(db, {
 				query: args.query,
 				...listOptions(args),
 			});
 			return json({
 				query: args.query,
+        ...(freshness ? {freshness} : {}),
 				count: result.items.length,
 				next_cursor: result.nextCursor,
 				results: result.items.map(hit),

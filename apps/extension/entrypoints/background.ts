@@ -1,3 +1,4 @@
+import { isLibrarySyncCommand } from "../lib/messages.ts";
 /**
  * The background worker: the only part of the extension that knows a server
  * exists, and the only part that holds the token.
@@ -69,9 +70,9 @@ import {
 	nativeHandoffStorageKey,
 	parseNativeHandoffStoreRequest,
 } from "../lib/native-handoff.ts";
+import { createLibrarySync, isLibraryPage } from "../lib/library-sync.ts";
 import {
 	SYNC_ALARM,
-	scheduleDailyCatchUp,
 	scheduleEarliestAlarm,
 	scheduleOutboxRetry,
 } from "../lib/schedule.ts";
@@ -123,7 +124,6 @@ export interface SourceStatus {
 export type Status = Record<string, SourceStatus>;
 
 const CONFIG_TTL_MS = 60 * 60 * 1000;
-const ALARM = SYNC_ALARM;
 const OUTBOX_ALARM = "anansi-outbox";
 const HEARTBEAT_ALARM = "anansi-heartbeat";
 const SOURCE_RUN_RECOVERY_ALARM_PREFIX = "anansi-source-run-recovery:";
@@ -392,6 +392,7 @@ function heartbeat(): HeartbeatClient {
 				const counts = snapshot.bySource[source] ?? EMPTY_COUNTS;
 				sources[source] = {
 					phase: run?.phase ?? "idle",
+          lastCheckedAt: Math.floor(Number(((await browser.storage.local.get("syncLastChecks")).syncLastChecks as Record<string, number> | undefined)?.[source] ?? 0) / 1000),
 					...(run?.paused ? { paused: true } : {}),
 					...(run?.lastErrorCode ? { lastErrorCode: run.lastErrorCode } : {}),
 					...counts,
@@ -414,6 +415,8 @@ function heartbeat(): HeartbeatClient {
 				},
 			);
 			if (!response.ok) throw new Error("heartbeat rejected");
+			const answer = (await response.json().catch(() => null)) as { syncRequestedAt?: unknown; platformSync?: unknown } | null;
+			void (answer?.platformSync ? librarySync().platformRequests(answer.platformSync) : librarySync().serverRequest(answer?.syncRequestedAt)).catch(() => {});
 			// The server answered, so captures waiting out an outage need not wait
 			// up to an hour for their next attempt.
 			void queue()
@@ -423,6 +426,23 @@ function heartbeat(): HeartbeatClient {
 		},
 	});
 	return healthHeartbeat;
+}
+
+let syncRunner: ReturnType<typeof createLibrarySync> | null = null;
+function librarySync() {
+	syncRunner ??= createLibrarySync({
+		storage: {
+			get: async (key) => (await browser.storage.local.get(key))[key],
+			set: (values) => browser.storage.local.set(values),
+		},
+		now: Date.now,
+		enabledSources: async () => {
+			const config = await loadConfig();
+			return config?.enabled ? config.sources.map((entry) => entry.source) : [];
+		},
+		start: (source) => startCapture(source, true, true),
+	});
+	return syncRunner;
 }
 
 function requestHeartbeat(): void {
@@ -1130,6 +1150,19 @@ async function expireOwnedRun(
  * Session-import adapters use credentialed worker requests; page-import
  * adapters open an inactive platform tab when they need one.
  */
+/** IDs are read before any page is queued, so this run cannot stop on itself. */
+async function syncKnownIds(source: string): Promise<string[]> {
+  const current = await settings();
+  if (!current) throw new Error("extension is not connected");
+  const response = await fetch(`${current.server}/api/extension/known-ids?source=${encodeURIComponent(source)}`, {
+    headers: { Authorization: `Bearer ${current.token}` }, redirect: "error", signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error("could not read sync stopping points");
+  const body = await response.json() as {ids?: unknown};
+  if (!Array.isArray(body.ids) || body.ids.length > 2000 || body.ids.some(id => typeof id !== "string" || id.length > 200)) throw new Error("invalid stopping points");
+  return body.ids as string[];
+}
+
 async function startCapture(
 	source: string,
 	quiet = false,
@@ -1169,7 +1202,17 @@ async function startCapture(
 		return;
 	}
 
-	const entry = config.sources.find((s) => s.source === source);
+	const configuredEntry = config.sources.find((s) => s.source === source);
+  let knownIds: string[] | undefined;
+  if (live && configuredEntry) {
+    try { knownIds = await syncKnownIds(source); }
+    catch {
+      await applyImportEffects((await sourceImportLifecycle().fail({source, runId, code: "platform_request_failed"})).effects);
+      await patchStatusForRun(source, runId, {message: "could not read sync stopping points"});
+      return;
+    }
+  }
+  const entry = configuredEntry && live ? { ...configuredEntry, pageLimit: 10, knownIds } : configuredEntry;
 	if (!entry) {
 		if (!quiet)
 			await patchStatusForRun(source, runId, {
@@ -1319,6 +1362,7 @@ async function startCapture(
 			source,
 			runId,
 			action: "scan",
+			// Syncs use a bounded pre-run snapshot; imports may walk history.
 			config: entry,
 		});
 		if (!scanning) {
@@ -1344,15 +1388,12 @@ async function startCapture(
 		return;
 	}
 
-	/**
-	 * A live sync is one small page, not a whole run. The thing you just saved
-	 * is at the top of the listing, so twenty items reaches it with room to
-	 * spare — and the upsert makes the nineteen you already have free.
-	 */
+	// A sync walks at most ten pages, stopping on a pre-run known ID.
+
 	const job = live
 		? {
 				...entry,
-				pageLimit: 1,
+				pageLimit: 10,
 				variables: { ...(entry.variables ?? {}), count: 20 },
 			}
 		: // A full run picks up where the last acknowledged page left off, so an
@@ -1472,6 +1513,7 @@ async function importWithoutTab(
 			source,
 			cursor: run.cursor,
 			pageLimit: entry.pageLimit ?? 40,
+			knownIds: entry.knownIds,
 			live,
 			signal,
 			isCurrent: async () => {
@@ -1646,10 +1688,6 @@ async function talk(tabId: number, message: unknown): Promise<boolean> {
 	}
 }
 
-async function rescheduleAlarm(): Promise<void> {
-	await scheduleDailyCatchUp(browser.alarms);
-}
-
 async function rescheduleHeartbeat(): Promise<void> {
 	await browser.alarms.clear(HEARTBEAT_ALARM);
 	browser.alarms.create(HEARTBEAT_ALARM, {
@@ -1731,6 +1769,7 @@ type BackgroundResult =
 	| { ok: false; error: string };
 
 interface RuntimeMessageSender {
+  frameId?: number;
 	url?: string;
 	documentId?: string;
 	tab?: { id?: number; url?: string };
@@ -1802,9 +1841,6 @@ async function handlePopupCommand(
 			return { ok: true, snapshot: await durableSnapshot() };
 		case "import-all":
 			return await startAllCaptures();
-		case "reschedule":
-			await rescheduleAlarm();
-			return { ok: true };
 		case "retry-queue":
 			await wakeDurableQueue(true, msg.source);
 			return { ok: true, snapshot: await durableSnapshot() };
@@ -1993,7 +2029,7 @@ async function handlePageEvent(
 					state: msg.state,
 					pages: msg.pages,
 					items: msg.items,
-					initialImport: true,
+					initialImport: (await persistentState().runs.current(source)).runMode !== "live",
 				});
 				await applyImportEffects(completed.effects);
 				if (completed.kind === "completed" && msg.items === 0) {
@@ -2017,7 +2053,8 @@ async function handlePageEvent(
 					source,
 					runId: msg.runId,
 					tabId,
-					initialImport: true,
+          state: run.runMode === "live" && currentStatus.pages >= 10 ? "limited" : "complete",
+					initialImport: run.runMode !== "live",
 				});
 				await applyImportEffects(completed.effects);
 				if (completed.kind === "completed" && currentStatus.items === 0) {
@@ -2055,7 +2092,13 @@ async function handleRuntimeMessage(
 	message: unknown,
 	sender: RuntimeMessageSender,
 ): Promise<BackgroundResult> {
-	const handoff = parseNativeHandoffStoreRequest(message);
+	if ((message as {anansi?: string})?.anansi === "library-sync-now") {
+    const current = await settings();
+    if (!isLibrarySyncCommand(message, sender.url, current?.server) || !sender.tab || sender.frameId !== 0) return {ok: false, error: "origin not allowed"};
+    void librarySync().syncNow().catch(() => {});
+    return {ok: true};
+  }
+  const handoff = parseNativeHandoffStoreRequest(message);
 	if (handoff) return handleNativeHandoffStore(handoff, sender);
 	const parsed = validateRuntimeMessage(message, sender);
 	if (!parsed.ok) return { ok: false, error: parsed.error.message };
@@ -2113,12 +2156,6 @@ export default defineBackground(() => {
 			handleRuntimeMessage(message, sender),
 	);
 
-	/**
-	 * Automatic sync. Incremental by nature rather than by flag: every capture
-	 * path stops at the first page it has already seen, and the ingest upsert is
-	 * idempotent on (source, external_id), so a repeated run costs a request and
-	 * changes nothing.
-	 */
 	browser.alarms.onAlarm.addListener((alarm) => {
 		void (async () => {
 			if (alarm.name.startsWith(SOURCE_RUN_RECOVERY_ALARM_PREFIX)) {
@@ -2140,16 +2177,11 @@ export default defineBackground(() => {
 				await processPendingRefreshes();
 				return;
 			}
-			if (alarm.name !== ALARM) return;
-			const config = await loadConfig();
-			for (const entry of config?.sources ?? []) {
-				if (entry.mode !== "page") continue;
-				await startCapture(entry.source, true);
-			}
 		})();
 	});
 
-	void rescheduleAlarm();
+	// Earlier versions kept a daily catch-up alarm. Sync now follows the library.
+	void browser.alarms.clear(SYNC_ALARM);
 	void rescheduleHeartbeat();
 	void wakeDurableQueue().then(processPendingRefreshes);
 	requestHeartbeat();
@@ -2169,6 +2201,25 @@ export default defineBackground(() => {
 	// works without anyone opening the popup.
 	browser.tabs.onUpdated.addListener((tabId, info, tab) => {
 		if (info.status !== "complete" || !tab.url) return;
+		void settings().then(async (current) => {
+			if (isLibraryPage(tab.url, current?.server)) {
+        // The bridge only serves Sync now, so failing to add it must not stop this sync.
+        void browser.scripting.executeScript({target: {tabId}, func: () => {
+          const marker = "__anansiSyncBridge";
+          const state = globalThis as typeof globalThis & {__anansiSyncBridge?: boolean};
+          if (state[marker]) return;
+          state[marker] = true;
+          window.addEventListener("message", event => {
+            if (event.source !== window || event.origin !== location.origin || event.data?.anansi !== "library-sync-request" || typeof event.data.id !== "string" || event.data.id.length > 80) return;
+            const id = event.data.id;
+            void chrome.runtime.sendMessage({anansi: "library-sync-now", messageVersion: 1}).then(result => {
+              window.postMessage({anansi: "library-sync-response", id, ok: result?.ok === true}, location.origin);
+            }).catch(() => window.postMessage({anansi: "library-sync-response", id, ok: false}, location.origin));
+          });
+        }}).catch(() => {});
+        return librarySync().libraryOpened();
+      }
+		}).catch(() => {});
 		void loadConfig().then((config) => {
 			const entry = config?.sources.find((candidate) =>
 				tab.url?.includes(candidate.host.replace("www.", "")),

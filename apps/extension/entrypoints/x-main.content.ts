@@ -1,3 +1,4 @@
+import { syncStopReason } from "../lib/sync-stop.ts";
 import { createNativeSnapshotCache } from "../lib/native-snapshot.ts";
 import { xhrResponseText } from "../lib/xhr-response.ts";
 import type { NormalizedItem } from "@anansi/sources";
@@ -47,6 +48,7 @@ interface SourceConfig {
   cursorPrefix: string;
   entryPrefix: string;
   pageLimit: number;
+  knownIds?: string[];
   watchOperations?: string[];
   /** Where the last acknowledged run stopped, if it stopped part-way. */
   resumeCursor?: string;
@@ -586,6 +588,8 @@ export default defineContentScript({
           ...(refreshTop && cursor ? { cursor } : read.cursor ? { cursor: read.cursor } : {}),
         });
 
+        const syncStop = syncStopReason(read.ids, cfg.knownIds, page, cfg.pageLimit);
+        if (syncStop) { limited = syncStop === "page_limit"; break; }
         const decision = shouldStopImport({
           page,
           pageLimit: cfg.pageLimit,

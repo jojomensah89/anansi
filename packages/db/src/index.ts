@@ -13,6 +13,7 @@ export type { PendingMedia } from "./media.ts";
 export { applyCapture, CaptureApplicationError } from "./capture-events.ts";
 export type { CaptureApplicationErrorCode } from "./capture-events.ts";
 export { extensionHealth, recordExtensionHeartbeat } from "./extension-health.ts";
+export { latestLibrarySyncRequest, requestLibrarySync } from "./sync-requests.ts";
 export type { ExtensionHealth } from "./extension-health.ts";
 export {
 	HIDDEN_SOURCES,
@@ -33,3 +34,11 @@ export { clearSemanticIndex, completeSemanticVectorDeletions, discardSemanticChu
 export type { SemanticChunkRow, SemanticChunkVector } from "./semantic-index.ts";
 export { chunkSemanticText, normalizeSemanticText, SEMANTIC_CHUNKER_VERSION, SEMANTIC_CHUNK_MAX_CHARS, SEMANTIC_CHUNK_OVERLAP_CHARS, SEMANTIC_CREDIT_CHARS } from "./semantic-chunks.ts";
 export type { SemanticTextChunk } from "./semantic-chunks.ts";
+
+export { knownSyncIds } from "./sync-requests.ts";
+
+export { getSyncSettings, setSyncSettings, pendingPlatformSync, requestPlatformSync } from "./sync-requests.ts";
+
+export { recordPublicGithubCheck } from "./sync-requests.ts";
+
+export { claimPublicGithubCheck } from "./sync-requests.ts";

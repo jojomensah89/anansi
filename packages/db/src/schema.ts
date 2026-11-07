@@ -363,3 +363,26 @@ export const extensionClients = sqliteTable(
 );
 
 export { mediaJobs } from "./media-jobs-schema.ts";
+
+/** One row: the last time a library page asked for platforms to be checked. */
+export const syncRequests = sqliteTable("sync_requests", {
+  id: integer("id").primaryKey().default(1),
+  requestedAt: integer("requested_at").notNull(),
+});
+
+/** Per-platform pending requests and owner-controlled sync configuration. */
+export const platformSync = sqliteTable("platform_sync", {
+  source: text("source").primaryKey(),
+  requestedAt: integer("requested_at").notNull().default(0),
+  forced: integer("forced").notNull().default(0),
+  trigger: text("trigger").notNull().default("library"),
+  agentAt: integer("agent_at").notNull().default(0),
+});
+export const syncSettings = sqliteTable("sync_settings", {
+  id: integer("id").primaryKey().default(1),
+  agentTabs: integer("agent_tabs").notNull().default(0),
+  githubUsername: text("github_username"),
+  githubCheckedAt: integer("github_checked_at"),
+  githubError: text("github_error"),
+  githubRetryAt: integer("github_retry_at").notNull().default(0),
+});

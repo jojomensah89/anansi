@@ -430,6 +430,35 @@ describe("handleApi", () => {
 		});
 	});
 
+	test("opening the library reaches the extension through its check-in", async () => {
+		const opened = await handleApi(env, new Request("https://anansi.test/api/sync", { method: "POST" }));
+		expect(opened.status).toBe(200);
+		const { requestedAt } = (await opened.json()) as { requestedAt: number };
+		const checkIn = await handleApi(
+			env,
+			new Request("https://anansi.test/api/extension/heartbeat", {
+				method: "POST",
+				headers: { "content-type": "application/json", authorization: "Bearer test-token" },
+				body: JSON.stringify({
+					schemaVersion: 1,
+					installationId: "123e4567-e89b-42d3-a456-426614174000",
+					extensionVersion: "0.1.0",
+					queue: { queued: 0, uploading: 0, retrying: 0, failed: 0 },
+					sources: {},
+				}),
+			}),
+		);
+		expect(((await checkIn.json()) as { syncRequestedAt: number }).syncRequestedAt).toBe(requestedAt);
+	});
+
+	test("a capture token cannot request a sync", async () => {
+		const response = await dispatchApi(env, new Request("https://anansi.test/api/sync", {
+			method: "POST",
+			headers: { authorization: "Bearer test-token" },
+		}));
+		expect(response.status).toBe(401);
+	});
+
 	test("extension heartbeat requires auth and updates connection health", async () => {
 		const heartbeat = {
 			schemaVersion: 1,

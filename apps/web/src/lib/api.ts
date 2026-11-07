@@ -192,6 +192,7 @@ export interface SourceRuntime extends QueueCounts {
   phase: "idle" | "running";
   paused?: boolean;
   lastErrorCode?: string;
+  lastCheckedAt?: number;
 }
 
 export interface ExtensionHealth {
@@ -274,6 +275,8 @@ export const api = {
 	},
 
   sources: (signal?: AbortSignal) => get<SourcesResponse>("/api/sources", signal),
+
+  requestSync: (force = false, browserHandled = false) => post<{ requestedAt: number }>("/api/sync", {force, browserHandled}),
 
   toggleSource: (source: string, enabled: boolean) =>
     post<{ source: string; enabled: boolean }>(`/api/sources/${source}`, { enabled }),

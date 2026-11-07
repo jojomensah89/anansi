@@ -141,7 +141,6 @@ export type PopupCommandMessage = MessageBase &
 				action:
 					| "queue-status"
 					| "import-all"
-					| "reschedule"
 					| "save-page"
 					| "mirror-status"
 					| "mirror-on"
@@ -546,7 +545,6 @@ function validatePopupCommandShape(
 	if (
 		value.action === "queue-status" ||
 		value.action === "import-all" ||
-		value.action === "reschedule" ||
 		value.action === "save-page" ||
 		value.action === "mirror-status" ||
 		value.action === "mirror-on" ||
@@ -688,4 +686,14 @@ export function parseExtensionMessage(
 	} catch {
 		return fail("invalid_message");
 	}
+}
+
+/** Library traffic is a separate, deliberately tiny command surface. */
+export function isLibrarySyncCommand(message: unknown, senderUrl: string | undefined, connectedOrigin: string | undefined): boolean {
+  if (!senderUrl || !connectedOrigin || !message || typeof message !== "object") return false;
+  try {
+    const value = message as Record<string, unknown>;
+    return new URL(senderUrl).origin === new URL(connectedOrigin).origin &&
+      Object.keys(value).length === 2 && value.anansi === "library-sync-now" && value.messageVersion === MESSAGE_PROTOCOL_VERSION;
+  } catch { return false; }
 }

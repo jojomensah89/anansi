@@ -87,7 +87,7 @@ Each stage ends with its own proof. A successful build alone never counts.
 
 ### 2. TikTok and background sync
 
-- Replace the click-and-watch TikTok import with direct fetches from a TikTok tab.
+- TikTok import scrolls its own Favorites list in a small window in front. Direct fetches were tried and do not work: TikTok answers re-issued requests with an empty body, and a hidden tab does not load the list. A sync therefore also shows that window, which is one more reason TikTok is opt-in.
 - Add one on-demand sync for every platform, stopping at the first known item. Remove today's 24-hour catch-up timer. No sync runs at browser start or on wake.
 - Trigger it when the library opens on this computer. Reddit and GitHub need no tab. X and TikTok use an open tab or a brief background tab that closes afterward.
 - When the library opens on another device, record a sync request on the Worker. The extension picks it up from its existing two-minute check-in, which only contacts the owner's Worker and never a platform.
@@ -96,6 +96,8 @@ Each stage ends with its own proof. A successful build alone never counts.
 - Show new saves arriving live through the existing two-second refresh.
 - Show each platform's last check, any error, and whether the browser is offline, on the library and Sources.
 - Let the library page talk to the extension on the owner's own origin only.
+
+**Implementation choices (2026-11-07):** syncs take an authenticated pre-run snapshot of at most 2,000 currently saved external IDs per source. Removed saves are excluded. The snapshot cannot learn IDs from its own in-flight pages. Syncs stop on a known ID or after ten pages, including an empty library's first sync. This bounded catch-up can require a manual full import after a large gap. TikTok keeps its focused import window and scrolls only its own rendered list; it makes no replayed requests. Sources stores an explicitly entered public GitHub username; it is never inferred from repository authors. Public API checks have a five-minute lease/backoff and report rate limits and page caps. ?Sync now? uses an origin-validated extension bridge where reachable; otherwise it visibly queues a forced Worker request. Both screens show browser check attempts and errors from heartbeat state, plus public GitHub check status. Agent requests use per-platform atomic fifteen-minute throttles, independent of ordinary library requests.
 
 **Proof:** for X, Reddit, TikTok and GitHub, save on the phone without opening the platform on desktop, then check three cases. With the library closed, no platform request or tab occurs. With the library opened on desktop, the save arrives within seconds to a minute. With the library opened on the phone while the desktop browser runs, it arrives within about two minutes of the check-in.
 

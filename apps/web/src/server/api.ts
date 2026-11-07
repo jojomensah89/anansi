@@ -1,6 +1,10 @@
+import { checkPublicGithub } from "./public-github-sync.ts";
 import {
 	creatorPage,
 	extensionHealth,
+	knownSyncIds, getSyncSettings, setSyncSettings, pendingPlatformSync, requestPlatformSync,
+	latestLibrarySyncRequest,
+	requestLibrarySync,
 	findByAuthor,
 	getItem,
 	disabledSources,
@@ -311,7 +315,28 @@ const extensionHeartbeatRoute: Route = {
 		if (!parsed.ok) return json({ error: parsed.error.message }, 400);
 		const receivedAt = Math.floor(Date.now() / 1000);
 		await recordExtensionHeartbeat(env.db, parsed.heartbeat, receivedAt);
-		return json({ ok: true, receivedAt });
+		return json({
+			ok: true,
+			receivedAt,
+			syncRequestedAt: await latestLibrarySyncRequest(env.db),
+      platformSync: await pendingPlatformSync(env.db),
+		});
+	},
+};
+
+/** A library page opened somewhere. The extension acts on this at check-in. */
+const librarySyncRoute: Route = {
+	method: "POST",
+	path: "/api/sync",
+	handle: async ({ env, request }) => {
+    const body = (request.body === null ? {} : await request.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object" || (body.force !== undefined && typeof body.force !== "boolean")) return json({error: "invalid sync request"}, 400);
+		const requestedAt = Math.floor(Date.now() / 1000);
+		await requestLibrarySync(env.db, requestedAt);
+    if (body.browserHandled !== true) await requestPlatformSync(env.db, requestedAt, body.force === true ? "force" : "library");
+    const github = checkPublicGithub(env.db, fetch, requestedAt, body.force === true);
+    if (env.waitUntil) env.waitUntil(github); else await github;
+		return json({ requestedAt });
 	},
 };
 
@@ -656,6 +681,19 @@ const ROUTES: Route[] = [
 	aiSettingsRoute, semanticPreviewRoute, aiSettingsUpdateRoute, aiReclassifyRoute,
 	extensionConfigRoute,
 	extensionHeartbeatRoute,
+	librarySyncRoute,
+  {method: "GET", path: "/api/sync/settings", handle: async ({env}) => json(await getSyncSettings(env.db))},
+  {method: "POST", path: "/api/sync/settings", handle: async ({env, request}) => {
+    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    if (!body || typeof body.agentTabs !== "boolean" || !(body.githubUsername === null || typeof body.githubUsername === "string")) return json({error: "invalid settings"},400);
+    try { await setSyncSettings(env.db, {agentTabs: body.agentTabs, githubUsername: body.githubUsername}); } catch { return json({error: "invalid GitHub username"},400); }
+    return json(await getSyncSettings(env.db));
+  }},
+  { method: "GET", path: "/api/extension/known-ids", handle: async ({env, q}) => {
+    const source = q.get("source");
+    if (!source || !["x", "reddit", "github", "tiktok"].includes(source)) return json({error: "invalid source"}, 400);
+    return json({ ids: await knownSyncIds(env.db, source) });
+  } },
 	ingestRoute,
 ];
 

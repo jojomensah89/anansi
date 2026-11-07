@@ -1,6 +1,6 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createAnansiServer } from "@anansi/mcp";
-import type { AnansiDb } from "@anansi/db";
+import { extensionHealth, requestPlatformSync, getSyncSettings, type AnansiDb } from "@anansi/db";
 import { sameSecret } from "./library-auth.ts";
 
 /**
@@ -43,7 +43,14 @@ export async function handleMcp(env: McpEnv, request: Request): Promise<Response
   // pure reads, so there is no session worth keeping.
   // The web-standard transport, not the node one: a Worker has Request and
   // Response, not req/res streams.
-  const server = createAnansiServer(env.db);
+  const server = createAnansiServer(env.db, async () => {
+    const now = Math.floor(Date.now()/1000);
+    const [requested, health, settings] = await Promise.all([requestPlatformSync(env.db, now, "agent"), extensionHealth(env.db, now), getSyncSettings(env.db)]);
+    return {browserOffline: health.connection !== "connected", platforms: Object.fromEntries(["x", "reddit", "github", "tiktok"].map(source => [source, {
+      requested: requested.includes(source), browser: health.sources[source as keyof typeof health.sources] ?? null,
+      ...(source === "github" ? {publicCheckedAt: settings.githubCheckedAt, publicError: settings.githubError} : {}),
+    }]))};
+  });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });

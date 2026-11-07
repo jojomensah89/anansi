@@ -13,6 +13,7 @@ export interface HeartbeatSourceState extends CaptureQueueStatus {
 	phase: "idle" | "running";
 	paused?: boolean;
 	lastErrorCode?: string;
+	lastCheckedAt?: number;
 }
 
 export interface ExtensionHeartbeat {
@@ -45,6 +46,7 @@ const ROOT_KEYS = new Set([
 ]);
 const QUEUE_KEYS = new Set(["queued", "uploading", "retrying", "failed"]);
 const SOURCE_KEYS = new Set([
+  "lastCheckedAt",
 	...QUEUE_KEYS,
 	"phase",
 	"paused",
@@ -91,6 +93,7 @@ function sourceState(value: unknown): value is HeartbeatSourceState {
 			retrying: value.retrying,
 			failed: value.failed,
 		}) &&
+		(value.lastCheckedAt === undefined || (Number.isSafeInteger(value.lastCheckedAt) && (value.lastCheckedAt as number) >= 0)) &&
 		(value.phase === "idle" || value.phase === "running") &&
 		(value.paused === undefined || typeof value.paused === "boolean") &&
 		(value.lastErrorCode === undefined ||

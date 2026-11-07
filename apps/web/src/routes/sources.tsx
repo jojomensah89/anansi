@@ -1,3 +1,4 @@
+import { SyncControls } from "../components/sync-controls.tsx";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Rail } from "../components/rail.tsx";
@@ -150,6 +151,7 @@ function Sources() {
 					minWidth: 0,
 				}}
 			>
+				<SyncControls settings/>
 				<header
 					style={{
 						height: 52,

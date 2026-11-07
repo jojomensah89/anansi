@@ -1,3 +1,4 @@
+import { SyncControls } from "../components/sync-controls.tsx";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -128,6 +129,11 @@ function Library() {
   const visibleCount = search.archived ? (stats.data?.archived ?? 0) : total;
   const counts = stats.data?.bySource ?? {};
 
+  useEffect(() => {
+    // Sync help only: the library works the same if this request fails.
+    void api.requestSync().catch(() => {});
+  }, []);
+
   const previousStatsFingerprint = useRef<string | null>(null);
   useEffect(() => {
     if (!stats.data) return;
@@ -221,6 +227,7 @@ function Library() {
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div className="scroll" style={{ flex: 1 }}>
+          <SyncControls/>
           {/*
             Glass, and therefore sticky inside the scroller rather than fixed
             above it. Blur over an empty background is just a tint; the header

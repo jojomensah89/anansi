@@ -1,3 +1,4 @@
+import { syncStopReason } from "../lib/sync-stop.ts";
 import { createNativeSnapshotCache } from "../lib/native-snapshot.ts";
 import { xhrResponseJson } from "../lib/xhr-response.ts";
 import type { NormalizedItem } from "@anansi/sources";
@@ -52,6 +53,8 @@ type Outbound =
 
 interface ScanConfig {
   source: string;
+  pageLimit?: number;
+  knownIds?: string[];
   watchUrls?: string[];
   mutationUrl?: string;
   idField?: string;
@@ -95,6 +98,8 @@ export default defineContentScript({
     let watched: string[] = [];
     let mutationConfig: ScanConfig = { source: "tiktok" };
     let scanning = false;
+    let syncConfig: ScanConfig | undefined;
+    let syncPages = 0;
     let sawFavoritesResponse = false;
     /** Set by any observed Favourites page that said there is more. */
     let moreToLoad = true;
@@ -115,6 +120,10 @@ export default defineContentScript({
       const page = readItemList(raw);
       moreToLoad = page.hasMore;
       favouritesResponses++;
+      syncPages++;
+      if (syncConfig?.knownIds) {
+        if (syncStopReason(page.ids, syncConfig.knownIds, syncPages, syncConfig.pageLimit)) moreToLoad = false;
+      }
       if (page.count === 0) return;
       if (activeRunId) send({ action: "observed", operation, raw, items: page.count, runId: activeRunId });
     };
@@ -590,6 +599,8 @@ export default defineContentScript({
         scanning = true;
         moreToLoad = true;
         sawFavoritesResponse = false;
+        syncConfig = msg.config;
+        syncPages = 0;
         void (async () => {
           /**
            * Whatever happens, say so and let the next run start.
