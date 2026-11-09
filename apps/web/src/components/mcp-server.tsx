@@ -1,20 +1,10 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { MCP_TOOL_CATALOG } from "@anansi/mcp/catalog";
+import { MCP_TOOL_CATALOG, MCP_WRITE_TOOL_CATALOG } from "@anansi/mcp/catalog";
 import { Rail } from "./rail.tsx";
 import { clientSnippet, MCP_CLIENTS, MCP_TOKEN_PLACEHOLDER, type McpClientId } from "./mcp-config.ts";
 import { api } from "../lib/api.ts";
 
 type CopyTarget = "endpoint" | "snippet";
-
-function ServerGlyph({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="4" width="16" height="6" rx="1.5" />
-      <rect x="4" y="14" width="16" height="6" rx="1.5" />
-      <path d="M7 7h.01M7 17h.01M11 7h6M11 17h6" />
-    </svg>
-  );
-}
 
 function CopyGlyph() {
   return (
@@ -73,6 +63,8 @@ const getServerOrigin = () => "";
 export function McpServerPage() {
   const origin = useSyncExternalStore(emptySubscribe, getClientOrigin, getServerOrigin);
   const [selectedClient, setSelectedClient] = useState<McpClientId>("claude-code");
+  const [mode, setMode] = useState<"oauth" | "key">("oauth");
+  const [ready, setReady] = useState(false);
   const [copied, setCopied] = useState<CopyTarget | null>(null);
   const [stats, setStats] = useState({ items: 0, authors: 0, archived: 0, bySource: {} as Record<string, number> });
 
@@ -80,13 +72,13 @@ export function McpServerPage() {
     const controller = new AbortController();
     api
       .stats(controller.signal)
-      .then((next) => setStats({ items: next.items, authors: next.authors, archived: next.archived, bySource: next.bySource }))
+      .then((next) => { setStats({ items: next.items, authors: next.authors, archived: next.archived, bySource: next.bySource }); setReady(true); })
       .catch(() => {});
     return () => controller.abort();
   }, []);
 
   const endpoint = `${origin}/mcp`;
-  const snippet = useMemo(() => clientSnippet(selectedClient, endpoint), [endpoint, selectedClient]);
+  const snippet = useMemo(() => clientSnippet(selectedClient, endpoint, mode), [endpoint, selectedClient, mode]);
 
   const copy = async (target: CopyTarget, value: string) => {
     try {
@@ -102,28 +94,24 @@ export function McpServerPage() {
 
   return (
     <div className="mcp-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
-      <Rail total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} />
+      <Rail ready={ready} total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} />
 
       <main className="mcp-main scroll">
         <div className="mcp-wrap">
           <header className="mcp-header">
-            <div className="mcp-eyebrow mono">
-              <ServerGlyph size={15} />
-              Integrations
-            </div>
             <h1>MCP server</h1>
             <p>
-              Give your agents a secure, read-only way to search the memories you have saved in Anansi.
+              Connect an agent to your saved library. You decide what it can change.
             </p>
           </header>
 
           <section className="mcp-endpoint-card" aria-labelledby="mcp-endpoint-heading">
-            <div className="mcp-card-label mono" id="mcp-endpoint-heading">Your MCP endpoint</div>
+            <div className="mcp-card-label" id="mcp-endpoint-heading">Your library address</div>
             <div className="mcp-endpoint-row">
               <code className="mcp-endpoint">{endpoint}</code>
               <CopyButton target="endpoint" value={endpoint} copied={copied} onCopy={copy} />
               <div className="mcp-endpoint-meta">
-                <span className="mcp-status-pill"><span className="mcp-status-dot" />{MCP_TOOL_CATALOG.length} tools available</span>
+                <span className="mcp-status-pill"><span className="mcp-status-dot" />{MCP_TOOL_CATALOG.length} read / {MCP_WRITE_TOOL_CATALOG.length} optional write</span>
                 <span>Streamable HTTP · OAuth or API key</span>
               </div>
             </div>
@@ -133,13 +121,13 @@ export function McpServerPage() {
             <section className="mcp-card" aria-labelledby="mcp-connect-heading">
               <div className="mcp-card-heading">
                 <div>
-                  <div className="mcp-card-kicker mono">Connect a client</div>
-                  <h2 id="mcp-connect-heading">Add Anansi to your agent</h2>
+                  
+                  <h2 id="mcp-connect-heading">Choose how to connect</h2>
                 </div>
               </div>
 
               <div className="mcp-step">
-                <span className="mcp-step-number">1</span>
+                
                 <div className="mcp-step-content">
                   <h3>Choose your client</h3>
                   <div className="mcp-client-list" role="tablist" aria-label="MCP clients">
@@ -164,20 +152,18 @@ export function McpServerPage() {
               </div>
 
               <div className="mcp-step">
-                <span className="mcp-step-number">2</span>
+                
                 <div className="mcp-step-content">
-                  <div className="mcp-step-title-row">
-                    <h3>Connect with OAuth or an API key</h3>
-                    <span className="mcp-configured"><span className="mcp-status-dot" />Configured</span>
+                  <div className="mcp-auth-options" aria-label="Connection method">
+                    <button aria-pressed={mode === "oauth"} onClick={() => setMode("oauth")}><strong>Sign in with OAuth</strong><span>Recommended - approve in your browser</span></button>
+                    <button aria-pressed={mode === "key"} onClick={() => setMode("key")}><strong>Use an API key</strong><span>For scripts and CLI tools</span></button>
                   </div>
-                  <p className="mcp-step-copy">
-                    For apps with OAuth, add the endpoint above and follow the sign-in prompt. Check the destination and allow read access. For scripts, create a named API key in Settings → Connected clients and replace <code>{MCP_TOKEN_PLACEHOLDER}</code> below. Revoke either connection in Settings.
-                  </p>
+                  <p className="mcp-step-copy">{mode === "oauth" ? "Add this setup to your client, then sign in and approve access in your browser. In Claude Desktop or claude.ai, add the URL as a custom connector." : <>Create a key in <a href="/settings#connected-clients">Settings &gt; Connected clients</a>, then replace <code>{MCP_TOKEN_PLACEHOLDER}</code>. Keep your key private.</>}</p>
                   <div className="mcp-code-wrap">
                     <pre><code>{snippet}</code></pre>
                     <CopyButton target="snippet" value={snippet} copied={copied} onCopy={copy} />
                   </div>
-                  <p className="mcp-note mono">Bearer authentication is required for every MCP request.</p>
+                  <p className="mcp-note">Connections start read-only. Allow changes in Connected clients. Agents can never delete.</p>
                 </div>
               </div>
             </section>
@@ -185,17 +171,17 @@ export function McpServerPage() {
             <section className="mcp-card mcp-tools-card" aria-labelledby="mcp-tools-heading">
               <div className="mcp-card-heading">
                 <div>
-                  <div className="mcp-card-kicker mono">Available tools</div>
+                  
                   <h2 id="mcp-tools-heading">Tools</h2>
                 </div>
-                <span className="mcp-tool-count mono">{MCP_TOOL_CATALOG.length}</span>
+                <span className="mcp-tool-count mono">{MCP_TOOL_CATALOG.length + MCP_WRITE_TOOL_CATALOG.length}</span>
               </div>
-              <p className="mcp-tools-intro">Read-only actions available to a connected agent.</p>
+              <p className="mcp-tools-intro">Search uses meaning when AI is on and keywords otherwise. Write tools need your permission.</p>
               <div className="mcp-tool-list">
-                {MCP_TOOL_CATALOG.map((tool) => (
+                {[...MCP_TOOL_CATALOG, ...MCP_WRITE_TOOL_CATALOG].map((tool) => (
                   <div className="mcp-tool-row" key={tool.name}>
                     <code>{tool.name}</code>
-                    <span>{tool.summary}</span>
+                    <span>{tool.summary}{"permission" in tool && <em className="mcp-permission">Needs write permission</em>}</span>
                   </div>
                 ))}
               </div>

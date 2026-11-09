@@ -48,3 +48,10 @@ export const MCP_TOOL_CATALOG = [
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_CATALOG)[number]["name"];
+
+export const MCP_WRITE_TOOL_CATALOG = [
+ {name:"add_tag",summary:"Add a tag to a saved item.",permission:"write"},
+ {name:"remove_tag",summary:"Remove a tag from a saved item.",permission:"write"},
+ {name:"set_note",summary:"Set or clear a saved note.",permission:"write"},
+ {name:"save_link",summary:"Save a web link.",permission:"write"},
+] as const;

@@ -13,8 +13,8 @@ export const Route = createFileRoute("/mcp")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const { db, mcpToken } = await serverEnv();
-        return handleMcp({ db, token: mcpToken }, request);
+        const { db, mcpToken, ai, vectorize, media, waitUntil } = await serverEnv();
+        return handleMcp({ db, token: mcpToken, ai, vectorize, media, waitUntil }, request);
       },
     },
   },

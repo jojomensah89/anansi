@@ -1,6 +1,7 @@
+import { coordinateSearch } from "./search-coordinator.ts";
 import { sql } from "drizzle-orm";
 import { runPreviewPass } from "./link-preview.ts";
-import { retireSelf, authorizeClient, createClient, listClients, retired, retireLegacy, updateClient, redeemPairing } from "./clients.ts";
+import { setClientWrite, retireSelf, authorizeClient, createClient, listClients, retired, retireLegacy, updateClient, redeemPairing } from "./clients.ts";
 import { checkPublicGithub } from "./public-github-sync.ts";
 import { decideRequest, describeRequest, exchangeToken, registerClient, type AuthorizationParams } from "./oauth.ts";
 import {
@@ -21,12 +22,11 @@ import {
 	sourceHealth,
 	recentSaves,
 	recordExtensionHeartbeat,
-	searchItemsPage,
 	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
 	InvalidListCursorError, InvalidSearchCursorError, InvalidCreatorCursorError,
 	getLibraryRestore,
   getAiSettings, setAiSettings, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
-  clearSemanticIndex, consumeSemanticCredits, estimateSemanticBackfill, semanticIndexStats,
+  clearSemanticIndex, estimateSemanticBackfill, semanticIndexStats,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
 import { authorizeLibrary, sessionRoute, type LibraryAuthEnv } from "./library-auth.ts";
@@ -38,8 +38,7 @@ import {
 } from "@anansi/sources";
 import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import type { AiBinding, VectorizeBinding } from "./ai.ts";
-import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
-import { hybridSearch } from "./semantic-search.ts";
+import { createVectorIndex } from "./ai.ts";
 import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
 import { ingestCapture } from "./ingest.ts";
 import { handleRestoreRequest } from "./restore.ts";
@@ -188,21 +187,7 @@ const searchRoute: Route = {
             order: q.get("order") === "posted" ? "posted" : "saved", cursor: q.get("cursor") ?? undefined,
             limit: num(q.get("limit"), 50),
           };
-          const page = await searchItemsPage(env.db, searchOptions);
-          const aiSettings = await getAiSettings(env.db);
-          const runtime = (env.ai && env.vectorize) ? {
-            provider: createEmbeddingProvider(env.ai, aiSettings.embeddingModel, aiSettings.embeddingDimensions),
-            index: createVectorIndex(env.vectorize, aiSettings.embeddingDimensions),
-            charge: async (text: string) => (await consumeSemanticCredits(env.db, text)).allowed,
-          } : undefined;
-          const hybrid = await hybridSearch(
-            env.db,
-            query,
-            searchOptions,
-            page,
-            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: aiSettings.embeddingDimensions, generation: aiSettings.semanticGeneration },
-            runtime,
-          );
+          const hybrid = await coordinateSearch(env, searchOptions);
           const enriched = await previewState(env.db, hybrid);
           return json({ query, items: enriched.items, results: enriched.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
         } catch (error) {
@@ -751,6 +736,16 @@ export async function handleApi(
     return await retireSelf(env.db,request) ? json({ok:true}) : json({error:"unauthorized"},401);
   }
   if (path === "/api/clients" || path.startsWith("/api/clients/")) {
+    if (path.endsWith("/permissions")) {
+      if (request.headers.has("authorization")) return json({error:"Use owner session"},401);
+      const denied = authorizeLibrary(env,request); if (denied) return denied;
+      if (request.headers.get("origin") !== url.origin) return json({error:"origin is not allowed"},403);
+      if (request.method !== "PATCH") return json({error:"method not allowed"},405);
+      const body = await request.json().catch(()=>null) as {write?:unknown}|null;
+      if (typeof body?.write !== "boolean") return json({error:"write must be boolean"},400);
+      const client = await setClientWrite(env.db,path.slice(13,-12),body.write);
+      return client ? json({client}) : json({error:"eligible client not found"},404);
+    }
     if (request.headers.has("authorization") && await retired(env.db)) return json({error:"Use owner sign-in"},401);
     const denied=authorizeLibrary(env,request); if (denied) return denied;
     // Management always requires same-origin, even for explicit owner bearer requests.

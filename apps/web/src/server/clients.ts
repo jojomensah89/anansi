@@ -42,7 +42,7 @@ export async function authorizeClient(env: {db: AnansiDb; ingestToken?: string; 
  if (mcp && key.startsWith("anansi_at_")) return await authorizeOAuthToken(env.db,digest,new URL(request.url).origin) ? null : denied();
  const row=(await env.db.select().from(clients).where(eq(clients.keyHash,digest)))[0];
  if (row) {
-  if (!sameSecret(digest,row.keyHash) || row.revokedAt !== null || (capture ? row.kind !== "extension" || row.scopes !== "capture" : row.kind !== "api" || row.scopes !== "read")) return denied();
+  if (!sameSecret(digest,row.keyHash) || row.revokedAt !== null || (capture ? row.kind !== "extension" || row.scopes !== "capture" : row.kind !== "api" || !row.scopes.split(",").includes("read"))) return denied();
   if (row.lastUse === null || now()-row.lastUse >= 300) await env.db.update(clients).set({lastUse:now()}).where(and(eq(clients.id,row.id),or(isNull(clients.lastUse),lt(clients.lastUse,now()-299))));
   return null;
  }
@@ -65,4 +65,18 @@ export async function retireSelf(db: AnansiDb, request: Request) {
  if (!key) return false;
  const rows=await db.update(clients).set({revokedAt:now()}).where(and(eq(clients.keyHash,hash(key)),eq(clients.kind,"extension"),eq(clients.scopes,"capture"),isNull(clients.revokedAt))).returning({id:clients.id});
  return rows.length === 1;
+}
+
+/** Owner management entry; route enforces session and same-origin. No schema change. */
+export async function setClientWrite(db: AnansiDb, id: string, write: boolean) {
+ const rows = await db.update(clients).set({scopes:write ? "read,write" : "read"}).where(and(eq(clients.id,id),isNull(clients.revokedAt),or(eq(clients.kind,"api"),eq(clients.kind,"app")))).returning({id:clients.id,kind:clients.kind,scopes:clients.scopes});
+ return rows[0] ?? null;
+}
+export async function clientCanWrite(db: AnansiDb, request: Request) {
+ const key=request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
+ if (!key) return false;
+ const rows = key.startsWith("anansi_at_")
+ ? await db.select({scopes:clients.scopes,revokedAt:clients.revokedAt}).from(oauthTokens).innerJoin(clients,eq(clients.id,oauthTokens.connectedClientId)).where(eq(oauthTokens.accessHash,hash(key)))
+ : await db.select({scopes:clients.scopes,revokedAt:clients.revokedAt}).from(clients).where(and(eq(clients.keyHash,hash(key)),eq(clients.kind,"api")));
+ return rows[0]?.revokedAt === null && rows[0].scopes.split(",").includes("write");
 }

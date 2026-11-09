@@ -1,6 +1,6 @@
 # ADR 0004: Keep MCP keyword-only unless explicitly changed
 
-- Status: Accepted
+- Status: Superseded by [ADR 0005](0005-agent-search-and-write-scope.md)
 - Date: 2026-09-07
 - Baseline: `25aed8d`
 

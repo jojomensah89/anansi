@@ -88,9 +88,9 @@ export async function hybridSearch(
       throw new AiProviderError("dimension", "semantic components have incompatible dimensions");
     }
     if (runtime.charge && !(await runtime.charge(query))) throw new AiProviderError("quota", "monthly semantic credit cap reached");
-    const vector = await runtime.provider.embed(query);
+    const vector = await bounded(runtime.provider.embed(query));
     const limit = Math.min(Math.max(Math.floor(opts.limit ?? 30), 1), 100);
-    const nearest = await runtime.index.query(vector, { topK: Math.min(Math.max(limit * 10, 50), 100) });
+    const nearest = await bounded(runtime.index.query(vector, { topK: Math.min(Math.max(limit * 10, 50), 100) }));
     // An empty/warming sidecar is a normal state. Preserve the lexical page
     // until the first vector is indexed rather than turning a successful
     // provider call into an empty result set.
@@ -121,4 +121,10 @@ export async function hybridSearch(
     if (snapshot) degraded.state = degradedReason === "provider-unavailable" ? "unavailable" : degradedReason === "quota" ? "paused" : "error";
     return { ...base, semantic: withSnapshot(degraded) };
   }
+}
+
+async function bounded<T>(work: Promise<T>): Promise<T> {
+ let timer: ReturnType<typeof setTimeout> | undefined;
+ try { return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new AiProviderError("unavailable","semantic search timed out")),5000);})]); }
+ finally { if (timer) clearTimeout(timer); }
 }

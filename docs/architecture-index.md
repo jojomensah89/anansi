@@ -68,7 +68,8 @@ local contract checks, not live-provider or authenticated-browser proof.
 - [ADR 0001: shared AI lifecycle and projection adapters](adr/0001-shared-ai-job-lifecycle.md)
 - [ADR 0002: retained versus shipped source subsets](adr/0002-retained-versus-shipped-source-subsets.md)
 - [ADR 0003: database-owned filtering and visibility](adr/0003-database-owned-filtering-and-visibility.md)
-- [ADR 0004: keyword-only MCP](adr/0004-keyword-only-mcp.md)
+- [ADR 0004: keyword-only MCP (superseded)](adr/0004-keyword-only-mcp.md)
+- [ADR 0005: semantic agent search and optional writes](adr/0005-agent-search-and-write-scope.md)
 - [Repository README](../README.md) — user-visible source, AI, MCP, privacy,
   and local/hosted behavior.
 - [Context glossary](../CONTEXT.md) — names and evidence boundary used by the

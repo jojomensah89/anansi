@@ -1,3 +1,4 @@
+import {ClientWritePermission} from "./client-write-permission.tsx";
 import { useEffect, useRef, useState } from "react";
 import { pairingState, dismissPairing } from "../lib/pairing-state.ts";
 import { useRouter } from "@tanstack/react-router";
@@ -227,7 +228,7 @@ export function ConnectedClients() {
           )}
         </td>
         <td>{c.kind === "api" ? "API key" : c.kind === "app" ? "App" : "Extension"}</td>
-        <td>{c.scopes === "read" ? "Read" : "Save only"}</td>
+        <td><span>{c.kind === "api" || c.kind === "app" ? "Read library" : "Save only"}</span><ClientWritePermission client={c} onChange={() => void refresh().catch(e => setError(e.message))} /></td>
         <td>{trail(c)}</td>
         <td>
           <div className="client-actions">

@@ -176,6 +176,13 @@
       "when": 1794180000000,
       "tag": "0024_link_previews",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1794260000000,
+      "tag": "0025_note_fts",
+      "breakpoints": true
     }
   ]
 }

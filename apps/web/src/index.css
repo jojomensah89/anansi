@@ -597,3 +597,41 @@ textarea::placeholder {
 
 @media(max-width:1000px){.client-section-head{flex-direction:column;gap:8px}.library-toolbar-actions{flex-wrap:wrap;justify-content:flex-start;width:100%;margin-left:0!important}.library-toolbar-actions button{white-space:nowrap;flex-shrink:0}.library-toolbar-actions>button:first-child{min-width:180px;flex:1}}
 .sources-header ~ .scroll {--faint:var(--muted);--fainter:var(--muted);--faintest:var(--muted)}
+
+/* Agent setup follows the existing Anansi app frame. */
+.mcp-header h1 {font-size:28px;line-height:1.2}
+.mcp-shell p,.mcp-shell button,.mcp-shell span,.mcp-card-label,.mcp-tool-row code {font-size:14px;letter-spacing:normal;text-transform:none}
+.mcp-card-label {font-family:inherit}
+.mcp-auth-options {display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 16px}
+.mcp-auth-options button {text-align:left;padding:16px;border:1px solid var(--edge);border-radius:8px;background:var(--card);color:var(--text);cursor:pointer}
+.mcp-auth-options button[aria-pressed=true] {border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.mcp-auth-options span {display:block;margin-top:8px;color:var(--muted)}
+.mcp-permission {display:block;font-size:14px;font-style:normal;color:var(--accent);margin-top:4px}
+.client-write-permission {margin-top:8px;min-width:180px;max-width:280px}
+.client-write-permission label {display:flex;gap:8px;align-items:center;font-size:14px;cursor:pointer}
+.client-write-permission input {accent-color:var(--accent);width:16px;height:16px}
+.client-write-permission p {font-size:14px;line-height:1.5;margin-top:8px;color:var(--muted)}
+.client-write-dialog {margin:auto;width:min(440px,calc(100vw - 32px));color:var(--text);background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:24px}
+.client-write-dialog::backdrop {background:#0009}
+.client-write-dialog h3 {font-size:18px;line-height:1.4;margin-bottom:12px}
+.client-table th {font-size:14px}
+@media(max-width:600px){.mcp-auth-options{grid-template-columns:1fr}.client-table td:nth-child(3){grid-column:1/-1}.client-write-permission{max-width:none}}
+
+.mcp-step {display:block}
+.mcp-step-content {width:100%;min-width:0}
+.mcp-client-list {display:flex;flex-wrap:wrap;gap:8px}
+.mcp-client-button {white-space:nowrap;border-radius:6px}
+.mcp-connect-grid {grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:start}
+.mcp-tool-row {grid-template-columns:1fr;gap:6px}
+.mcp-endpoint-meta {flex-wrap:wrap;color:var(--muted)}
+.mcp-card-label {color:var(--muted)}
+.mcp-code-wrap pre {font-size:14px;overflow-wrap:anywhere;white-space:pre-wrap;padding-right:80px}
+@media(max-width:1000px){.mcp-connect-grid{grid-template-columns:1fr}}
+
+@media(prefers-color-scheme:light){
+ .mcp-shell {--ink:#f7f8fa;--rail:#f0f2f4;--card:#fff;--raised:#edf0f3;--line:#dce1e6;--line-soft:#eef0f2;--edge:#d3d9df;--text:#20262d;--text-dim:#343f4b;--muted:#526171;--faint:#526171;--accent:#996014;--accent-text:#805010;color:var(--text);background:var(--ink)}
+}
+
+.mcp-note {color:var(--muted);font-size:14px}
+.mcp-status-pill,.mcp-tool-count {color:var(--text-dim);background:var(--raised)}
+.mcp-status-dot {background:var(--accent)}
