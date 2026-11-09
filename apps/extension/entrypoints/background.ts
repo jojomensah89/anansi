@@ -64,7 +64,7 @@ import {
 import { createLiveCapture } from "../lib/live-capture.ts";
 import { captureAdapter, isSessionCaptureSource, platformCanonicalUrl, platformEntryUrl, platformTabPatterns, shouldRefreshTopOnResume } from "../lib/platforms/registry.ts";
 import { createDocumentNonces } from "../lib/document-nonces.ts";
-import { importWindowBounds } from "../lib/import-window.ts";
+import { importWindowBounds, importTabPresentation, needsFullWindowImport } from "../lib/import-window.ts";
 import { createRunDeadlines } from "../lib/run-deadline.ts";
 import { SAVE_CONFIRMATION_SETTING } from "../lib/save-toast.ts";
 import {
@@ -1045,9 +1045,10 @@ async function openImportWindow(url: string) {
 async function openTab(
 	source: PlatformSource,
 	preferredUrl?: string,
+	live = false,
 ): Promise<{ id: number; ours: boolean } | null> {
 	const url = preferredUrl ?? platformEntryUrl(source);
-	const tab = captureAdapter(source).ownsImportTab
+	const tab = importTabPresentation(captureAdapter(source).ownsImportTab === true, live) === "window"
 		? await openImportWindow(url)
 		: await browser.tabs.create({ url, active: false });
 	if (!tab?.id) return null;
@@ -1213,7 +1214,7 @@ async function startCapture(
       return;
     }
   }
-  const entry = configuredEntry && live ? { ...configuredEntry, pageLimit: 10, knownIds } : configuredEntry;
+  const entry = configuredEntry && live ? { ...configuredEntry, pageLimit: source === "tiktok" ? 1 : 10, knownIds: source === "tiktok" ? knownIds ?? [] : knownIds } : configuredEntry;
 	if (!entry) {
 		if (!quiet)
 			await patchStatusForRun(source, runId, {
@@ -1251,7 +1252,7 @@ async function startCapture(
 	if (existing?.id) target = { id: existing.id, ours: false };
 	else {
 		await patchStatus(source, { message: `opening ${entry.host}…` });
-		target = await openTab(source);
+		target = await openTab(source, undefined, live);
 	}
 
 	if (!target) {
@@ -2062,11 +2063,15 @@ async function handlePageEvent(
 					source,
 					runId: msg.runId,
 					tabId,
-          state: run.runMode === "live" && currentStatus.pages >= 10 ? "limited" : "complete",
+          state: needsFullWindowImport(run.runMode === "live", msg) || (run.runMode === "live" && currentStatus.pages >= 10) ? "limited" : "complete",
 					initialImport: run.runMode !== "live",
 				});
 				await applyImportEffects(completed.effects);
-				if (completed.kind === "completed" && currentStatus.items === 0) {
+				if (completed.kind === "completed" && needsFullWindowImport(run.runMode === "live", msg)) {
+					await patchStatusForRun(source, msg.runId, {
+						message: "more favorites may remain; use Import everything to finish in a window",
+					});
+				} else if (completed.kind === "completed" && currentStatus.items === 0) {
 					await patchStatusForRun(source, msg.runId, {
 						message: "no favorites were returned",
 					});

@@ -113,7 +113,8 @@ Agent searches also prompt a sync through the same Worker request, with a 15-min
 
 - Add stored clients with names, permissions, last use and revocation.
 - Add the "Connect extension" flow and per-browser capture-only keys.
-- Stage 3A: named read-only API keys for MCP; OAuth is deferred to Stage 3B. Stored kind and scopes permit future OAuth clients.
+- Stage 3A: named read-only API keys for MCP.
+- Stage 3B: OAuth apps use @node-oauth/oauth2-server 5.3.1 with hashed credentials in D1, S256 PKCE, discovery, registration, owner-session consent, rotating refresh tokens and immediate revocation. Apps share Connected clients. No KV or new deployment secret.
 - Connect using a five-minute single-use code pasted into the popup after granting origin permission. Keys never enter page scripts. Explicit legacy retirement disables shared extension/MCP credentials.
 - Limit the master secret to owner sign-in and recovery.
 - Add the "Connected clients" screen.

@@ -1,3 +1,4 @@
+import { WebPreviewCard } from "./web-preview-card.tsx";
 import { mediaUrl, shortDate, type CardMedia, type ItemRow } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
 import { GithubRepoCard } from "./github-repo-card.tsx";
@@ -101,7 +102,7 @@ export function Card({
         </span>
       )}
 
-      {isRepo ? (
+      {item.source === "web" ? <WebPreviewCard item={item} onPreview={changed} footer={<CardOrganization item={item} tags={tags} onChanged={changed} />} /> : isRepo ? (
 		<>
 			<GithubRepoCard item={item} footer={<CardOrganization item={item} tags={tags} onChanged={changed} />} />
 		</>
@@ -251,7 +252,7 @@ export function Card({
 	);
 }
 
-function CardOrganization({ item, tags, onChanged }: { item: ItemRow; tags: NonNullable<ItemRow["tags"]>; onChanged: () => void }) {
+export function CardOrganization({ item, tags, onChanged }: { item: ItemRow; tags: NonNullable<ItemRow["tags"]>; onChanged: () => void }) {
 	return (
 		<div className="anansi-card-org" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", flexShrink: 0 }} onClick={(event) => event.stopPropagation()}>
 			{tags.slice(0, 2).map((tag) => <span key={tag.label} className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, minHeight: 21, padding: "0 7px", borderRadius: 5, background: `${tag.color || "#6b7280"}22`, color: "var(--text-dim)", fontSize: 10 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: tag.color || "#6b7280" }} />{tag.label}</span>)}

@@ -14,7 +14,9 @@ import { Route as CreatorsRouteImport } from './routes/creators'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourcesRouteImport } from './routes/sources'
+import { Route as DotwellKnownSplatRouteImport } from './routes/[.]well-known.$'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
+import { Route as OauthAuthorizeRouteImport } from './routes/oauth.authorize'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -41,9 +43,19 @@ const SourcesRoute = SourcesRouteImport.update({
   path: '/sources',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DotwellKnownSplatRoute = DotwellKnownSplatRouteImport.update({
+  id: '/.well-known/$',
+  path: '/.well-known/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
   path: '/api/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OauthAuthorizeRoute = OauthAuthorizeRouteImport.update({
+  id: '/oauth/authorize',
+  path: '/oauth/authorize',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -53,7 +65,9 @@ export interface FileRoutesByFullPath {
   '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/$': typeof ApiSplatRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -61,7 +75,9 @@ export interface FileRoutesByTo {
   '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/$': typeof ApiSplatRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,13 +86,31 @@ export interface FileRoutesById {
   '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/$': typeof ApiSplatRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/creators' | '/mcp' | '/settings' | '/sources' | '/api/$'
+  fullPaths:
+    | '/'
+    | '/creators'
+    | '/mcp'
+    | '/settings'
+    | '/sources'
+    | '/.well-known/$'
+    | '/api/$'
+    | '/oauth/authorize'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/creators' | '/mcp' | '/settings' | '/sources' | '/api/$'
+  to:
+    | '/'
+    | '/creators'
+    | '/mcp'
+    | '/settings'
+    | '/sources'
+    | '/.well-known/$'
+    | '/api/$'
+    | '/oauth/authorize'
   id:
     | '__root__'
     | '/'
@@ -84,7 +118,9 @@ export interface FileRouteTypes {
     | '/mcp'
     | '/settings'
     | '/sources'
+    | '/.well-known/$'
     | '/api/$'
+    | '/oauth/authorize'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -93,7 +129,9 @@ export interface RootRouteChildren {
   McpRoute: typeof McpRoute
   SettingsRoute: typeof SettingsRoute
   SourcesRoute: typeof SourcesRoute
+  DotwellKnownSplatRoute: typeof DotwellKnownSplatRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  OauthAuthorizeRoute: typeof OauthAuthorizeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -133,11 +171,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SourcesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/.well-known/$': {
+      id: '/.well-known/$'
+      path: '/.well-known/$'
+      fullPath: '/.well-known/$'
+      preLoaderRoute: typeof DotwellKnownSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/$': {
       id: '/api/$'
       path: '/api/$'
       fullPath: '/api/$'
       preLoaderRoute: typeof ApiSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/oauth/authorize': {
+      id: '/oauth/authorize'
+      path: '/oauth/authorize'
+      fullPath: '/oauth/authorize'
+      preLoaderRoute: typeof OauthAuthorizeRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -149,7 +201,9 @@ const rootRouteChildren: RootRouteChildren = {
   McpRoute: McpRoute,
   SettingsRoute: SettingsRoute,
   SourcesRoute: SourcesRoute,
+  DotwellKnownSplatRoute: DotwellKnownSplatRoute,
   ApiSplatRoute: ApiSplatRoute,
+  OauthAuthorizeRoute: OauthAuthorizeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

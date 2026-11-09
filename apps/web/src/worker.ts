@@ -1,6 +1,6 @@
+import { runPreviewPass } from "./server/link-preview.ts";
 import startEntry from "@tanstack/react-start/server-entry";
 import { openD1 } from "@anansi/db/d1";
-import { fetchPendingMedia } from "./server/media.ts";
 import { applyAiTags, getAiSettings, reconcileAiJobs, searchableText } from "@anansi/db";
 import { createAiJobRunner } from "./server/ai-job-runner.ts";
 import { createEmbeddingProvider, createVectorIndex, generateTags, type AiBinding, type VectorizeBinding } from "./server/ai.ts";
@@ -14,7 +14,7 @@ type WorkerBindings = Pick<Env, "DB" | "MEDIA"> & {
 };
 
 export async function runMediaSchedule(env: WorkerBindings): Promise<void> {
-  await fetchPendingMedia(openD1(env.DB), { bucket: env.MEDIA, runtime: "worker" });
+  await runPreviewPass(openD1(env.DB), { bucket: env.MEDIA, runtime: "worker" });
 }
 
 export async function runAiSchedule(env: WorkerBindings): Promise<void> {

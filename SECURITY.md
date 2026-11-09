@@ -57,4 +57,12 @@ See PRIVACY.md for capture destinations and optional AI processing.
 
 ## Connected clients
 Stored keys use 256 random bits and SHA-256 hashes. Revocation is checked each request; last use updates at most every five minutes. API keys permit read-only MCP. Legacy shared credentials work only for capture or MCP until explicitly retired in Connected clients; owner login remains available.
-First connection uses a five-minute single-use code pasted from the library into the popup. The popup requests optional origin permission and redeems directly. Requests with Origin are rejected so pages and subframes cannot redeem codes. Keys never pass through MAIN-world scripts or the page bridge. Keep codes private. Existing queue destination guards preserve captures during reconnect. OAuth is deferred.
+First connection uses a five-minute single-use code pasted from the library into the popup. The popup requests optional origin permission and redeems directly. Keys never pass through MAIN-world scripts or the page bridge. Keep codes private. Existing queue destination guards preserve captures during reconnect.
+
+OAuth apps use authorization codes with S256 PKCE and rotating refresh tokens.
+Codes and tokens are SHA-256 hashes in D1. Access tokens are restricted to the
+deployment's /mcp audience. Consent requires an owner session and same-origin
+approval; bearer credentials cannot approve. Public OAuth POST routes use the
+login rate limiter. Unapproved registrations expire after one day and are capped
+at 200. Revocation is checked on every access and refresh request. No KV or extra
+deployment secret is needed.

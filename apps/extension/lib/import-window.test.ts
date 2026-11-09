@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { IMPORT_WINDOW_HEIGHT, IMPORT_WINDOW_WIDTH, importWindowBounds } from "./import-window.ts";
+import { IMPORT_WINDOW_HEIGHT, IMPORT_WINDOW_WIDTH, importWindowBounds, importTabPresentation, needsFullWindowImport } from "./import-window.ts";
 
 const size = { width: IMPORT_WINDOW_WIDTH, height: IMPORT_WINDOW_HEIGHT };
 
@@ -20,5 +20,21 @@ describe("importWindowBounds", () => {
 		expect(importWindowBounds(null)).toEqual(size);
 		expect(importWindowBounds({ left: 0, top: 0, width: 800, height: 600, state: "minimized" })).toEqual(size);
 		expect(importWindowBounds({ width: 800, height: 600 })).toEqual(size);
+	});
+});
+
+
+describe("import tab decisions", () => {
+	test("live owned imports open in the background; full imports render in a window", () => {
+		expect(importTabPresentation(true, true)).toBe("background");
+		expect(importTabPresentation(true, false)).toBe("window");
+		expect(importTabPresentation(false, false)).toBe("background");
+	});
+	test("requires a full window only when the cap stopped a live scan with more remaining", () => {
+		expect(needsFullWindowImport(true, { stopReason: "page_limit", hasMore: true })).toBe(true);
+		expect(needsFullWindowImport(true, { stopReason: "known", hasMore: true })).toBe(false);
+		expect(needsFullWindowImport(true, { stopReason: "page_limit", hasMore: false })).toBe(false);
+		expect(needsFullWindowImport(true, {})).toBe(false);
+		expect(needsFullWindowImport(false, { stopReason: "page_limit", hasMore: true })).toBe(false);
 	});
 });

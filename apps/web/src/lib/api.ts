@@ -50,6 +50,7 @@ async function responseError(res: Response, path: string): Promise<Error> {
 }
 
 export interface ItemRow extends SearchHit {
+  previewAttempted?: boolean;
   saveOrder: number | null;
   metrics?: Record<string, number>;
   media?: CardMedia[];

@@ -124,7 +124,7 @@ export function McpServerPage() {
               <CopyButton target="endpoint" value={endpoint} copied={copied} onCopy={copy} />
               <div className="mcp-endpoint-meta">
                 <span className="mcp-status-pill"><span className="mcp-status-dot" />{MCP_TOOL_CATALOG.length} tools available</span>
-                <span>Streamable HTTP · Bearer-key auth</span>
+                <span>Streamable HTTP · OAuth or API key</span>
               </div>
             </div>
           </section>
@@ -136,7 +136,6 @@ export function McpServerPage() {
                   <div className="mcp-card-kicker mono">Connect a client</div>
                   <h2 id="mcp-connect-heading">Add Anansi to your agent</h2>
                 </div>
-                <span className="mcp-step-count mono">01—02</span>
               </div>
 
               <div className="mcp-step">
@@ -168,11 +167,11 @@ export function McpServerPage() {
                 <span className="mcp-step-number">2</span>
                 <div className="mcp-step-content">
                   <div className="mcp-step-title-row">
-                    <h3>Use the configured token</h3>
+                    <h3>Connect with OAuth or an API key</h3>
                     <span className="mcp-configured"><span className="mcp-status-dot" />Configured</span>
                   </div>
                   <p className="mcp-step-copy">
-                    Replace <code>{MCP_TOKEN_PLACEHOLDER}</code> with <code>MCP_TOKEN</code> when it is configured; otherwise use the server&apos;s <code>ANANSI_SECRET</code>. The token is never shown here.
+                    For apps with OAuth, add the endpoint above and follow the sign-in prompt. Check the destination and allow read access. For scripts, create a named API key in Settings → Connected clients and replace <code>{MCP_TOKEN_PLACEHOLDER}</code> below. Revoke either connection in Settings.
                   </p>
                   <div className="mcp-code-wrap">
                     <pre><code>{snippet}</code></pre>

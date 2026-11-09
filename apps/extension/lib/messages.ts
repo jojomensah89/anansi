@@ -118,7 +118,7 @@ export type PageEventMessage = PageTrafficBase &
 				items: number;
 				state?: "complete" | "limited" | "cancelled";
 			}
-		| { anansi: "page-event"; action: "scanned"; runId: string }
+		| { anansi: "page-event"; action: "scanned"; runId: string; stopReason?: "known" | "page_limit"; hasMore?: boolean }
 		| { anansi: "page-event"; action: "identified"; handle: string; runId: string }
 		| {
 				anansi: "page-event";
@@ -409,7 +409,9 @@ function validatePageEventShape(
 		case "saved":
 			return hasOnlyKeys(value, base);
 		case "scanned":
-			return hasOnlyKeys(value, [...base, "runId"]) && isRunId(value.runId);
+			return hasOnlyKeys(value, [...base, "runId", "stopReason", "hasMore"]) && isRunId(value.runId)
+				&& (value.stopReason === undefined || value.stopReason === "known" || value.stopReason === "page_limit")
+				&& (value.hasMore === undefined || typeof value.hasMore === "boolean");
 		case "bookmark":
 			return (
 				hasOnlyKeys(value, [

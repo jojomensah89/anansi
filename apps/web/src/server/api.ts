@@ -1,5 +1,8 @@
+import { sql } from "drizzle-orm";
+import { runPreviewPass } from "./link-preview.ts";
 import { retireSelf, authorizeClient, createClient, listClients, retired, retireLegacy, updateClient, redeemPairing } from "./clients.ts";
 import { checkPublicGithub } from "./public-github-sync.ts";
+import { decideRequest, describeRequest, exchangeToken, registerClient, type AuthorizationParams } from "./oauth.ts";
 import {
 	creatorPage,
 	extensionHealth,
@@ -120,13 +123,19 @@ const mediaRoute: Route = {
 		readMedia(env.media ?? {}, decodeURIComponent(params[0] ?? "")),
 };
 
+async function previewState<T extends {items: {id:string;source:string}[]}>(db: AnansiDb, page: T) {
+  const ids = page.items.filter(item=>item.source === "web").map(item=>item.id);
+  const attempted = ids.length ? await db.all<{item_id:string}>(sql`SELECT item_id FROM link_preview_jobs WHERE attempts>0 AND item_id IN (${sql.join(ids.map(id=>sql`${id}`),sql`,` )})`) : [];
+  const seen = new Set(attempted.map(row=>row.item_id));
+  return {...page,items:page.items.map(item=>({...item,previewAttempted:seen.has(item.id)}))};
+}
 const itemsRoute: Route = {
 	method: "GET",
 	path: "/api/items",
 	handle: async ({ env, q }) => {
 		try {
 			return json(
-				await listItems(env.db, {
+				await previewState(env.db, await listItems(env.db, {
 					cursor: q.get("cursor") ?? undefined,
 					// Repeated params, so ?source=x&source=tiktok is "either of these".
 					// getAll returns [] for an absent param, which the query layer
@@ -144,7 +153,7 @@ const itemsRoute: Route = {
 					),
 					order: q.get("order") === "posted" ? "posted" : "saved",
 					limit: num(q.get("limit"), 50),
-				}),
+				})),
 			);
 		} catch (error) {
 			if (error instanceof InvalidListCursorError || error instanceof InvalidSearchCursorError)
@@ -194,7 +203,8 @@ const searchRoute: Route = {
             { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: aiSettings.embeddingDimensions, generation: aiSettings.semanticGeneration },
             runtime,
           );
-          return json({ query, items: hybrid.items, results: hybrid.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
+          const enriched = await previewState(env.db, hybrid);
+          return json({ query, items: enriched.items, results: enriched.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
         } catch (error) {
           if (error instanceof InvalidListCursorError || error instanceof InvalidSearchCursorError) return json({ error: error.message }, 400);
           throw error;
@@ -361,7 +371,7 @@ const statsRoute: Route = {
 	method: "GET",
 	path: "/api/stats",
 	handle: async ({ env }) => {
-    if (env.media && env.waitUntil) env.waitUntil(fetchPendingMedia(env.db, env.media));
+    if (env.media && env.waitUntil) env.waitUntil(runPreviewPass(env.db, env.media));
     return json(await libraryStats(env.db));
   },
 };
@@ -606,8 +616,8 @@ const ingestRoute: Route = {
 		 * an ingest must not block on image fetches, and a burst of saves
 		 * must not become an unbounded download.
 		 */
-		if (env.media && result.syncMedia) {
-			const work = fetchPendingMedia(env.db, env.media);
+		if (env.media && result.status < 300 && (result.syncMedia || env.waitUntil)) {
+			const work = runPreviewPass(env.db, env.media);
 			if (env.waitUntil) env.waitUntil(work); else await work;
 		}
 
@@ -656,6 +666,14 @@ const collectionRoutes: Route[] = [
  * because the second is a pattern; everything else is disjoint.
  */
 export const ROUTES: Route[] = [
+  {method:"POST", path:"/api/link-previews/visible", handle:async({env,request})=>{
+    const body = await request.json().catch(()=>null) as {ids?: unknown} | null;
+    if (!Array.isArray(body?.ids) || body.ids.length > 12 || body.ids.some((id: unknown)=>typeof id !== "string" || id.length > 100)) return json({error:"expected up to 12 item ids"},400);
+    const ids = [...new Set<string>(body.ids)];
+    if (!ids.length) return json({subrequests:0});
+    if (!env.media) return json({error:"media is not configured"},503);
+    return json(await runPreviewPass(env.db,env.media,ids));
+  }},
 	...(["/api/restore/start", "/api/restore/chunk", "/api/restore/finish", "/api/restore/abort"] as const).map((path): Route => ({ method: "POST", path, handle: ({ env, request }) => handleRestoreRequest(env, request) })),
 	{ method: "GET", path: "/api/restore", handle: ({ env, request }) => handleRestoreRequest(env, request) },
 	itemUpdateRoute, itemTagsRoute("POST"), itemTagsRoute("DELETE"), ...collectionRoutes,
@@ -706,6 +724,21 @@ export async function handleApi(
 	const path = url.pathname.replace(/\/+$/, "");
 
   if (path === "/api/auth/session") return sessionRoute(env, request);
+  // Public by design: an app has no credential yet when it registers or trades a code.
+  if (path === "/api/oauth/register" && request.method === "POST") return registerClient(env.db, request);
+  if (path === "/api/oauth/token" && request.method === "POST") return exchangeToken(env.db, request);
+  if (path === "/api/oauth/authorize") {
+    // Approving an app needs the owner's signed-in browser session, never a bearer.
+    if (request.headers.has("authorization")) return json({error:"Use owner sign-in"},401);
+    const denied = authorizeLibrary(env, request);
+    if (denied) return denied;
+    if (request.method === "GET") return json(await describeRequest(env.db, url.origin, Object.fromEntries(url.searchParams) as AuthorizationParams));
+    if (request.method !== "POST") return json({error:"method not allowed"},405);
+    if (request.headers.get("origin") !== url.origin) return json({error:"origin is not allowed"},403);
+    const body = await request.json().catch(() => null) as {params?: AuthorizationParams; allow?: unknown} | null;
+    if (!body?.params || typeof body.allow !== "boolean") return json({error:"invalid request"},400);
+    return decideRequest(env.db, url.origin, body.params, body.allow);
+  }
   if (path === "/api/connect/redeem" && request.method === "POST") {
     // Browsers send the extension's own Origin on this POST. Web pages cannot claim that scheme.
     const origin = request.headers.get("origin");

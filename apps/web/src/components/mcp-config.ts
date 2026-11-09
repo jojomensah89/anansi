@@ -1,7 +1,7 @@
-export const MCP_TOKEN_PLACEHOLDER = "<YOUR_MCP_TOKEN>";
+export const MCP_TOKEN_PLACEHOLDER = "<YOUR_API_KEY>";
 
 export const MCP_CLIENTS = [
-  { id: "claude-code", label: "Claude Code", glyph: "✳" },
+  { id: "claude-code", label: "Claude Code", glyph: "C" },
   { id: "codex", label: "Codex", glyph: "C" },
   { id: "cursor", label: "Cursor", glyph: "◆" },
   { id: "vscode", label: "VS Code", glyph: "VS" },

@@ -4,10 +4,10 @@ import { mediaJobs } from "./media-jobs-schema.ts";
 import type { AnansiDb } from "./types.ts";
 
 /** Database leases survive restarts and are claimed atomically across requests. */
-export async function claimMediaJobs(db: AnansiDb, limit = 4, now = Math.floor(Date.now() / 1000)) {
+export async function claimMediaJobs(db: AnansiDb, limit = 4, now = Math.floor(Date.now() / 1000), itemId?: string) {
   await db.run(sql`INSERT OR IGNORE INTO media_jobs(media_id) SELECT id FROM media WHERE stored_key IS NULL`);
   const candidates = await db.select({ id: mediaJobs.mediaId }).from(mediaJobs).innerJoin(media, eq(media.id, mediaJobs.mediaId))
-    .where(and(isNull(media.storedKey), lte(mediaJobs.nextRunAt, now), lte(mediaJobs.leaseUntil, now)))
+    .where(and(itemId ? eq(media.itemId,itemId) : undefined, isNull(media.storedKey), lte(mediaJobs.nextRunAt, now), lte(mediaJobs.leaseUntil, now)))
     .orderBy(mediaJobs.nextRunAt, mediaJobs.mediaId).limit(Math.min(Math.max(limit, 1), 20));
   const claimed = [];
   for (const row of candidates) {

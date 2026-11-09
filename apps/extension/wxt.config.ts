@@ -11,7 +11,9 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 // A private mode must be an explicit shell/package-script choice. Do not let a
 // repository .env file turn an otherwise public build into a private artifact.
 const requestedBuildMode = process.env.ANANSI_EXTENSION_BUILD_MODE;
-loadDotenv({ path: resolve(repoRoot, ".env"), quiet: true });
+if (process.env.ANANSI_EXTENSION_SKIP_DOTENV !== "1") {
+	loadDotenv({ path: resolve(repoRoot, ".env"), quiet: true });
+}
 
 const mode = resolveExtensionBuildMode(requestedBuildMode);
 const connection = connectionForWxtConfig(

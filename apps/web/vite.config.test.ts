@@ -6,7 +6,8 @@ describe("local one-origin proxy", () => {
 		expect(LOCAL_API_ORIGIN).toBe("http://127.0.0.1:8788");
 		expect(localProxy).toEqual({
 			"/api": { target: LOCAL_API_ORIGIN },
-			"/mcp": { target: LOCAL_API_ORIGIN },
+			"/mcp": { target: LOCAL_API_ORIGIN, bypass: expect.any(Function) },
+    "/.well-known/oauth": { target: LOCAL_API_ORIGIN },
 		});
 		expect(
 			Object.values(localProxy).every((rule) => !("rewrite" in rule)),

@@ -1,3 +1,4 @@
+import type { FetchBudget } from "./fetch-budget.ts";
 import { sql } from "drizzle-orm";
 import { join } from "node:path";
 import { claimMediaJobs, completeMediaJob, failMediaJob } from "@anansi/db";
@@ -13,7 +14,7 @@ export interface MediaSource {
   put?: (key: string, bytes: ArrayBuffer, contentType?: string) => Promise<void>;
   runtime?: "worker" | "local";
 }
-const TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif" };
+const TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif", "image/x-icon": "ico", "image/vnd.microsoft.icon": "ico" };
 const EXT_TYPES = Object.fromEntries(Object.entries(TYPES).map(([type, ext]) => [ext, type]));
 const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 15_000;
@@ -46,7 +47,7 @@ export function isFetchableMediaUrl(value: string): boolean {
     if (!["https:","http:"].includes(url.protocol) || url.username || url.password) return false;
     const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
     if (host.includes(":") || /^[\d.]+$/.test(host)) return isPublicAddress(host);
-    return host.includes(".") && !host.endsWith(".") && !["localhost","local","internal","home","lan"].some(s => host===s || host.endsWith(`.${s}`));
+    return host.includes(".") && !host.endsWith(".") && !["localhost","local","internal","home","lan","corp","intranet","home.arpa","onion","invalid","test"].some(s => host===s || host.endsWith(`.${s}`));
   } catch { return false; }
 }
 
@@ -59,7 +60,7 @@ async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T
   });
 }
 /** DNS validation and the connection share the same address, closing rebinding. */
-async function localFetch(url: URL, signal: AbortSignal): Promise<Response> {
+export async function localFetch(url: URL, signal: AbortSignal): Promise<Response> {
   const [{ lookup }, http, https, { Readable }, { isIP }] = await Promise.all([
     import("node:dns/promises"), import("node:http"), import("node:https"), import("node:stream"), import("node:net"),
   ]);
@@ -93,7 +94,7 @@ export function pinnedRequest(
       family:address.family,
       port:url.port || undefined,
       path:`${url.pathname}${url.search}`,
-      headers:{host:url.host},
+      headers:{host:url.host,"User-Agent":"Anansi-LinkPreview/1.0"},
       ...(url.protocol === "https:" ? {servername:url.hostname} : {}),
     }, response => {
       const headers = new Headers();
@@ -133,19 +134,21 @@ export async function readBoundedImage(response: Response): Promise<{bytes:Array
     : contentType === "image/png" ? bytes[0]===137 && ascii(1,4)==="PNG" && bytes[4]===13 && bytes[5]===10 && bytes[6]===26 && bytes[7]===10
     : contentType === "image/gif" ? ["GIF87a","GIF89a"].includes(ascii(0,6))
     : contentType === "image/webp" ? ascii(0,4)==="RIFF" && ascii(8,12)==="WEBP"
+    : contentType.includes("icon") ? bytes[0]===0 && bytes[1]===0 && bytes[2]===1 && bytes[3]===0
     : ascii(4,8)==="ftyp" && ["avif","avis"].includes(ascii(8,12));
   if (!valid) throw new Error("image signature does not match content type");
   return {bytes:bytes.buffer,contentType};
 }
-export async function fetchThumbnail(target: string, runtime: "local" | "worker" = "local"): Promise<{bytes:ArrayBuffer;contentType:string}> {
+export async function fetchThumbnail(target: string, runtime: "local" | "worker" = "local", publicWeb = false, budget?: FetchBudget): Promise<{bytes:ArrayBuffer;contentType:string}> {
   const controller = new AbortController();
-  const timeout = setTimeout(()=>controller.abort(), TIMEOUT_MS);
+  const timeout = setTimeout(()=>controller.abort(), Math.min(TIMEOUT_MS, budget?.remainingMs ?? TIMEOUT_MS));
   try {
     let url = new URL(target);
     for (let redirects=0;redirects<=3;redirects++) {
       if (!isFetchableMediaUrl(url.href)) throw new Error("refused media url");
-      if (runtime === "worker" && !workerMediaHostAllowed(url.href)) throw new Error("Worker media host is not in the trusted CDN list; use local media sync");
-      const response = runtime === "worker" ? await fetch(url,{redirect:"manual",signal:controller.signal}) : await localFetch(url,controller.signal);
+      if (runtime === "worker" && !publicWeb && !workerMediaHostAllowed(url.href)) throw new Error("Worker media host is not in the trusted CDN list; use local media sync");
+      if (budget && !(runtime === "worker" && publicWeb)) budget.consume(runtime === "worker" ? 1 : 3);
+      const response = runtime === "worker" ? publicWeb ? await (await import("./public-fetch.ts")).publicFetch(url,controller.signal,"worker",fetch,budget) : await fetch(url,{redirect:"manual",signal:controller.signal}) : await localFetch(url,controller.signal);
       if (response.status >=300 && response.status<400) {
         const location=response.headers.get("location");
         await response.body?.cancel();
@@ -158,7 +161,7 @@ export async function fetchThumbnail(target: string, runtime: "local" | "worker"
 }
 export async function readMedia(source: MediaSource, key: string): Promise<Response> {
   // Only generated object keys are accepted; no drive paths, traversal or alternate separators.
-  if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif)$/.test(key)) return new Response("bad key",{status:400});
+  if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif|ico)$/.test(key)) return new Response("bad key",{status:400});
   const inferred = EXT_TYPES[key.split(".").at(-1)!] ?? "image/jpeg";
   const headers = {"content-type":inferred,"cache-control":"private, no-store","x-content-type-options":"nosniff"};
   if (source.bucket) {
@@ -174,14 +177,15 @@ export async function readMedia(source: MediaSource, key: string): Promise<Respo
   }
   return new Response("media is not configured",{status:503});
 }
-export async function fetchPendingMedia(db: AnansiDb, source: MediaSource, limit=4): Promise<{stored:number;failed:number}> {
+export async function fetchPendingMedia(db: AnansiDb, source: MediaSource, limit=4, budget?: FetchBudget, itemId?: string): Promise<{stored:number;failed:number}> {
   if (!source.put && !source.bucket?.put && !source.dir) return {stored:0,failed:0};
-  await cleanupOrphanedMedia(db, source);
-  const rows=await claimMediaJobs(db,limit);
+  if (budget && !budget.canStart()) return {stored:0,failed:0};
+  if (!budget) await cleanupOrphanedMedia(db, source);
+  const rows=await claimMediaJobs(db,limit,undefined,itemId);
   let stored=0,failed=0;
   await Promise.all(rows.map(async row=>{
     try {
-      const {bytes,contentType}=await fetchThumbnail(variant(row.originUrl),source.runtime ?? (source.bucket ? "worker":"local"));
+      const {bytes,contentType}=await fetchThumbnail(variant(row.originUrl),source.runtime ?? (source.bucket ? "worker":"local"), row.kind === "card" || row.kind === "favicon", budget);
       const flat=row.id.replace(/-/g,"");
       const key=`${flat.slice(0,2)}/${flat.slice(2,4)}/${flat}-${row.token.replace(/-/g, "")}.${TYPES[contentType]}`;
       if (source.put) await source.put(key,bytes,contentType);
@@ -218,7 +222,7 @@ export async function cleanupOrphanedMedia(db: AnansiDb, source: MediaSource, li
   const rows = await db.all<{ stored_key: string }>(sql`SELECT stored_key FROM media_orphan_objects ORDER BY stored_key LIMIT ${Math.min(20, Math.max(1, limit))}`);
   let removed = 0;
   for (const { stored_key: key } of rows) {
-    if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif)$/.test(key)) continue;
+    if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif|ico)$/.test(key)) continue;
     const refs = await db.all(sql`SELECT id FROM media WHERE stored_key = ${key} LIMIT 1`);
     if (!refs.length) {
       try {

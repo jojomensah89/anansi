@@ -35,3 +35,18 @@ export function importWindowBounds(anchor: WindowFrame | null | undefined) {
 		top: Math.max(anchor.top, anchor.top + anchor.height - IMPORT_WINDOW_HEIGHT - MARGIN),
 	};
 }
+
+/** Owned page imports need rendering only when walking history. */
+export function importTabPresentation(ownsImportTab: boolean, live: boolean): "background" | "window" {
+	return ownsImportTab && !live ? "window" : "background";
+}
+
+export interface ImportScanResult {
+	stopReason?: "known" | "page_limit";
+	hasMore?: boolean;
+}
+
+/** A bounded catch-up is incomplete only if history remains beyond its cap. */
+export function needsFullWindowImport(live: boolean, result: ImportScanResult): boolean {
+	return live && result.stopReason === "page_limit" && result.hasMore === true;
+}

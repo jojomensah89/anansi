@@ -407,7 +407,7 @@ function Library() {
             </div>
           )}
 
-          {!firstLoad && (search.q || view === "row") && <RowView items={items} onOpen={openItem} />}
+          {!firstLoad && (search.q || view === "row") && <RowView onChanged={() => { void queryClient.invalidateQueries({queryKey: libraryKeys.pages()}); }} items={items} onOpen={openItem} />}
           {!firstLoad && !search.q && view === "timeline" && <TimelineView items={items} onOpen={openItem} />}
           <div ref={sentinel} style={{ height: 40 }} />
             {library.isFetchingNextPage && items.length > 0 && (

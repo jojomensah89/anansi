@@ -86,7 +86,7 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
 function GateFrame({ children }: { children: ReactNode }) {
   return (
     <main style={{ minHeight: "100svh", display: "grid", placeItems: "center", padding: 24, background: "var(--ink)" }}>
-      <section style={{ width: 420, maxWidth: "100%", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14, padding: 26, border: "1px solid var(--line)", borderRadius: 10, background: "var(--card)" }}>
+      <section style={{ width: "min(420px, 100%)", minWidth: 0, overflowWrap: "anywhere", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 16, padding: 24, border: "1px solid var(--line)", borderRadius: 8, background: "var(--card)" }}>
         {children}
       </section>
     </main>

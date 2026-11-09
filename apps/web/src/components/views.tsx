@@ -1,3 +1,5 @@
+import { CardOrganization } from "./card.tsx";
+import { WebPreviewCard } from "./web-preview-card.tsx";
 import { mediaUrl, shortDate, type ItemRow } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
@@ -15,15 +17,17 @@ import type { ViewMode } from "../lib/library-search.ts";
 
 /* ---------------------------------------------------------------- Row --- */
 
-export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemRow) => void }) {
+export function RowView({ items, onOpen, onChanged }: { items: ItemRow[]; onChanged?: () => void; onOpen: (i: ItemRow) => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
       {items.map((item) => {
         const thumb = item.media?.[0] ?? item.quoted?.media?.[0];
         return (
-          <button
+          <div
             key={item.id}
-            type="button"
+            role="button"
+            tabIndex={0}
+            onKeyDown={event=>{if(event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {event.preventDefault();onOpen(item);}}}
             onClick={() => onOpen(item)}
             style={{
               display: "flex",
@@ -40,7 +44,7 @@ export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemR
               color: "inherit",
             }}
           >
-            {thumb ? (
+            {item.source === "web" ? <WebPreviewCard item={item} compact onPreview={onChanged} footer={<CardOrganization item={item} tags={item.tags ?? []} onChanged={()=>onChanged?.()} />} /> : thumb ? (
               <span style={{ position: "relative", flexShrink: 0 }}>
                 <img
                   src={mediaUrl(thumb.key)}
@@ -60,7 +64,7 @@ export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemR
               <span style={{ width: 64, height: 64, borderRadius: 6, background: "var(--card)", flexShrink: 0 }} />
             )}
 
-            <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+            {item.source !== "web" && <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} size={16} />
                 <span style={{ fontSize: 12.5 }}>{item.authorName ?? item.author}</span>
@@ -88,13 +92,14 @@ export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemR
               </span>
             </span>
 
-            <span className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)", flexShrink: 0, paddingTop: 2 }}>
+            }
+            {item.source !== "web" && <span className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)", flexShrink: 0, paddingTop: 2 }}>
               <span>{shortDate(item.postedAt)}</span>
               <span style={{ color: "var(--fainter)", display: "flex" }}>
                 <SourceMark source={item.source} size={20} />
               </span>
-            </span>
-          </button>
+            </span>}
+          </div>
         );
       })}
     </div>

@@ -1,4 +1,5 @@
 import { authorizeClient } from "./clients.ts";
+import { mcpChallenge } from "./oauth.ts";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createAnansiServer } from "@anansi/mcp";
 import { extensionHealth, requestPlatformSync, getSyncSettings, type AnansiDb } from "@anansi/db";
@@ -24,7 +25,12 @@ export interface McpEnv {
 
 export async function handleMcp(env: McpEnv, request: Request): Promise<Response> {
   const denied = await authorizeClient(env, request);
-  if (denied) return denied;
+  if (denied) {
+    if (denied.status !== 401) return denied;
+    const headers = new Headers(denied.headers);
+    headers.set("www-authenticate", mcpChallenge(new URL(request.url).origin, request.headers.has("authorization")));
+    return new Response(denied.body, { status: 401, headers });
+  }
 
   // Stateless: every request builds its own server and transport. A Worker
   // has no durable process to keep a session in, and the four tools are all

@@ -46,7 +46,7 @@ import {
 type Outbound =
   | { action: "observed"; operation: string; raw: unknown; items: number; runId: string }
   | { action: "identified"; handle: string; runId: string }
-  | { action: "scanned"; runId: string }
+  | { action: "scanned"; runId: string; stopReason?: "known" | "page_limit"; hasMore: boolean }
   | { action: "error"; errorCode: "capture_failed" | "not_signed_in"; runId: string }
   | { action: "saved" }
   | { action: "bookmark"; bookmarkAction: "save" | "unsave"; externalId: string; canonicalUrl: string; normalizedItem?: NormalizedItem; mutationId: string; observedAt: number };
@@ -100,6 +100,8 @@ export default defineContentScript({
     let scanning = false;
     let syncConfig: ScanConfig | undefined;
     let syncPages = 0;
+    let stopReason: "known" | "page_limit" | undefined;
+    let responseHasMore = false;
     let sawFavoritesResponse = false;
     /** Set by any observed Favourites page that said there is more. */
     let moreToLoad = true;
@@ -111,6 +113,7 @@ export default defineContentScript({
       if (isEndOfFavourites(raw)) {
         sawFavoritesResponse = true;
         moreToLoad = false;
+        responseHasMore = false;
         favouritesResponses++;
         return;
       }
@@ -119,10 +122,12 @@ export default defineContentScript({
       sawFavoritesResponse = true;
       const page = readItemList(raw);
       moreToLoad = page.hasMore;
+      responseHasMore = page.hasMore;
       favouritesResponses++;
       syncPages++;
       if (syncConfig?.knownIds) {
-        if (syncStopReason(page.ids, syncConfig.knownIds, syncPages, syncConfig.pageLimit)) moreToLoad = false;
+        stopReason = syncStopReason(page.ids, syncConfig.knownIds, syncPages, syncConfig.pageLimit) ?? undefined;
+        if (stopReason) moreToLoad = false;
       }
       if (page.count === 0) return;
       if (activeRunId) send({ action: "observed", operation, raw, items: page.count, runId: activeRunId });
@@ -601,6 +606,8 @@ export default defineContentScript({
         sawFavoritesResponse = false;
         syncConfig = msg.config;
         syncPages = 0;
+        stopReason = undefined;
+        responseHasMore = false;
         void (async () => {
           /**
            * Whatever happens, say so and let the next run start.
@@ -621,7 +628,7 @@ export default defineContentScript({
               return;
             }
             if (moreToLoad) await scan();
-            if (sawFavoritesResponse && !moreToLoad && activeRunId) send({ action: "scanned", runId: activeRunId });
+            if (sawFavoritesResponse && !moreToLoad && activeRunId) send({ action: "scanned", runId: activeRunId, stopReason, hasMore: responseHasMore });
             else if (activeRunId) send({ action: "error", errorCode: "capture_failed", runId: activeRunId });
           } catch {
             if (activeRunId) send({ action: "error", errorCode: "capture_failed", runId: activeRunId });

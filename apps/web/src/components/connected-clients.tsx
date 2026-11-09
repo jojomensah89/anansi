@@ -226,7 +226,7 @@ export function ConnectedClients() {
             <strong>{c.name}</strong>
           )}
         </td>
-        <td>{c.kind === "api" ? "API key" : "Extension"}</td>
+        <td>{c.kind === "api" ? "API key" : c.kind === "app" ? "App" : "Extension"}</td>
         <td>{c.scopes === "read" ? "Read" : "Save only"}</td>
         <td>{trail(c)}</td>
         <td>

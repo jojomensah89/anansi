@@ -394,6 +394,21 @@ export const connectedClients = sqliteTable("connected_clients", {
  scopes: text("scopes").notNull(), keyHash: text("key_hash").notNull().unique(),
  createdAt: integer("created_at").notNull(), lastUse: integer("last_use"), revokedAt: integer("revoked_at"),
 });
+/** Apps that registered themselves. They reach nothing until the owner approves one. */
+export const oauthClients = sqliteTable("oauth_clients", {
+ id: text("id").primaryKey(), name: text("name").notNull(), redirectUris: text("redirect_uris").notNull(),
+ createdAt: integer("created_at").notNull(), connectedClientId: text("connected_client_id"),
+});
+export const oauthCodes = sqliteTable("oauth_codes", {
+ codeHash: text("code_hash").primaryKey(), clientId: text("client_id").notNull(), connectedClientId: text("connected_client_id").notNull(),
+ redirectUri: text("redirect_uri").notNull(), codeChallenge: text("code_challenge").notNull(), codeChallengeMethod: text("code_challenge_method").notNull(),
+ scope: text("scope").notNull(), expiresAt: integer("expires_at").notNull(),
+});
+export const oauthTokens = sqliteTable("oauth_tokens", {
+ accessHash: text("access_hash").primaryKey(), refreshHash: text("refresh_hash").notNull().unique(), clientId: text("client_id").notNull(),
+ connectedClientId: text("connected_client_id").notNull(), scope: text("scope").notNull(), resource: text("resource").notNull(),
+ accessExpiresAt: integer("access_expires_at").notNull(), refreshExpiresAt: integer("refresh_expires_at").notNull(),
+});
 export const clientSecurity = sqliteTable("client_security", {
  id: integer("id").primaryKey(), retiredAt: integer("retired_at"),
 });

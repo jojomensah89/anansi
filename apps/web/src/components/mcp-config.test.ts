@@ -21,7 +21,7 @@ describe("MCP client setup snippets", () => {
 
   test("uses the CLI command for Claude Code", () => {
     expect(clientSnippet("claude-code", "/mcp")).toBe(
-      'claude mcp add --transport http anansi /mcp --header "Authorization: Bearer <YOUR_MCP_TOKEN>"',
+      'claude mcp add --transport http anansi /mcp --header "Authorization: Bearer <YOUR_API_KEY>"',
     );
   });
 
