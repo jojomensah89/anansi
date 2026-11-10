@@ -1,9 +1,14 @@
+import { Button } from "@anansi/ui/components/button";
+import { Input } from "@anansi/ui/components/input";
+import { Label } from "@anansi/ui/components/label";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertCircle, RotateCcw } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { api } from "../lib/api.ts";
 import { PageSkeleton } from "./skeleton.tsx";
 
 const sessionKey = ["auth", "session"] as const;
+const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
 
 export function ConnectionGate({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -28,13 +33,15 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
 
   if (session.isError) {
     return (
-      <GateFrame>
-        <h1 style={titleStyle}>Anansi is out of reach</h1>
-        <p style={copyStyle}>{message(session.error)}</p>
-        <button type="button" onClick={() => void session.refetch()} style={primaryStyle}>
-          Try again
-        </button>
-      </GateFrame>
+      <AuthCard size="sm" title="Anansi is out of reach">
+        <p className="auth-lead">{message(session.error)}</p>
+        <div>
+          <Button variant="outline" onClick={() => void session.refetch()} disabled={session.isFetching}>
+            <RotateCcw {...ICON} />
+            {session.isFetching ? "Trying" : "Try again"}
+          </Button>
+        </div>
+      </AuthCard>
     );
   }
 
@@ -42,12 +49,11 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
 
   if (!session.data.configured) {
     return (
-      <GateFrame>
-        <h1 style={titleStyle}>Sign-in isn’t set up</h1>
-        <p style={copyStyle}>
-          Set <code style={codeStyle}>LIBRARY_TOKEN</code> or <code style={codeStyle}>ANANSI_SECRET</code> on the server, then reload.
+      <AuthCard size="sm" title="Sign-in isn’t set up">
+        <p className="auth-lead">
+          Set <code>LIBRARY_TOKEN</code> or <code>ANANSI_SECRET</code> on the server, then reload
         </p>
-      </GateFrame>
+      </AuthCard>
     );
   }
 
@@ -55,48 +61,79 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
     event.preventDefault();
     if (token.trim()) connect.mutate();
   };
+  const failed = connect.isError;
 
   return (
-    <GateFrame>
-      <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 12, background: "var(--accent)", color: "var(--ink)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 18 }}>A</div>
-      <h1 style={titleStyle}>Sign in to Anansi</h1>
-      <p style={copyStyle}>
-        Use your <code style={codeStyle}>LIBRARY_TOKEN</code>, or <code style={codeStyle}>ANANSI_SECRET</code> if no library token is set. It’s swapped for a browser session and never stored in the page.
-      </p>
-      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
-        <label htmlFor="library-token" style={{ fontSize: 12, color: "var(--muted)" }}>Token</label>
-        <input
-          id="library-token"
-          type="password"
-          autoComplete="current-password"
-          value={token}
-          onChange={(event) => setToken(event.target.value)}
-          disabled={connect.isPending}
-          style={{ height: 40, borderRadius: 6, border: "1px solid var(--edge-strong)", background: "var(--card)", color: "var(--text)", padding: "0 12px", fontFamily: "var(--mono)", outline: "none" }}
-        />
-        {connect.isError && <div role="alert" style={{ color: "#f2a7a7", fontSize: 12 }}>{message(connect.error)}</div>}
-        <button type="submit" disabled={!token.trim() || connect.isPending} style={{ ...primaryStyle, opacity: !token.trim() || connect.isPending ? 0.55 : 1 }}>
-          {connect.isPending ? "Connecting…" : "Connect"}
-        </button>
+    <AuthCard title="Sign in to Anansi" lead="Paste your library token">
+      <form onSubmit={submit} className="auth-form">
+        <div className="auth-field">
+          <Label htmlFor="library-token">Token</Label>
+          <Input
+            id="library-token"
+            type="password"
+            autoComplete="current-password"
+            className="auth-input auth-mono"
+            value={token}
+            aria-invalid={failed || undefined}
+            aria-describedby="library-token-hint"
+            onChange={(event) => setToken(event.target.value)}
+            disabled={connect.isPending}
+          />
+          {failed ? (
+            <span id="library-token-hint" role="alert" className="auth-error">
+              <AlertCircle {...ICON} />
+              {tokenError(connect.error)}
+            </span>
+          ) : (
+            <span id="library-token-hint" className="auth-meta">
+              Your <code>LIBRARY_TOKEN</code>, or <code>ANANSI_SECRET</code> if none is set
+            </span>
+          )}
+        </div>
+        <Button type="submit" className="auth-submit" disabled={!token.trim() || connect.isPending}>
+          {connect.isPending ? "Connecting" : "Connect"}
+        </Button>
       </form>
-    </GateFrame>
+    </AuthCard>
   );
 }
 
-function GateFrame({ children }: { children: ReactNode }) {
+/** The centred card shared by sign-in and app consent: the spider, a title, then the content. */
+export function AuthCard({
+  title,
+  lead,
+  size = "md",
+  logo,
+  children,
+}: {
+  title: ReactNode;
+  lead?: ReactNode;
+  size?: "sm" | "md" | "lg";
+  logo?: ReactNode;
+  children?: ReactNode;
+}) {
   return (
-    <main style={{ minHeight: "100svh", display: "grid", placeItems: "center", padding: 24, background: "var(--ink)" }}>
-      <section style={{ width: "min(420px, 100%)", minWidth: 0, overflowWrap: "anywhere", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 16, padding: 24, border: "1px solid var(--line)", borderRadius: 8, background: "var(--card)" }}>
+    <main className="auth-page">
+      <section className="auth-card" data-size={size} aria-labelledby="auth-title">
+        {logo ?? <AnansiMark />}
+        <div className="auth-head">
+          <h1 id="auth-title">{title}</h1>
+          {lead && <p className="auth-lead">{lead}</p>}
+        </div>
         {children}
       </section>
     </main>
   );
 }
 
-const titleStyle = { fontSize: 20, margin: 0, color: "var(--text)" } as const;
-const copyStyle = { fontSize: 14, lineHeight: 1.6, margin: 0, color: "var(--muted)" } as const;
-const codeStyle = { fontFamily: "var(--mono)", fontSize: 13, color: "var(--text)" } as const;
-const primaryStyle = { minHeight: 38, border: "none", borderRadius: 6, padding: "0 14px", background: "var(--accent)", color: "var(--ink)", cursor: "pointer", font: "inherit", fontWeight: 600 } as const;
+export function AnansiMark() {
+  return <img className="auth-logo" src="/favicon.png" width={32} height={32} alt="Anansi" />;
+}
+
+function tokenError(error: unknown): string {
+  const text = message(error);
+  return text === "unauthorized" ? "That token didn’t work" : text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "The request failed";

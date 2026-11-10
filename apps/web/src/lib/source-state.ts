@@ -10,6 +10,7 @@ export type SourceState =
 	| "retrying"
 	| "queued"
 	| "experimental"
+	| "limited"
 	| "ready";
 
 export type SourceTone = "ok" | "accent" | "warn" | "muted" | "faint";
@@ -24,14 +25,16 @@ function plural(count: number, word: string): string {
 	return `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
 }
 
+const PLATFORM: Record<string, string> = { x: "X", reddit: "Reddit", github: "GitHub", tiktok: "TikTok" };
+
 const ERROR_TEXT: Record<string, string> = {
-	not_signed_in: "Sign in required",
 	queue_full: "Capture queue is full, delivery is catching up",
 	rate_limited: "Rate limited, will retry later",
 };
 
 /** Say what went wrong; a count of zero failures is not a description. */
-function failureText(runtime: SourceRow["runtime"]): string {
+function failureText(source: string, runtime: SourceRow["runtime"]): string {
+	if (runtime?.lastErrorCode === "not_signed_in") return `Sign in to ${PLATFORM[source] ?? "the site"}, then try again`;
 	const named = runtime?.lastErrorCode ? ERROR_TEXT[runtime.lastErrorCode] : undefined;
 	if (named) return named;
 	if (runtime && runtime.failed > 0) return `${plural(runtime.failed, "capture")} failed`;
@@ -55,7 +58,8 @@ export function sourcePresentation(
 				extension.connection === "never_connected"
 					? "Waiting for the extension"
 					: "Extension disconnected",
-			tone: "warn",
+			// The rail's dot already reports the extension; rows only wait.
+			tone: "faint",
 		};
 	}
 
@@ -75,7 +79,7 @@ export function sourcePresentation(
 		return { state: "paused", text: "Import paused", tone: "muted" };
 	}
 	if ((runtime?.failed ?? 0) > 0 || runtime?.lastErrorCode) {
-		return { state: "failed", text: failureText(runtime), tone: "warn" };
+		return { state: "failed", text: failureText(source.source, runtime), tone: "warn" };
 	}
 	if ((runtime?.retrying ?? 0) > 0) {
 		return {
@@ -99,11 +103,47 @@ export function sourcePresentation(
 			tone: "accent",
 		};
 	}
+	if (importable(source) && source.imported === 0 && source.live > 0) {
+		return { state: "limited", text: "Live only · history not imported", tone: "faint" };
+	}
 	return {
 		state: "ready",
 		text: source.mode === "manual" ? "Save a page or selection" : source.source === "tiktok" ? "Ready to import" : "Ready",
 		tone: "ok",
 	};
+}
+
+/** A source whose history the extension can import (not manual capture). */
+export function importable(source: SourceRow): boolean {
+	return source.mode !== "manual" && source.support !== "coming_next";
+}
+
+export type SourceAction = "import" | "resume" | "retry" | "view" | null;
+
+/**
+ * The one thing a source row offers. Importing history comes first while
+ * none has arrived; a failure offers a retry; otherwise the saves themselves.
+ * Nothing that needs the extension is offered while it is away.
+ */
+export function sourceAction(source: SourceRow, presentation: SourcePresentation): SourceAction {
+	switch (presentation.state) {
+		case "coming_next":
+		case "disabled":
+		case "running":
+			return source.items > 0 && presentation.state === "running" ? "view" : null;
+		case "disconnected":
+			return importable(source) && source.imported === 0 ? "import" : source.items > 0 ? "view" : null;
+		case "paused":
+			return "resume";
+		case "failed":
+		case "retrying":
+			return importable(source) ? "retry" : source.items > 0 ? "view" : null;
+		case "limited":
+			return "import";
+		default:
+			if (importable(source) && source.items === 0) return "import";
+			return source.items > 0 ? "view" : null;
+	}
 }
 
 export function extensionLabel(extension: ExtensionHealth): string {

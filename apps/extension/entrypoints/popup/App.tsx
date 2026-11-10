@@ -1,15 +1,10 @@
 import { TIKTOK_SYNC_SETTING } from "../../lib/library-sync.ts";
 import { retireOwnConnection } from "../../lib/library-connect.ts";
 import { SAVE_CONFIRMATION_SETTING } from "../../lib/save-toast.ts";
-import type {
-  ExtensionRemoteConfig,
-  ExtensionSourceConfig,
-} from "@anansi/sources";
+import type { ExtensionRemoteConfig } from "@anansi/sources";
 import { SourceMark } from "@anansi/ui/components/source-mark";
-import { useCallback, useEffect, useState } from "react";
-import {
-  requireOriginPermission,
-} from "../../lib/connection-lifecycle.ts";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { requireOriginPermission } from "../../lib/connection-lifecycle.ts";
 import {
   clearExtensionConnection,
   type ExtensionConnection,
@@ -23,6 +18,7 @@ import {
   connectionFromStatus,
   LOADING_CONNECTION,
   type PopupConnectionState,
+  type PopupSourceRow,
   popupSourceRows,
   UNCONFIGURED_CONNECTION,
   UNREACHABLE_CONNECTION,
@@ -33,51 +29,31 @@ import {
   describeSource,
   redactError,
   type SourceSnapshot,
-  type Tone,
   withoutStartingSource,
   initialImportSummary,
 } from "../../lib/popup-state.ts";
+import { sourceRowView, type SourceRowView } from "../../lib/popup-view.ts";
 import type { Status } from "../background.ts";
+import { Icon } from "./icons.tsx";
 import "./App.css";
 
 /**
  * The popup.
  *
- * So each source says its state in words — but the words are derived, here,
- * from durable run records and durable outbox counts, and never read out of a
- * message the background left in storage. That distinction is the whole point
- * of this file: "running…" used to be a string that outlived the run that
- * wrote it, survived reloads and browser restarts, and made the only question
- * worth asking unanswerable. A source can no longer claim to be synced while
- * anything is still queued, retrying or failed for it.
+ * It leads with the page you are on, because saving it is the thing done most
+ * often. Below that, two tabs: Sources (each platform, its state in a few
+ * words, and the one action that makes sense right now) and Options.
  *
- * The source list comes from the server's config — one list, server-owned.
- * A source switched off there keeps its row and says it is off, because a row
- * that silently vanishes reads as a bug rather than as a setting.
+ * Every word about a source is derived here from durable run records and
+ * durable outbox counts, never read out of a message the background left in
+ * storage: "running…" used to be a string that outlived the run that wrote
+ * it. A source can no longer claim to be up to date while anything is still
+ * queued, retrying or failed for it.
+ *
+ * The source list comes from the server's config. A source switched off there
+ * keeps its row and says so, because a row that silently vanishes reads as a
+ * bug rather than as a setting.
  */
-const S = {
-  ink: "var(--anansi-ink)",
-  card: "var(--anansi-card)",
-  raised: "var(--anansi-raised)",
-  line: "var(--anansi-line)",
-  edge: "var(--anansi-edge)",
-  text: "var(--anansi-text)",
-  muted: "var(--anansi-muted)",
-  faint: "var(--anansi-faint)",
-  faintest: "var(--anansi-faintest)",
-  accent: "var(--anansi-accent)",
-  ok: "var(--anansi-ok)",
-  warn: "var(--anansi-warn)",
-  mono: "ui-monospace, 'IBM Plex Mono', monospace",
-};
-
-const TONES: Record<Tone, string> = {
-  accent: S.accent,
-  ok: S.ok,
-  warn: S.warn,
-  muted: S.muted,
-  faint: S.faint,
-};
 
 interface Stats {
   items: number;
@@ -105,8 +81,17 @@ interface DurableSnapshot {
   queue: QueueStatus;
   bySource: Record<string, QueueStatus>;
   runs: Record<string, RunRecord>;
-	destinationOrigin?: string | null;
+  destinationOrigin?: string | null;
 }
+
+interface ActivePage {
+  title: string;
+  host: string;
+  savable: boolean;
+}
+
+type Saving = null | "saving" | "saved" | "queued" | { error: string };
+type Tab = "sources" | "options";
 
 const EMPTY_QUEUE: QueueStatus = {
   queued: 0,
@@ -115,16 +100,11 @@ const EMPTY_QUEUE: QueueStatus = {
   failed: 0,
 };
 
-const NAMES: Record<string, string> = {
-  x: "X bookmarks",
-  reddit: "Reddit saves",
-  github: "GitHub stars",
-  tiktok: "TikTok favorites",
-};
-
-const SOURCE_LABELS: Record<string, string> = {
-  github: "GitHub",
+const SOURCE_NAMES: Record<string, string> = {
+  x: "X",
   reddit: "Reddit",
+  github: "GitHub",
+  tiktok: "TikTok",
 };
 
 const command = (message: Record<string, unknown>) =>
@@ -153,6 +133,22 @@ const mirror = (action: "mirror-status" | "mirror-on" | "mirror-off") =>
 
 const retry = (source?: string) => command(source ? { action: "retry-queue", source } : { action: "retry-queue" });
 
+function describePage(tab: { title?: string; url?: string } | undefined): ActivePage | null {
+  if (!tab?.url) return null;
+  try {
+    const url = new URL(tab.url);
+    const savable = url.protocol === "http:" || url.protocol === "https:";
+    const host = savable ? url.hostname.replace(/^www\./, "") : "";
+    return { title: tab.title?.trim() || host || "This page", host, savable };
+  } catch {
+    return null;
+  }
+}
+
+function sentenceCase(message: string): string {
+  return message.charAt(0).toUpperCase() + message.slice(1);
+}
+
 export default function App() {
   const [status, setStatus] = useState<Status>({});
   const [config, setConfig] = useState<ExtensionRemoteConfig | null>(null);
@@ -160,13 +156,17 @@ export default function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [snapshot, setSnapshot] = useState<DurableSnapshot | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [saving, setSaving] = useState<null | "saving" | "saved" | string>(null);
+  const [page, setPage] = useState<ActivePage | null>(null);
+  const [saving, setSaving] = useState<Saving>(null);
+  const [tab, setTab] = useState<Tab>("sources");
   const [mirroring, setMirroring] = useState<boolean | null>(null);
   const [mirrorNote, setMirrorNote] = useState<string | null>(null);
   const [startingSources, setStartingSources] = useState<Set<string>>(() => new Set());
+  const [pausingSources, setPausingSources] = useState<Set<string>>(() => new Set());
   const [isRetrying, setIsRetrying] = useState(false);
   const [saveConfirmations, setSaveConfirmations] = useState(false);
   const [syncTiktok, setSyncTiktok] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     void mirror("mirror-status").then((r) => setMirroring(r?.mirroring ?? false));
@@ -181,6 +181,15 @@ export default function App() {
       .then((stored) => setSyncTiktok(stored[TIKTOK_SYNC_SETTING] === true));
   }, []);
 
+  // The page Save acts on. The popup only reads its title and address.
+  useEffect(() => {
+    void browser.tabs
+      .query({ active: true, currentWindow: true })
+      .then(([active]) => setPage(describePage(active)))
+      .catch(() => setPage(null));
+    return () => clearTimeout(saveTimer.current);
+  }, []);
+
   useEffect(() => {
     void browser.storage.local.get("status").then((s) => {
       setStatus((s.status as Status) ?? {});
@@ -193,8 +202,16 @@ export default function App() {
   }, []);
 
   const [connection, setConnection] = useState<ExtensionConnection | null>(null);
-  const [showXRisk,setShowXRisk]=useState(false);
-  useEffect(()=>{if(!connection)return;void browser.storage.local.get("anansiXRiskSeen").then(state=>{if(!state.anansiXRiskSeen){setShowXRisk(true);void browser.storage.local.set({anansiXRiskSeen:true});}});},[connection]);
+  const [showXRisk, setShowXRisk] = useState(false);
+  useEffect(() => {
+    if (!connection) return;
+    void browser.storage.local.get("anansiXRiskSeen").then((state) => {
+      if (!state.anansiXRiskSeen) {
+        setShowXRisk(true);
+        void browser.storage.local.set({ anansiXRiskSeen: true });
+      }
+    });
+  }, [connection]);
   const [connectionLoaded, setConnectionLoaded] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [urlInput, setUrlInput] = useState("");
@@ -273,7 +290,7 @@ export default function App() {
             setStats(null);
             const state = connectionFromStatus(configResponse.status);
             setConnectionState(state.kind === "unauthorized"
-              ? { ...state, message: "Key rejected — check INGEST_TOKEN or ANANSI_SECRET on the server" }
+              ? { ...state, message: "Key rejected. Check INGEST_TOKEN or ANANSI_SECRET on the server" }
               : state);
           }
           return;
@@ -284,7 +301,7 @@ export default function App() {
             setConfig(null);
             setConnectionState({
               kind: "incompatible",
-              message: "Incompatible server — update or redeploy Anansi",
+              message: "Incompatible server. Update or redeploy Anansi",
             });
           }
           return;
@@ -340,7 +357,7 @@ export default function App() {
       const importRunning = Object.values(currentSnapshot?.runs ?? {}).some((run) => run.phase === "running");
       if (connection && connection.origin !== validated.origin &&
         ((pending > 0 && currentSnapshot?.destinationOrigin && currentSnapshot.destinationOrigin !== validated.origin) || importRunning)) {
-        setConnectError("Pending captures or imports belong to your current Anansi server. Retry or reconnect there until they finish before switching servers.");
+        setConnectError("Pending captures or imports belong to your current library. Let them finish there before switching");
         return;
       }
 
@@ -349,11 +366,14 @@ export default function App() {
         browser.permissions,
       );
       const redemption = await fetch(`${validated.origin}/api/connect/redeem`, {
-        method: "POST", headers: {"content-type":"application/json"},
-        body: JSON.stringify({code: validated.token}), redirect:"error", signal: AbortSignal.timeout(10_000),
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: validated.token }),
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
       });
       if (redemption.ok) {
-        const issued = await redemption.json() as {key?:unknown};
+        const issued = await redemption.json() as { key?: unknown };
         validated = validateExtensionConnection(validated.origin, issued.key);
       }
       const res = await fetch(`${validated.origin}/api/extension/config`, {
@@ -362,18 +382,15 @@ export default function App() {
         signal: AbortSignal.timeout(10_000),
       });
       if (res.status === 401 || res.status === 403) {
-        setConnectError("That code or key was rejected. It may have expired, been used or been revoked. Get a new code in Anansi under Settings › Connect extension.");
-        setIsConnecting(false);
+        setConnectError("That code was rejected. It may have expired or been used. Get a new one in Anansi under Sources, Connect extension");
         return;
       }
       if (res.status === 404) {
         setConnectError("No Anansi library at this address");
-        setIsConnecting(false);
         return;
       }
       if (!res.ok) {
-        setConnectError(`Server returned HTTP ${res.status}`);
-        setIsConnecting(false);
+        setConnectError(`The library answered with HTTP ${res.status}`);
         return;
       }
       const data = await res.json();
@@ -410,6 +427,7 @@ export default function App() {
       setConnectionState(CONNECTED_CONNECTION);
       setLegacyQueueNeedsDecision(false);
       setShowSettings(false);
+      setTokenInput("");
       refresh();
       connectionSucceeded = true;
     } catch (err) {
@@ -431,7 +449,7 @@ export default function App() {
     try {
       const result = await command({ action: "adopt-legacy-queue" }) as { ok?: boolean; error?: string } | undefined;
       if (!result?.ok) {
-        setConnectError(result?.error ?? "Could not assign the pending captures.");
+        setConnectError(result?.error ?? "Could not assign the pending captures");
         return;
       }
       setLegacyQueueNeedsDecision(false);
@@ -476,7 +494,7 @@ export default function App() {
     if (settled.size !== startingSources.size) setStartingSources(settled);
   }, [snapshot, startingSources]);
 
-  // Safety fallback: if starting state does not settle within 6 seconds, clear it so buttons don't stay locked
+  // If a start does not settle within 6 seconds, unlock the buttons anyway.
   useEffect(() => {
     if (startingSources.size === 0) return;
     const timer = setTimeout(() => {
@@ -484,6 +502,7 @@ export default function App() {
     }, 6000);
     return () => clearTimeout(timer);
   }, [startingSources]);
+
   const queue = snapshot?.queue ?? EMPTY_QUEUE;
   const outbox = describeQueue(queue);
 
@@ -496,23 +515,13 @@ export default function App() {
    */
   const rows = popupSourceRows(config?.sources ?? null);
   const initialImport = initialImportSummary(rows, snapshot?.runs ?? null);
-  const showImportAll = config?.enabled === true && snapshot !== null && initialImport.due.length > 0;
-  const importAllStarting = initialImport.due.some((source) => startingSources.has(source));
 
-  /** Everything one row needs, entirely from persisted state. */
-  const viewOf = (s: ExtensionSourceConfig & { enabled: boolean; configured: boolean }) => {
-    if (!s.configured && config === null) {
-      // The header reports the connection once; it is not a fact about this source.
-      return {
-        state: "ready" as const,
-        text: "",
-        tone: "faint" as const,
-        action: "none" as const,
-        actionLabel: "Import",
-        settled: false,
-      };
-    }
+  /** Everything one row shows, entirely from persisted state. */
+  const rowOf = (s: PopupSourceRow): SourceRowView => {
+    const name = SOURCE_NAMES[s.source] ?? s.host;
     const run = snapshot?.runs[s.source];
+    const sourceQueue = snapshot?.bySource?.[s.source] ?? EMPTY_QUEUE;
+    const offline = !s.configured && config === null;
     const input: SourceSnapshot = {
       source: s.source,
       enabled: s.enabled,
@@ -521,886 +530,494 @@ export default function App() {
       updatedAt: run?.updatedAt,
       paused: run?.paused,
       lastErrorCode: run?.lastErrorCode,
-      queue: snapshot?.bySource?.[s.source] ?? EMPTY_QUEUE,
+      queue: sourceQueue,
       lastRun: status[s.source]?.lastRun ?? null,
       held: stats?.bySource[s.source] ?? 0,
     };
-    return describeSource(input, now);
-  };
-
-  const act = (s: ExtensionSourceConfig, action: string) => {
-    if (action === "pause") return void pause(s.source);
-    setStartingSources((previous) => new Set(previous).add(s.source));
-    void start(s.source).then(
-      () => setStartingSources((previous) => withoutStartingSource(previous, s.source)),
-      () => setStartingSources((previous) => withoutStartingSource(previous, s.source)),
-    );
-  };
-
-  const actImportAll = () => {
-    if (initialImport.due.length === 0) return;
-    const due = initialImport.due;
-    setStartingSources((previous) => new Set([...previous, ...due]));
-    void command({ action: "import-all" }).then((response) => {
-      const ok = (response as { ok?: boolean } | undefined)?.ok;
-      if (!ok) {
-        setStartingSources((previous) => {
-          const next = new Set(previous);
-          for (const source of due) next.delete(source);
-          return next;
-        });
-      }
-      refresh();
+    const view = describeSource(input, now);
+    return sourceRowView({
+      view: offline ? { ...view, state: "ready" } : view,
+      name,
+      initialImportDue: initialImport.due.includes(s.source),
+      lastErrorCode: run?.lastErrorCode,
+      queueFailed: sourceQueue.failed,
+      progress: {
+        pages: status[s.source]?.pages ?? 0,
+        items: status[s.source]?.items ?? 0,
+      },
+      offline,
     });
   };
 
-  /**
-   * The one line that answers "is anything outstanding".
-   *
-   * Counted from the same persisted records the rows are, so it cannot
-   * disagree with them.
-   */
-  const running = rows.filter((s) => viewOf(s).state === "running").length;
-  const summary =
-    running > 0 ? `${running} importing` : outbox.total > 0 ? "" : "Nothing waiting";
+  const act = (source: string, action: SourceRowView["action"]) => {
+    if (action === "pause") {
+      setPausingSources((previous) => new Set(previous).add(source));
+      void pause(source).finally(() => {
+        setPausingSources((previous) => withoutStartingSource(previous, source));
+        refresh();
+      });
+      return;
+    }
+    if (action !== "import") return;
+    setStartingSources((previous) => new Set(previous).add(source));
+    void start(source).then(
+      () => setStartingSources((previous) => withoutStartingSource(previous, source)),
+      () => setStartingSources((previous) => withoutStartingSource(previous, source)),
+    );
+  };
+
+  const onSave = async () => {
+    clearTimeout(saveTimer.current);
+    setSaving("saving");
+    const result = (await savePage()) as
+      | { ok?: boolean; delivery?: "queued" | "uploaded"; error?: string }
+      | undefined;
+    setSaving(
+      result?.ok
+        ? result.delivery === "uploaded"
+          ? "saved"
+          : "queued"
+        : { error: sentenceCase(result?.error ?? "Could not save this page") },
+    );
+    saveTimer.current = setTimeout(() => setSaving(null), 4000);
+    refresh();
+  };
+
+  const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next: Tab = event.key === "Home" ? "sources" : event.key === "End" ? "options" : tab === "sources" ? "options" : "sources";
+    setTab(next);
+    document.getElementById(`anansi-tab-${next}`)?.focus();
+  };
+
+  const toggleMirror = async () => {
+    setMirrorNote(null);
+    const next = !mirroring;
+    const result = await mirror(next ? "mirror-on" : "mirror-off");
+    setMirroring(result?.mirroring ?? false);
+    if (result?.error) setMirrorNote(sentenceCase(result.error));
+    refresh();
+  };
 
   // Whatever last went wrong, with anything credential-shaped removed.
   const diagnostics = [
     ...(connectionState.kind === "connected" || connectionState.kind === "loading"
       ? []
-      : [`connection: ${connectionState.message}`]),
+      : [`Connection: ${connectionState.message}`]),
     ...Object.entries(status).flatMap(([source, st]) =>
       st.message && !(source === "_" && connectionState.kind === "connected")
-        ? [`${source}: ${redactError(st.message)}`]
+        ? [`${source === "_" ? "Server" : SOURCE_NAMES[source] ?? source}: ${redactError(st.message)}`]
         : [],
     ),
   ];
 
-  return (
-    <div
-      className="anansi-popup"
-      style={{
-        width: 344,
-        background: S.ink,
-        color: S.text,
-        fontFamily: "system-ui, sans-serif",
-        fontSize: 14,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "14px 16px 0",
+  const connectionProblem =
+    connection && connectionState.kind !== "connected" && connectionState.kind !== "loading"
+      ? connectionState.message
+      : null;
+
+  const inSettings = connectionLoaded && (!connection || showSettings);
+
+  const header = inSettings && connection ? (
+    <header className="pop-head with-back">
+      <button
+        type="button"
+        className="btn ghost icon-only"
+        aria-label="Back"
+        onClick={() => {
+          setConnectError(null);
+          setShowSettings(false);
         }}
       >
-        <img
-          src="/icon/48.png"
-          width="18"
-          height="18"
-          alt=""
-          aria-hidden="true"
-          style={{ borderRadius: 5, objectFit: "cover" }}
-        />
-        <strong style={{ fontSize: 14 }}>Anansi</strong>
-        {connection && (
+        <Icon name="back" />
+      </button>
+      <span className="name">Connection</span>
+    </header>
+  ) : (
+    <header className="pop-head">
+      <img className="logo" src="/icon/48.png" width="20" height="20" alt="" aria-hidden="true" />
+      <span className="name">Anansi</span>
+      {connection && (
+        <>
+          <span className="host meta" title={connection.origin}>
+            {connection.origin.replace(/^https?:\/\//, "")}
+          </span>
           <button
             type="button"
+            className="btn ghost icon-only end"
+            aria-label="Connection settings"
+            title="Connection settings"
             onClick={() => {
               setConnectError(null);
-              setShowSettings((prev) => !prev);
-            }}
-            title={showSettings ? "Back to library" : "Connection settings"}
-            aria-label={showSettings ? "Back to library" : "Connection settings"}
-            style={{
-              marginLeft: "auto",
-              background: "transparent",
-              border: "none",
-              color: S.muted,
-              cursor: "pointer",
-              padding: "4px 6px",
-              display: "flex",
-              alignItems: "center",
-              fontSize: 12,
-              borderRadius: 4,
+              setShowSettings(true);
             }}
           >
-            {showSettings ? (
-              "← Back"
-            ) : (
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            )}
+            <Icon name="sliders" />
           </button>
-        )}
+        </>
+      )}
+    </header>
+  );
+
+  if (!connectionLoaded) {
+    return (
+      <div className="anansi-popup">
+        {header}
+        <div className="loading meta">Connecting…</div>
       </div>
+    );
+  }
 
-      {!connectionLoaded ? (
-        <div style={{ padding: "32px 16px", textAlign: "center", color: S.muted, fontSize: 12 }}>
-          Connecting…
-        </div>
-      ) : !connection || showSettings ? (
-        <form
-          onSubmit={handleConnect}
-          style={{
-            padding: "16px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-              {connection ? "Connection" : "Connect to Anansi"}
+  if (inSettings) {
+    return (
+      <div className="anansi-popup">
+        {header}
+        <form className="connect" onSubmit={handleConnect}>
+          {!connection && (
+            <div>
+              <div className="heading">Connect to your library</div>
+              <div className="meta">Get a code in Anansi under Sources, Connect extension</div>
             </div>
-          </div>
+          )}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <label htmlFor="anansi-worker-url" style={{ fontSize: 12, color: S.muted, fontWeight: 500 }}>
-              Library address
-            </label>
+          <div className="field">
+            <label htmlFor="anansi-worker-url">Library address</label>
             <input
               id="anansi-worker-url"
+              className="input mono"
               type="url"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="https://anansi.yourname.workers.dev"
+              placeholder="https://anansi.example.dev"
+              autoComplete="url"
+              spellCheck={false}
               required
-              style={{
-                background: S.card,
-                border: `1px solid ${S.edge}`,
-                borderRadius: 6,
-                color: S.text,
-                padding: "7px 10px",
-                fontSize: 12,
-                fontFamily: S.mono,
-                outline: "none",
-              }}
             />
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <label htmlFor="anansi-worker-token" style={{ fontSize: 12, color: S.muted, fontWeight: 500 }}>
-              Connection code or capture key
-            </label>
+          <div className="field">
+            <label htmlFor="anansi-worker-token">Code or capture key</label>
             <input
               id="anansi-worker-token"
+              className="input mono"
               type="password"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
-              placeholder="Paste the code from Settings"
+              placeholder="Paste the code"
+              autoComplete="off"
+              spellCheck={false}
               required
-              style={{
-                background: S.card,
-                border: `1px solid ${S.edge}`,
-                borderRadius: 6,
-                color: S.text,
-                padding: "7px 10px",
-                fontSize: 12,
-                fontFamily: S.mono,
-                outline: "none",
-              }}
             />
           </div>
 
           {connectError && !legacyQueueNeedsDecision && (
-            <div
-              style={{
-                padding: "8px 10px",
-                background: "var(--anansi-warning-surface)",
-                border: `1px solid ${S.warn}`,
-                borderRadius: 6,
-                color: S.warn,
-                fontSize: 12,
-                lineHeight: 1.4,
-              }}
-            >
-              {connectError}
+            <div className="notice" role="alert">
+              <Icon name="alert" />
+              <span className="body">{connectError}</span>
             </div>
           )}
 
           {legacyQueueNeedsDecision && connection && (
-            <div style={{ padding: "9px 10px", border: `1px solid ${S.warn}`, borderRadius: 6, color: S.muted, fontSize: 12, lineHeight: 1.4 }}>
-              Older pending captures have no recorded server destination. Delivery is paused. Assign them to {connection.origin} only if this is the library you want them added to.
-              <button type="button" disabled={resolvingLegacyQueue} onClick={() => void adoptLegacyQueue()} style={{ ...button, display: "block", marginTop: 8, width: "100%" }}>
-                {resolvingLegacyQueue ? "Assigning…" : "Assign pending captures here"}
-              </button>
+            <div className="notice">
+              <Icon name="alert" />
+              <span className="body">
+                Older pending captures have no recorded library, so delivery is paused. Assign them to {connection.origin.replace(/^https?:\/\//, "")} only if this is the library they belong to
+                {connectError && <span className="meta" style={{ display: "block", marginTop: 4, color: "inherit" }}>{connectError}</span>}
+                <button
+                  type="button"
+                  className="btn sm block"
+                  disabled={resolvingLegacyQueue}
+                  aria-busy={resolvingLegacyQueue}
+                  onClick={() => void adoptLegacyQueue()}
+                >
+                  {resolvingLegacyQueue ? "Assigning…" : "Assign pending captures here"}
+                </button>
+              </span>
             </div>
           )}
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-            <button
-              type="submit"
-              disabled={isConnecting}
-              style={{
-                ...button,
-                flex: 1,
-                opacity: isConnecting ? 0.7 : 1,
-              }}
-            >
+          <div className="actions">
+            <button type="submit" className="btn primary" disabled={isConnecting} aria-busy={isConnecting}>
               {isConnecting ? "Connecting…" : "Connect"}
             </button>
             {connection && (
-              <button
-                type="button"
-                onClick={handleDisconnect}
-                style={{
-                  ...button,
-                  background: S.raised,
-                  color: S.muted,
-                  padding: "0 12px",
-                }}
-              >
+              <button type="button" className="btn" onClick={() => void handleDisconnect()}>
                 Disconnect
               </button>
             )}
           </div>
-          {connection && (
-            <div style={{ fontSize: 12, color: S.muted, lineHeight: 1.4 }}>
-              Pending captures stay on this device until you reconnect.
-            </div>
-          )}
+          {connection && <p className="meta" style={{ margin: 0 }}>Pending captures stay on this device until you reconnect</p>}
         </form>
-      ) : (
-        <>
-          <div
-            style={{
-              padding: "12px 16px 14px",
-              display: "flex",
-              alignItems: "baseline",
-              gap: 9,
-            }}
-          >
-            <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.02em" }}>
-          {stats ? stats.items.toLocaleString() : "—"}
-        </span>
-        <span style={{ fontSize: 12.5, color: S.muted }}>saved items</span>
-        {stats && stats.today > 0 && (
-          <span
-            style={{
-              marginLeft: "auto",
-              fontFamily: S.mono,
-              fontSize: 12,
-              color: S.ok,
-              border: `1px solid ${S.edge}`,
-              borderRadius: 20,
-              padding: "3px 9px",
-            }}
-          >
-            +{stats.today} today
-          </span>
-        )}
-        {stats === null && (
-          <span
-            style={{
-              marginLeft: "auto",
-              fontSize: 12,
-              color: connectionState.kind === "loading" ? S.muted : S.warn,
-            }}
-          >
-            {connectionState.message}
-          </span>
-        )}
       </div>
+    );
+  }
 
-      {outbox.total > 0 && (
-        <div
-          style={{
-            margin: "0 16px 12px",
-            padding: "8px 10px",
-            border: `1px solid ${queue.failed ? S.warn : S.edge}`,
-            borderRadius: 7,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            color: TONES[outbox.tone],
-            fontSize: 12,
-          }}
-        >
-          <span>Outbox · {outbox.text}</span>
-          {outbox.canRetry && (
-            <button
-              type="button"
-              disabled={isRetrying}
-              aria-busy={isRetrying}
-              onClick={async () => {
-                setIsRetrying(true);
-                try {
-                  await retry();
-                  refresh();
-                } finally {
-                  setIsRetrying(false);
-                }
-              }}
-              style={{
-                ...button,
-                marginLeft: "auto",
-                height: 23,
-                padding: "0 8px",
-                fontSize: 12,
-                opacity: isRetrying ? 0.6 : 1,
-              }}
-            >
-              {isRetrying ? "Retrying…" : "Retry all"}
-            </button>
-          )}
-        </div>
-      )}
+  const saveLabel =
+    saving === "saving"
+      ? "Saving…"
+      : saving === "saved"
+        ? "Saved to your library"
+        : saving === "queued"
+          ? "Saved on this device"
+          : "Save this page";
+  const saved = saving === "saved" || saving === "queued";
+  const saveNote =
+    saving === "queued"
+      ? { text: "Waiting to upload", tone: "" }
+      : saving && typeof saving === "object"
+        ? { text: saving.error, tone: "warn" }
+        : page && !page.savable
+          ? { text: "Only web pages can be saved", tone: "" }
+          : { text: "Or right-click a selection", tone: "" };
 
-      {showImportAll && (
-        <div
-          style={{
-            margin: "0 16px 12px",
-            padding: "10px 11px",
-            border: `1px solid ${S.edge}`,
-            borderRadius: 7,
-            background: S.raised,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-              <strong style={{ fontSize: 12.5 }}>
-                {initialImport.completed > 0 ? "Import remaining history" : "Import all history"}
-              </strong>
-              <span style={{ fontSize: 12, color: S.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {initialImport.due.map((source) => NAMES[source] ?? source).join(" · ")}
-              </span>
-            </span>
-            <button
-              type="button"
-              disabled={importAllStarting}
-              onClick={actImportAll}
-              aria-busy={importAllStarting}
-              style={{
-                ...button,
-                height: 27,
-                padding: "0 12px",
-                fontSize: 12,
-                fontWeight: 500,
-                borderRadius: 5,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-                whiteSpace: "nowrap",
-                opacity: importAllStarting ? 0.6 : 1,
-                cursor: importAllStarting ? "default" : "pointer",
-              }}
-            >
-              {importAllStarting
-                ? "Importing…"
-                : initialImport.completed > 0
-                  ? "Import remaining history"
-                  : "Import all history"}
-            </button>
+  const footerText = stats
+    ? `${stats.items.toLocaleString("en-US")} ${stats.items === 1 ? "save" : "saves"}${stats.today > 0 ? ` · +${stats.today.toLocaleString("en-US")} today` : ""}`
+    : connectionState.kind === "loading"
+      ? "Loading…"
+      : "";
+
+  return (
+    <div className="anansi-popup">
+      {header}
+
+      <section className="save-card" aria-label="This page">
+        <div className="page-line">
+          <Icon name="globe" />
+          <div className="page-text">
+            <div className="page-title" title={page?.title}>{page?.title ?? "This page"}</div>
+            {page?.host && <div className="page-host meta">{page.host}</div>}
           </div>
         </div>
-      )}
-
-      <div className="anansi-sources">
-          {rows.map((s) => {
-            const view = viewOf(s);
-            const isStarting = startingSources.has(s.source) && view.action === "import";
-            const sourceName = SOURCE_LABELS[s.source] ?? NAMES[s.source] ?? s.host;
-            const statusText =
-              view.state === "running"
-                ? `${(status[s.source]?.pages ?? 0).toLocaleString()} scanned, ${(status[s.source]?.items ?? 0).toLocaleString()} new`
-                : view.state === "synced"
-                  ? "Up to date"
-                  : view.text;
-            const actionLabel = view.actionLabel;
-            const inProgressLabel =
-              actionLabel === "Resume"
-                ? "Resuming…"
-                : actionLabel === "Try again"
-                  ? "Retrying…"
-                  : "Importing…";
-            return (
-            <div
-              key={s.source}
-              className="anansi-provider-row"
-              data-state={view.state}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 11,
-                padding: "11px 16px",
-                borderTop: `1px solid ${S.line}`,
-                boxSizing: "border-box",
-              }}
-            >
-              <span
-                style={{
-                  width: 20,
-                  height: 20,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <SourceMark source={s.source} size={20} decorative />
-              </span>
-              <span
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
-                  minWidth: 0,
-                  flex: 1,
-                }}
-              >
-                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{sourceName}</span>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color:
-                      view.state === "failed"
-                        ? "var(--anansi-provider-error)"
-                        : view.state === "running"
-                          ? "var(--anansi-provider-running)"
-                          : view.state === "synced"
-                            ? "var(--anansi-provider-muted)"
-                            : TONES[view.tone],
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {statusText}
-                </span>
-              </span>
-              <button
-                type="button"
-                disabled={!s.configured || view.action === "none" || isStarting}
-                onClick={() => act(s, view.action)}
-                aria-label={`${isStarting ? inProgressLabel.replace("…", "") : actionLabel} ${sourceName}`}
-                aria-busy={isStarting}
-                style={{
-                  ...button,
-                  minWidth: 59,
-                  width: "auto",
-                  height: 27,
-                  padding: "0 12px",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  flexShrink: 0,
-                  borderRadius: 5,
-                  border: `1px solid ${S.edge}`,
-                  opacity: !s.configured || view.action === "none" || isStarting ? 0.6 : 1,
-                  cursor: !s.configured || view.action === "none" || isStarting ? "default" : "pointer",
-                  background: view.action === "pause" ? S.raised : S.card,
-                  color: view.action === "pause" ? S.muted : S.text,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {isStarting ? inProgressLabel : actionLabel}
-              </button>
-            </div>
-          );
-        })}
-        {/*
-            The page you are on. Not a platform row — there is nothing to
-            import and nothing to watch — so it says what it does and offers
-            the one action it has.
-          */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 11,
-            padding: "11px 16px",
-            borderTop: `1px solid ${S.line}`,
-          }}
-        >
-          <span
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 7,
-              background: S.raised,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              color: S.muted,
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="9" />
-              <path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z" />
-            </svg>
-          </span>
-          <span
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-              minWidth: 0,
-              flex: 1,
-            }}
-          >
-            <span style={{ fontSize: 12.5, fontWeight: 600 }}>This page</span>
-            <span
-              style={{
-                fontSize: 12,
-                color: saving === "saved" ? S.ok : saving && saving !== "saving" ? S.warn : S.muted,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {saving === "saving"
-                ? "Saving…"
-                : saving === "saved"
-                  ? "Saved to your library"
-                  : (saving ?? "Save this page, or right-click a selection")}
-            </span>
-          </span>
-          <button
-            type="button"
-            disabled={saving === "saving"}
-            aria-busy={saving === "saving"}
-            onClick={async () => {
-              setSaving("saving");
-              const result = (await savePage()) as
-                | {
-                    ok?: boolean;
-                    delivery?: "queued" | "uploaded";
-                    error?: string;
-                  }
-                | undefined;
-              setSaving(
-                result?.ok
-                  ? result.delivery === "uploaded"
-                    ? "saved"
-                    : "Saved on this device; waiting to upload"
-                  : (result?.error ?? "Could not save this page"),
-              );
-              setTimeout(() => setSaving(null), 4000);
-              refresh();
-            }}
-            style={{
-              ...button,
-              height: 27,
-              padding: "0 12px",
-              fontSize: 12,
-              flexShrink: 0,
-            }}
-          >
-            {saving === "saving" ? "Saving…" : "Save"}
-          </button>
-        </div>
-
-      </div>
-        {/*
-            Chrome, kept separate from the sources above and from "This page".
-            It is not a platform being watched and not a page being clipped —
-            it is the browser's own list, mirrored only if you ask, and the
-            permission arrives when you do.
-          */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 11,
-            padding: "11px 16px",
-            borderTop: `1px solid ${S.line}`,
-          }}
-        >
-          <span
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 7,
-              background: S.raised,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              color: S.muted,
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M6 4h12v17l-6-4-6 4z" />
-            </svg>
-          </span>
-          <span
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-              minWidth: 0,
-              flex: 1,
-            }}
-          >
-            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Chrome bookmarks</span>
-            <span
-              style={{
-                fontSize: 12,
-                color: mirrorNote ? S.warn : mirroring ? S.faint : S.muted,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {mirrorNote ??
-                (mirroring === null
-                  ? "Checking…"
-                  : mirroring
-                    ? "On · new bookmarks arrive as you make them"
-                    : "Off · asks Chrome for access")}
-            </span>
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={mirroring === true}
-            aria-label="Mirror Chrome bookmarks"
-            disabled={mirroring === null}
-            onClick={async () => {
-              setMirrorNote(null);
-              const next = !mirroring;
-              const result = await mirror(next ? "mirror-on" : "mirror-off");
-              setMirroring(result?.mirroring ?? false);
-              if (result?.error) setMirrorNote(result.error);
-              refresh();
-            }}
-            style={{
-              width: 36,
-              height: 20,
-              flexShrink: 0,
-              borderRadius: 10,
-              padding: "0 2px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: mirroring ? "flex-end" : "flex-start",
-              background: mirroring ? "var(--anansi-mirror-surface)" : S.raised,
-              border: `1px solid ${mirroring ? "var(--anansi-mirror-border)" : S.edge}`,
-              cursor: mirroring === null ? "default" : "pointer",
-            }}
-          >
-            <span
-              style={{
-                width: 14,
-                height: 14,
-                borderRadius: "50%",
-                background: mirroring ? S.ok : S.faint,
-              }}
-            />
-          </button>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 11,
-            padding: "11px 16px",
-            borderTop: `1px solid ${S.line}`,
-          }}
-        >
-          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Save confirmations</span>
-            <span style={{ fontSize: 12, color: S.muted }}>
-              {saveConfirmations ? "Shown beside the button" : "Off · errors still show"}
-            </span>
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={saveConfirmations}
-            aria-label="Show save confirmations"
-            onClick={() => {
-              const next = !saveConfirmations;
-              setSaveConfirmations(next);
-              void browser.storage.local.set({ [SAVE_CONFIRMATION_SETTING]: next });
-            }}
-            style={{
-              width: 36,
-              height: 20,
-              flexShrink: 0,
-              borderRadius: 10,
-              padding: "0 2px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: saveConfirmations ? "flex-end" : "flex-start",
-              background: saveConfirmations ? "var(--anansi-mirror-surface)" : S.raised,
-              border: `1px solid ${saveConfirmations ? "var(--anansi-mirror-border)" : S.edge}`,
-              cursor: "pointer",
-            }}
-          >
-            <span
-              style={{
-                width: 14,
-                height: 14,
-                borderRadius: "50%",
-                background: saveConfirmations ? S.ok : S.faint,
-              }}
-            />
-          </button>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 11,
-            padding: "11px 16px",
-            borderTop: `1px solid ${S.line}`,
-          }}
-        >
-          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Check TikTok when the library opens</span>
-            <span style={{ fontSize: 12, color: S.muted }}>
-              Opens a visible TikTok window briefly. Automated visits can put your account at risk.
-            </span>
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={syncTiktok}
-            aria-label="Check TikTok when the library opens"
-            onClick={() => {
-              const next = !syncTiktok;
-              setSyncTiktok(next);
-              void browser.storage.local.set({ [TIKTOK_SYNC_SETTING]: next });
-            }}
-            style={{
-              width: 36,
-              height: 20,
-              flexShrink: 0,
-              borderRadius: 10,
-              padding: "0 2px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: syncTiktok ? "flex-end" : "flex-start",
-              background: syncTiktok ? "var(--anansi-mirror-surface)" : S.raised,
-              border: `1px solid ${syncTiktok ? "var(--anansi-mirror-border)" : S.edge}`,
-              cursor: "pointer",
-            }}
-          >
-            <span style={{ width: 14, height: 14, borderRadius: "50%", background: syncTiktok ? S.ok : S.faint }} />
-          </button>
-        </div>
-        <div style={{ padding: "0 16px 11px", fontSize: 12, color: S.muted }}>
-          Opening your library checks X, Reddit and GitHub for new saves.
-          {showXRisk && <div role="note">X checks may open a background tab. Automated visits can put your X account at risk. <button type="button" onClick={()=>{setShowXRisk(false);void browser.storage.local.set({anansiXRiskSeen:true});}}>Got it</button></div>}
-        </div>
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "11px 16px",
-          borderTop: `1px solid ${S.line}`,
-        }}
-      >
-        <span style={{ fontSize: 12, color: S.muted }}>
-          {summary}
-        </span>
         <button
           type="button"
-          disabled={!connection}
+          className={saved ? "btn block" : "btn primary block"}
+          disabled={saving === "saving" || saved || page?.savable === false}
+          aria-busy={saving === "saving"}
+          onClick={() => void onSave()}
+        >
+          <Icon name={saved ? "check" : "bookmarkPlus"} />
+          {saveLabel}
+        </button>
+        <div className={`save-note meta ${saveNote.tone}`} role={saveNote.tone === "warn" ? "alert" : undefined} aria-live="polite">
+          {saveNote.text}
+        </div>
+      </section>
+
+      <div className="tabs" role="tablist" aria-label="Popup sections" onKeyDown={onTabKey}>
+        {(["sources", "options"] as const).map((name) => (
+          <button
+            key={name}
+            id={`anansi-tab-${name}`}
+            type="button"
+            role="tab"
+            className="tab"
+            aria-selected={tab === name}
+            aria-controls={`anansi-panel-${name}`}
+            tabIndex={tab === name ? 0 : -1}
+            onClick={() => setTab(name)}
+          >
+            {name === "sources" ? "Sources" : "Options"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "sources" ? (
+        <div className="panel" id="anansi-panel-sources" role="tabpanel" aria-labelledby="anansi-tab-sources">
+          {connectionProblem && (
+            <div className="notice" role="alert">
+              <Icon name="alert" />
+              <span className="body">{connectionProblem}</span>
+            </div>
+          )}
+
+          {outbox.total > 0 && (
+            <div className={`notice notice-row${queue.failed ? "" : " neutral"}`}>
+              <span className="body">{sentenceCase(outbox.text)}</span>
+              {outbox.canRetry && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={isRetrying}
+                  aria-busy={isRetrying}
+                  onClick={async () => {
+                    setIsRetrying(true);
+                    try {
+                      await retry();
+                      refresh();
+                    } finally {
+                      setIsRetrying(false);
+                    }
+                  }}
+                >
+                  {isRetrying ? "Retrying…" : "Retry all"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {showXRisk && (
+            <div className="notice neutral" role="note">
+              <span className="body">
+                Checking X may open a background tab. Automated visits can put your X account at risk
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ display: "flex" }}
+                  onClick={() => {
+                    setShowXRisk(false);
+                    void browser.storage.local.set({ anansiXRiskSeen: true });
+                  }}
+                >
+                  Got it
+                </button>
+              </span>
+            </div>
+          )}
+
+          <div>
+            {rows.map((s) => {
+              const row = rowOf(s);
+              const name = SOURCE_NAMES[s.source] ?? s.host;
+              const busy =
+                row.action === "import"
+                  ? startingSources.has(s.source)
+                  : row.action === "pause" && pausingSources.has(s.source);
+              return (
+                <div key={s.source} className="srow" data-tone={row.tone}>
+                  <span className="mark">
+                    <SourceMark source={s.source} size={20} decorative />
+                  </span>
+                  <div className="text">
+                    <div className="title">{name}</div>
+                    {row.status && (
+                      <div className="status" data-tone={row.tone}>
+                        {row.status}
+                      </div>
+                    )}
+                  </div>
+                  {row.label && (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={row.action === "none" || busy}
+                      aria-busy={busy}
+                      aria-label={`${busy ? row.busyLabel.replace("…", "") : row.label}, ${name}`}
+                      onClick={() => act(s.source, row.action)}
+                    >
+                      {row.action === "pause" && !busy && <Icon name="pause" />}
+                      {row.label === "Resume" && !busy && <Icon name="play" />}
+                      {busy ? row.busyLabel : row.label}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="panel" id="anansi-panel-options" role="tabpanel" aria-labelledby="anansi-tab-options">
+          {/*
+              Chrome's own bookmark list, mirrored only if you ask; the
+              permission is requested when you switch it on and handed back
+              when you switch it off.
+            */}
+          <div className="opt">
+            <div className="text">
+              <div className="title" id="opt-mirror">Chrome bookmarks</div>
+              <div className={mirrorNote ? "meta warn" : "meta"}>
+                {mirrorNote ??
+                  (mirroring === null
+                    ? "Checking…"
+                    : mirroring
+                      ? "On · new bookmarks arrive as you make them"
+                      : "Off · asks Chrome for access when switched on")}
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              className="switch"
+              aria-checked={mirroring === true}
+              aria-labelledby="opt-mirror"
+              disabled={mirroring === null}
+              onClick={() => void toggleMirror()}
+            />
+          </div>
+
+          <div className="opt">
+            <div className="text">
+              <div className="title" id="opt-confirm">Save confirmations</div>
+              <div className="meta">{saveConfirmations ? "Shown beside the button you pressed" : "Off · errors still show"}</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              className="switch"
+              aria-checked={saveConfirmations}
+              aria-labelledby="opt-confirm"
+              onClick={() => {
+                const next = !saveConfirmations;
+                setSaveConfirmations(next);
+                void browser.storage.local.set({ [SAVE_CONFIRMATION_SETTING]: next });
+              }}
+            />
+          </div>
+
+          <div className="opt">
+            <div className="text">
+              <div className="title" id="opt-tiktok">Check TikTok when the library opens</div>
+              <div className="meta">Opens a TikTok window briefly. Automated visits can put your account at risk</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              className="switch"
+              aria-checked={syncTiktok}
+              aria-labelledby="opt-tiktok"
+              onClick={() => {
+                const next = !syncTiktok;
+                setSyncTiktok(next);
+                void browser.storage.local.set({ [TIKTOK_SYNC_SETTING]: next });
+              }}
+            />
+          </div>
+
+          <p className="opt-note meta" style={{ margin: 0 }}>
+            Opening your library checks X, Reddit and GitHub for new saves
+          </p>
+        </div>
+      )}
+
+      {diagnostics.length > 0 && (
+        <details className="details">
+          <summary>
+            <Icon name="chevronRight" />
+            Details
+          </summary>
+          <ul>
+            {diagnostics.map((line) => (
+              <li key={line} className="meta">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <footer className="pop-foot">
+        <span className="meta num">{footerText}</span>
+        <button
+          type="button"
+          className="btn ghost sm"
           onClick={() => {
             if (connection) void browser.tabs.create({ url: new URL("/", connection.origin).toString() });
           }}
-          style={{
-            marginLeft: "auto",
-            background: "none",
-            border: "none",
-            cursor: connection ? "pointer" : "default",
-            font: "inherit",
-            fontSize: 12,
-            color: S.accent,
-            opacity: connection ? 1 : 0.5,
-          }}
         >
-          Open library ↗
+          Open library
+          <Icon name="arrowUpRight" />
         </button>
-      </div>
-
-      {diagnostics.length > 0 && (
-        <details className="anansi-diagnostics" style={{ borderTop: `1px solid ${S.line}`, padding: "9px 16px 12px" }}>
-          <summary style={{ fontSize: 12, color: S.muted }}>Details</summary>
-          <div
-            style={{
-              marginTop: 7,
-              display: "flex",
-              flexDirection: "column",
-              gap: 5,
-            }}
-          >
-            {diagnostics.map((line) => (
-              <div
-                key={line}
-                style={{
-                  fontSize: 12,
-                  fontFamily: S.mono,
-                  color: S.muted,
-                  lineHeight: 1.45,
-                  wordBreak: "break-word",
-                }}
-              >
-                {line}
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-        </>
-      )}
+      </footer>
     </div>
   );
 }
-
-const button: React.CSSProperties = {
-  height: 27,
-  borderRadius: 5,
-  border: `1px solid ${S.edge}`,
-  background: S.card,
-  color: S.text,
-  fontSize: 12,
-  fontWeight: 500,
-  cursor: "pointer",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 6,
-  whiteSpace: "nowrap",
-  boxSizing: "border-box",
-};

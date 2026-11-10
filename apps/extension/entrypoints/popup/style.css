@@ -2,27 +2,21 @@ html,
 body {
   margin: 0;
   padding: 0;
-  width: 344px;
+  width: 360px;
   background-color: #0b0e11;
   color: #e6ebef;
-  font-family: system-ui, -apple-system, sans-serif;
-  -webkit-font-smoothing: antialiased;
 }
 
 #root {
-  width: 344px;
+  width: 360px;
   margin: 0;
   padding: 0;
-}
-
-* {
-  box-sizing: border-box;
 }
 
 @media (prefers-color-scheme: light) {
   html,
   body {
-    background-color: #ffffff;
-    color: #171717;
+    background-color: #f8fafc;
+    color: #202832;
   }
 }

@@ -1,5 +1,7 @@
 import { retirePreviousConnection, connectLibrary } from "../lib/library-connect.ts";
 import { isLibrarySyncCommand } from "../lib/messages.ts";
+import { startLibraryImport } from "../lib/library-import.ts";
+import { libraryBridgeScript } from "../lib/library-bridge-script.ts";
 /**
  * The background worker: the only part of the extension that knows a server
  * exists, and the only part that holds the token.
@@ -2103,21 +2105,7 @@ async function handlePageEvent(
 }
 
 async function injectLibraryBridge(tabId: number) {
-        await browser.scripting.executeScript({target: {tabId}, func: () => {
-          const marker = "__anansiSyncBridge";
-          const state = globalThis as typeof globalThis & {__anansiSyncBridge?: (event: MessageEvent) => void};
-          if (state[marker]) window.removeEventListener("message",state[marker]);
-          state[marker] = event => {
-            if (event.source !== window || event.origin !== location.origin || !["library-sync-request","library-connect-request"].includes(event.data?.anansi) || typeof event.data.id !== "string" || event.data.id.length > 80) return;
-            const id = event.data.id;
-            const connecting=event.data.anansi === "library-connect-request";
-            const family=connecting?"library-connect-response":"library-sync-response";
-            void chrome.runtime.sendMessage(connecting?{anansi:"library-connect",messageVersion:1,code:event.data.code}:{anansi: "library-sync-now", messageVersion: 1}).then(result => {
-              window.postMessage({anansi: family, id, ok: result?.ok === true}, location.origin);
-            }).catch(() => window.postMessage({anansi: family, id, ok: false}, location.origin));
-          };
-          window.addEventListener("message",state[marker]);
-        }}).catch(() => {});
+        await browser.scripting.executeScript({target: {tabId}, func: libraryBridgeScript}).catch(() => {});
 
 }
 async function armLibraryTabs() {
@@ -2147,6 +2135,24 @@ async function handleRuntimeMessage(
   });
   return result.ok?{ok:true}:{ok:false,error:"Connection failed"};
  }
+	if ((message as {anansi?: string})?.anansi === "library-import") {
+		// The same full import the popup's "Import everything" starts.
+		const started = await startLibraryImport(
+			message,
+			{ url: sender.url, frameId: sender.frameId, fromTab: Boolean(sender.tab) },
+			{
+				connectedOrigin: async () => (await settings())?.server,
+				enabledSources: async () => {
+					// The cached config answers inside the page's timeout; startCapture
+					// re-reads it fresh before the run does anything.
+					const config = await loadConfig();
+					return config?.enabled ? config.sources.map((entry) => entry.source) : null;
+				},
+				start: (source) => startCapture(source),
+			},
+		);
+		return started.ok ? { ok: true } : { ok: false, error: "import not allowed" };
+	}
 	if ((message as {anansi?: string})?.anansi === "library-sync-now") {
     const current = await settings();
     if (!isLibrarySyncCommand(message, sender.url, current?.server) || !sender.tab || sender.frameId !== 0) return {ok: false, error: "origin not allowed"};

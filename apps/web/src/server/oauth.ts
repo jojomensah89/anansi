@@ -134,7 +134,7 @@ const authClient = (row: typeof oauthClients.$inferSelect) => ({
 });
 
 async function activeConnection(db: AnansiDb, id: string) {
-	const [row] = await db.select({ id: connectedClients.id }).from(connectedClients)
+	const [row] = await db.select({ id: connectedClients.id, scopes: connectedClients.scopes }).from(connectedClients)
 		.where(and(eq(connectedClients.id, id), eq(connectedClients.kind, "app"), isNull(connectedClients.revokedAt)));
 	return row;
 }
@@ -289,7 +289,10 @@ async function inspect(db: AnansiDb, origin: string, params: AuthorizationParams
 export async function describeRequest(db: AnansiDb, origin: string, params: AuthorizationParams) {
 	const checked = await inspect(db, origin, params);
 	if (!checked.ok) return { ok: false as const, message: checked.message };
-	return { ok: true as const, name: checked.client.name, destination: redirectLabel(checked.redirectUri) };
+	// Consent never grants write. An app that reconnects keeps what the owner already allowed it.
+	const existing = checked.client.connectedClientId ? await activeConnection(db, checked.client.connectedClientId) : undefined;
+	const write = existing?.scopes.split(",").includes("write") ?? false;
+	return { ok: true as const, name: checked.client.name, destination: redirectLabel(checked.redirectUri), write };
 }
 
 const withParams = (uri: string, params: Record<string, string | undefined>) => {

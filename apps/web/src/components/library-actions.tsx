@@ -6,7 +6,6 @@ import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { api, type Collection } from "../lib/api.ts";
 import { libraryKeys } from "../lib/library-query.ts";
-import { restoreLibraryFile } from "../lib/restore-library.ts";
 import { SavedViewsSkeleton, useSlowLoad } from "./skeleton.tsx";
 
 export function LibraryActions({ current, onApply }: {
@@ -15,10 +14,6 @@ export function LibraryActions({ current, onApply }: {
 }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
-  const [exporting, setExporting] = useState(false);
-  const [restoring, setRestoring] = useState(false);
-  const [restoreProgress, setRestoreProgress] = useState<string | null>(null);
-  const [abandonableBackupId, setAbandonableBackupId] = useState<string | null>(null);
   const collections = useQuery({
     queryKey: libraryKeys.collections(),
     queryFn: ({ signal }) => api.collections(signal),
@@ -62,44 +57,6 @@ export function LibraryActions({ current, onApply }: {
     if (name.trim()) save.mutate();
   };
 
-  const exportAll = async () => {
-    setExporting(true);
-    try {
-      const blob = await api.exportLibrary();
-      const href = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = href;
-      link.download = `anansi-library-${new Date().toISOString().slice(0, 10)}.json`;
-      link.click();
-      URL.revokeObjectURL(href);
-      toast.success("Library export downloaded");
-    } catch (error) {
-      toast.error("Export failed", { description: message(error) });
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const restoreFile = async (file: File) => {
-    setRestoring(true);
-    setRestoreProgress("Checking export…");
-    setAbandonableBackupId(null);
-    try {
-      await restoreLibraryFile(file, setRestoreProgress);
-      await queryClient.invalidateQueries();
-      toast.success("Library data restored");
-    } catch (error) {
-      setRestoreProgress(message(error));
-      toast.error("Restore stopped", { description: message(error) });
-      try {
-        const { restore } = await api.restoreStatus();
-        if (restore?.status === "active" && Object.values(restore.progress).every((count) => count === 0)) {
-          setAbandonableBackupId(restore.backupId);
-        }
-      } catch { /* Keep the original restore error. */ }
-    } finally { setRestoring(false); }
-  };
-
   return (
     <Popover>
       <PopoverTrigger style={summaryStyle}>Saved views</PopoverTrigger>
@@ -119,22 +76,6 @@ export function LibraryActions({ current, onApply }: {
           <Input id="collection-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name this view" maxLength={80} style={{ flex: 1, minWidth: 0, height: 30, borderRadius: 5, border: "1px solid var(--edge)", background: "var(--ink)", color: "var(--text)", padding: "0 8px", font: "inherit", fontSize: "var(--text-body)" }} />
           <Button variant="ghost" type="submit" disabled={!name.trim() || save.isPending} style={smallButton}>Save</Button>
         </form>
-        <Button variant="ghost" type="button" disabled={exporting} onClick={() => void exportAll()} style={{ ...smallButton, width: "100%", marginTop: 8, background: "transparent", color: "var(--muted)" }}>{exporting ? "Preparing export…" : "Export library (without media)"}</Button>
-        <label style={{ ...smallButton, display: "block", textAlign: "center", marginTop: 8, cursor: restoring ? "wait" : "pointer" }}>
-          {restoring ? "Restoring…" : "Restore into an empty library"}
-          <Input type="file" accept=".json,application/json" disabled={restoring} style={{ display: "none" }} onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (file) void restoreFile(file);
-          }} />
-        </label>
-        {restoreProgress && <p role="status" style={{ ...statusStyle, lineHeight: 1.5 }}>{restoreProgress}</p>}
-        {abandonableBackupId && <Button variant="ghost" type="button" style={{ ...smallButton, width: "100%" }} onClick={() => {
-          void api.restoreAbort(abandonableBackupId).then(() => {
-            setAbandonableBackupId(null);
-            setRestoreProgress("Empty restore session cleared. Choose a corrected export.");
-          }).catch((error) => toast.error("Could not clear restore session", { description: message(error) }));
-        }}>Clear empty restore session</Button>}
       </PopoverContent>
     </Popover>
   );

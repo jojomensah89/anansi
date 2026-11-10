@@ -110,26 +110,19 @@ export function PageSkeleton() {
   );
 }
 
-/** The settings card shape, including both feature rows and progress count. */
+/** Settings rows: a title and description on the left, a switch on the right. */
 export function SettingsSkeleton() {
   return (
     <Loading label="Loading settings">
-      <section className="anansi-settings-section">
-        <Bone width="24%" height={14} style={{ margin: "0 6px 12px" }} />
-        <div className="anansi-settings-list">
-          {[0, 1].map((index) => (
-            <div key={index} className="anansi-settings-row">
-              <Bone width={38} height={38} radius={9} delay={index * 70} />
-              <span style={{ display: "flex", flex: 1, minWidth: 0, flexDirection: "column", gap: 7 }}>
-                <Bone width="46%" height={10} delay={index * 70 + 40} />
-                <Bone width="72%" height={8} delay={index * 70 + 80} />
-              </span>
-              <Bone width={32} height={18} radius={999} delay={index * 70 + 120} />
-            </div>
-          ))}
+      {[0, 1].map((index) => (
+        <div key={index} className="settings-row">
+          <span className="settings-row-copy" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <Bone width="36%" height={12} delay={index * 70} />
+            <Bone width="58%" height={10} delay={index * 70 + 40} />
+          </span>
+          <span className="settings-row-control"><Bone width={32} height={18} radius={9} delay={index * 70 + 80} /></span>
         </div>
-        <Bone width="42%" height={8} style={{ margin: "12px 4px 1px" }} />
-      </section>
+      ))}
     </Loading>
   );
 }
@@ -324,43 +317,22 @@ export function CreatorRowsSkeleton({ count = 10 }: { count?: number }) {
   );
 }
 
-export function SourceCardsSkeleton({ count = 3 }: { count?: number }) {
+/** Source table rows: mark and name, status, figures, switch. */
+export function SourceCardsSkeleton({ count = 5 }: { count?: number }) {
   return (
     <Loading label="Loading sources">
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-          gap: 14,
-        }}
-      >
+      <div className="sources-panel">
         {Array.from({ length: count }, (_, index) => (
-          <div
-            key={index}
-            style={{
-              background: "var(--card)",
-              border: "1px solid var(--line)",
-              borderRadius: 8,
-              padding: 16,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <Bone width={30} height={30} radius={7} delay={index * 70} />
-              <span style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
-                <Bone width="46%" height={10} delay={index * 70 + 40} />
-                <Bone width="62%" height={8} delay={index * 70 + 70} />
-              </span>
-              <Bone width={36} height={20} radius={10} delay={index * 70 + 100} />
-            </div>
-            <Bone height={6} radius={3} delay={index * 70 + 130} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 18 }}>
-              {[0, 1, 2, 3].map((cell) => (
-                <span key={cell} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  <Bone width="40%" height={11} delay={index * 70 + 160 + cell * 25} />
-                  <Bone width="60%" height={7} delay={index * 70 + 180 + cell * 25} />
-                </span>
-              ))}
-            </div>
+          <div key={index} style={{ display: "flex", alignItems: "center", gap: 12, height: 60, padding: "0 20px", borderTop: index ? "1px solid var(--line-soft)" : undefined }}>
+            <Bone width={20} height={20} radius={5} delay={index * 70} />
+            <span style={{ display: "flex", flexDirection: "column", gap: 6, width: 180 }}>
+              <Bone width="70%" height={12} delay={index * 70 + 30} />
+              <Bone width="44%" height={10} delay={index * 70 + 60} />
+            </span>
+            <Bone width={200} height={12} delay={index * 70 + 90} />
+            <span style={{ flex: 1 }} />
+            <Bone width={40} height={12} delay={index * 70 + 120} />
+            <Bone width={32} height={18} radius={9} delay={index * 70 + 150} />
           </div>
         ))}
       </div>

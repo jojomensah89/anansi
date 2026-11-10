@@ -4,7 +4,7 @@ import { openLocalDb, migrateLocalDb } from "@anansi/db/local";
 import type { AnansiDb } from "@anansi/db";
 import { handleApi } from "./api.ts";
 import { handleMcp } from "./mcp.ts";
-import { authorizeClient, listClients, updateClient } from "./clients.ts";
+import { authorizeClient, listClients, setClientWrite, updateClient } from "./clients.ts";
 import { validRedirectUri, protectedResourceMetadata, authorizationServerMetadata } from "./oauth.ts";
 import { oauthTokens } from "../../../../packages/db/src/schema.ts";
 import { createClient } from "./clients.ts";
@@ -74,3 +74,12 @@ test("expired access tokens and tokens for another audience fail closed",async()
 });
 
 
+test("consent says whether a reconnecting app already has write access",async()=>{
+ const {env,params,cookie}=await connect();
+ const describe=async()=>await (await handleApi(env,new Request(origin+"/api/oauth/authorize?"+new URLSearchParams(params),{headers:{cookie}}))).json() as {ok:boolean;name:string;write:boolean};
+ expect(await describe()).toMatchObject({ok:true,name:"Test app",write:false});
+ const [app]=await listClients(env.db);await setClientWrite(env.db,app!.id,true);
+ expect((await describe()).write).toBe(true);
+ await updateClient(env.db,app!.id);
+ expect((await describe()).write).toBe(false);
+});

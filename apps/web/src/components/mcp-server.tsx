@@ -1,182 +1,175 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { MCP_TOOL_CATALOG, MCP_WRITE_TOOL_CATALOG } from "@anansi/mcp/catalog";
-import { Rail } from "./rail.tsx";
-import { clientSnippet, MCP_CLIENTS, MCP_TOKEN_PLACEHOLDER, type McpClientId } from "./mcp-config.ts";
+import { Button } from "@anansi/ui/components/button";
+import { RadioGroup, RadioGroupItem } from "@anansi/ui/components/radio-group";
+import { ToggleGroup, ToggleGroupItem } from "@anansi/ui/components/toggle-group";
+import { Check, Copy, Lock } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { api } from "../lib/api.ts";
+import { ConnectedClients } from "./connected-clients.tsx";
+import { clientSnippet, MCP_CLIENTS, MCP_TOKEN_PLACEHOLDER, type McpClientId } from "./mcp-config.ts";
+import { Rail } from "./rail.tsx";
 
+const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
 type CopyTarget = "endpoint" | "snippet";
-
-function CopyGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="8" y="8" width="11" height="11" rx="2" />
-      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-    </svg>
-  );
-}
-
-function CheckGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="m5 12 4 4L19 6" />
-    </svg>
-  );
-}
-
-function CopyButton({
-  target,
-  value,
-  copied,
-  onCopy,
-}: {
-  target: CopyTarget;
-  value: string;
-  copied: CopyTarget | null;
-  onCopy: (target: CopyTarget, value: string) => void;
-}) {
-  const isCopied = copied === target;
-  return (
-    <button
-      type="button"
-      onClick={() => onCopy(target, value)}
-      aria-label={isCopied ? "Copied" : `Copy ${target === "endpoint" ? "MCP endpoint" : "client setup"}`}
-      className="mcp-copy-button"
-    >
-      {isCopied ? <CheckGlyph /> : <CopyGlyph />}
-      {isCopied ? "Copied" : "Copy"}
-    </button>
-  );
-}
 
 const emptySubscribe = () => () => {};
 const getClientOrigin = () => (typeof window !== "undefined" ? window.location.origin : "");
 const getServerOrigin = () => "";
 
+/** Catalog summaries end in a full stop; short lines on this page do not. */
+const plain = (summary: string) => summary.replace(/\.$/, "").replace(/, and /g, " and ");
+
+function useCopy() {
+	const [copied, setCopied] = useState<CopyTarget | null>(null);
+	const copy = async (target: CopyTarget, value: string) => {
+		try {
+			if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+			await navigator.clipboard.writeText(value);
+			setCopied(target);
+			window.setTimeout(() => setCopied((current) => (current === target ? null : current)), 1800);
+		} catch {
+			// The text stays on screen and selectable for copying by hand.
+			setCopied(null);
+		}
+	};
+	return { copied, copy };
+}
+
+function ToolColumn({ title, tools }: { title?: ReactNode; tools: ReadonlyArray<{ name: string; summary: string }> }) {
+	return (
+		<div className="mcp-tool-column">
+			<div className="mcp-tool-group">{title ?? <span aria-hidden="true">&nbsp;</span>}</div>
+			<ul>
+				{tools.map((tool) => (
+					<li key={tool.name} className="mcp-tool">
+						<code>{tool.name}</code>
+						<p>{plain(tool.summary)}</p>
+					</li>
+				))}
+			</ul>
+		</div>
+	);
+}
+
 export function McpServerPage() {
-  const origin = useSyncExternalStore(emptySubscribe, getClientOrigin, getServerOrigin);
-  const [selectedClient, setSelectedClient] = useState<McpClientId>("claude-code");
-  const [mode, setMode] = useState<"oauth" | "key">("oauth");
-  const [ready, setReady] = useState(false);
-  const [copied, setCopied] = useState<CopyTarget | null>(null);
-  const [stats, setStats] = useState({ items: 0, authors: 0, archived: 0, bySource: {} as Record<string, number> });
+	const origin = useSyncExternalStore(emptySubscribe, getClientOrigin, getServerOrigin);
+	const [selectedClient, setSelectedClient] = useState<McpClientId>("claude-code");
+	const [mode, setMode] = useState<"oauth" | "key">("oauth");
+	const [ready, setReady] = useState(false);
+	const { copied, copy } = useCopy();
+	const [stats, setStats] = useState({ items: 0, authors: 0, archived: 0, bySource: {} as Record<string, number> });
 
-  useEffect(() => {
-    const controller = new AbortController();
-    api
-      .stats(controller.signal)
-      .then((next) => { setStats({ items: next.items, authors: next.authors, archived: next.archived, bySource: next.bySource }); setReady(true); })
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
+	useEffect(() => {
+		const controller = new AbortController();
+		api
+			.stats(controller.signal)
+			.then((next) => {
+				setStats({ items: next.items, authors: next.authors, archived: next.archived, bySource: next.bySource });
+				setReady(true);
+			})
+			.catch(() => {});
+		return () => controller.abort();
+	}, []);
 
-  const endpoint = `${origin}/mcp`;
-  const snippet = useMemo(() => clientSnippet(selectedClient, endpoint, mode), [endpoint, selectedClient, mode]);
+	const endpoint = `${origin}/mcp`;
+	const snippet = useMemo(() => clientSnippet(selectedClient, endpoint, mode), [endpoint, selectedClient, mode]);
+	const readHalf = Math.ceil(MCP_TOOL_CATALOG.length / 2);
+	const toolCount = MCP_TOOL_CATALOG.length + MCP_WRITE_TOOL_CATALOG.length;
 
-  const copy = async (target: CopyTarget, value: string) => {
-    try {
-      if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
-      await navigator.clipboard.writeText(value);
-      setCopied(target);
-      window.setTimeout(() => setCopied((current) => (current === target ? null : current)), 1800);
-    } catch {
-      // The text remains selected and readable for manual copying.
-      setCopied(null);
-    }
-  };
+	return (
+		<div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+			<Rail ready={ready} total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} />
 
-  return (
-    <div className="mcp-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
-      <Rail ready={ready} total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} />
+			<main className="workspace-page mcp-page">
+				<header className="workspace-page-head">
+					<h1>MCP server</h1>
+					<div className="workspace-page-tools mcp-endpoint">
+						<span className="mcp-endpoint-label">Streamable HTTP</span>
+						<div className="settings-joined mcp-endpoint-field">
+							<code className="connect-value" aria-label="MCP endpoint">{endpoint}</code>
+							<Button variant="outline" onClick={() => void copy("endpoint", endpoint)} aria-label={copied === "endpoint" ? "Copied" : "Copy MCP endpoint"}>
+								{copied === "endpoint" ? <Check {...ICON} /> : <Copy {...ICON} />}
+								<span className="mcp-copy-label">{copied === "endpoint" ? "Copied" : "Copy"}</span>
+							</Button>
+						</div>
+					</div>
+				</header>
 
-      <main className="mcp-main scroll">
-        <div className="mcp-wrap">
-          <header className="mcp-header">
-            <h1>MCP server</h1>
-            <p>Connect an agent to your library</p>
-          </header>
+				<div className="scroll workspace-page-body">
+					<div className="mcp-layout">
+						<div className="mcp-grid">
+							<ConnectedClients />
 
-          <section className="mcp-endpoint-card" aria-labelledby="mcp-endpoint-heading">
-            <div className="mcp-card-label" id="mcp-endpoint-heading">Your library address</div>
-            <div className="mcp-endpoint-row">
-              <code className="mcp-endpoint">{endpoint}</code>
-              <CopyButton target="endpoint" value={endpoint} copied={copied} onCopy={copy} />
-              <div className="mcp-endpoint-meta">
-                <span>Streamable HTTP</span>
-              </div>
-            </div>
-          </section>
+							<section className="mcp-panel mcp-connect" aria-labelledby="connect-title">
+								<div className="mcp-panel-head">
+									<h2 id="connect-title">Connect an agent</h2>
+								</div>
+								<div className="mcp-connect-body">
+									<RadioGroup
+										className="mcp-clients"
+										aria-label="Client"
+										value={selectedClient}
+										onValueChange={(value) => setSelectedClient(value as McpClientId)}
+									>
+										{MCP_CLIENTS.map((client) => (
+											<label key={client.id} className="mcp-client" data-selected={selectedClient === client.id || undefined}>
+												<RadioGroupItem value={client.id} />
+												<span>{client.label}</span>
+											</label>
+										))}
+									</RadioGroup>
 
-          <div className="mcp-connect-grid">
-            <section className="mcp-card" aria-labelledby="mcp-connect-heading">
-              <div className="mcp-card-heading">
-                <div>
-                  
-                  <h2 id="mcp-connect-heading">Connect</h2>
-                </div>
-              </div>
+									<div className="mcp-signin">
+										<span id="signin-label">Sign-in</span>
+										<ToggleGroup
+											className="mcp-segment"
+											aria-labelledby="signin-label"
+											value={[mode]}
+											onValueChange={(values) => { if (values[0]) setMode(values[0] as "oauth" | "key"); }}
+										>
+											<ToggleGroupItem value="oauth">OAuth</ToggleGroupItem>
+											<ToggleGroupItem value="key">API key</ToggleGroupItem>
+										</ToggleGroup>
+									</div>
 
-              <div className="mcp-step">
-                
-                <div className="mcp-step-content">
-                  <h3>Client</h3>
-                  <div className="mcp-client-list" role="tablist" aria-label="MCP clients">
-                    {MCP_CLIENTS.map((client) => {
-                      const active = selectedClient === client.id;
-                      return (
-                        <button
-                          key={client.id}
-                          type="button"
-                          role="tab"
-                          aria-selected={active}
-                          onClick={() => setSelectedClient(client.id)}
-                          className={`mcp-client-button${active ? " is-active" : ""}`}
-                        >
-                          {client.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+									<pre className="mcp-snippet"><code>{snippet}</code></pre>
 
-              <div className="mcp-step">
-                
-                <div className="mcp-step-content">
-                  <div className="mcp-auth-options" aria-label="Connection method">
-                    <button aria-pressed={mode === "oauth"} onClick={() => setMode("oauth")}><strong>Sign in with OAuth</strong><span>Recommended</span></button>
-                    <button aria-pressed={mode === "key"} onClick={() => setMode("key")}><strong>Use an API key</strong><span>For scripts and CLI tools</span></button>
-                  </div>
-                  <p className="mcp-step-copy">{mode === "oauth" ? "Add this to your client, then approve access in your browser. In Claude Desktop or claude.ai, add the address as a custom connector." : <>Create a key in <a href="/settings#connected-clients">Settings › Connected clients</a>, then replace <code>{MCP_TOKEN_PLACEHOLDER}</code>.</>}</p>
-                  <div className="mcp-code-wrap">
-                    <pre><code>{snippet}</code></pre>
-                    <CopyButton target="snippet" value={snippet} copied={copied} onCopy={copy} />
-                  </div>
-                  <p className="mcp-note">Connections start read-only. Allow changes in Connected clients. Agents can never delete.</p>
-                </div>
-              </div>
-            </section>
+									<p className="mcp-hint">
+										{mode === "key" ? (
+											<>Create an API key under Connected, then replace <code>{MCP_TOKEN_PLACEHOLDER}</code></>
+										) : selectedClient === "claude-desktop" ? (
+											"Add the address as a custom connector, then approve access in your browser. Starts read-only, never deletes"
+										) : (
+											"Approve access in your browser when the client asks. Starts read-only, never deletes"
+										)}
+									</p>
 
-            <section className="mcp-card mcp-tools-card" aria-labelledby="mcp-tools-heading">
-              <div className="mcp-card-heading">
-                <div>
-                  
-                  <h2 id="mcp-tools-heading">Tools</h2>
-                </div>
-                <span className="mcp-tool-count" aria-label={`${MCP_TOOL_CATALOG.length + MCP_WRITE_TOOL_CATALOG.length} tools`}>{MCP_TOOL_CATALOG.length + MCP_WRITE_TOOL_CATALOG.length}</span>
-              </div>
-              <p className="mcp-tools-intro">Search matches by meaning when AI is on, by keyword otherwise.</p>
-              <div className="mcp-tool-list">
-                {[...MCP_TOOL_CATALOG, ...MCP_WRITE_TOOL_CATALOG].map((tool) => (
-                  <div className="mcp-tool-row" key={tool.name}>
-                    <code>{tool.name}</code>
-                    <span>{tool.summary}{"permission" in tool && <em className="mcp-permission">Needs write permission</em>}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-        </div>
-      </main>
-    </div>
-  );
+									<Button variant="outline" className="mcp-copy-setup" onClick={() => void copy("snippet", snippet)} aria-label={copied === "snippet" ? "Copied" : "Copy setup"}>
+										{copied === "snippet" ? <Check {...ICON} /> : <Copy {...ICON} />}
+										{copied === "snippet" ? "Copied" : "Copy setup"}
+									</Button>
+								</div>
+							</section>
+						</div>
+
+						<section className="mcp-panel mcp-tools" aria-labelledby="tools-title">
+							<div className="mcp-panel-head">
+								<h2 id="tools-title">Tools</h2>
+								<span className="mcp-count">{toolCount}</span>
+								<span className="mcp-panel-note">Search matches by meaning when AI is on, by keyword otherwise</span>
+							</div>
+							<div className="mcp-tool-grid">
+								<ToolColumn title="Read" tools={MCP_TOOL_CATALOG.slice(0, readHalf)} />
+								<ToolColumn tools={MCP_TOOL_CATALOG.slice(readHalf)} />
+								<ToolColumn
+									title={<><span>Write</span><Lock {...ICON} /><span className="mcp-tool-group-note">needs read and write access</span></>}
+									tools={MCP_WRITE_TOOL_CATALOG}
+								/>
+							</div>
+						</section>
+					</div>
+				</div>
+			</main>
+		</div>
+	);
 }

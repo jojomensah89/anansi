@@ -1337,9 +1337,8 @@ async function main(): Promise<void> {
 					method: "POST",
 					body: { backupId, counts },
 				});
-				const startBody = await bodyJson(start);
+				await bodyJson(start);
 				equal(start.status, 200, "restore start");
-				let restore = startBody.restore;
 				const firstRows = backup.items.slice(0, PAGE_SIZE);
 				const firstChunk = await api(targetEnv, "/api/restore/chunk", {
 					method: "POST",
@@ -1372,9 +1371,8 @@ async function main(): Promise<void> {
 							method: "POST",
 							body: { backupId, table, offset, rows: chunk },
 						});
-						const value = await bodyJson(response);
+						await bodyJson(response);
 						equal(response.status, 200, `restore ${table} chunk at ${offset}`);
-						restore = value.restore;
 						offset += chunk.length;
 					}
 				}
