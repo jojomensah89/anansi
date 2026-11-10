@@ -17,7 +17,8 @@ import { CountBone, useSlowLoad } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 import { ExtensionIcon } from "./extension-icon.tsx";
 import { api, LIBRARY_SOURCES, sourceLabel, type ExtensionHealth } from "../lib/api.ts";
-import { extensionLabel } from "../lib/source-state.ts";
+import { extensionStatus } from "../lib/source-state.ts";
+import { StatusDot } from "./status-dot.tsx";
 import { GITHUB_URL, X_URL } from "../lib/links.ts";
 
 /** The library rail. The shell owns counts so navigation and content agree. */
@@ -43,7 +44,7 @@ function Item({ to, label, count, active, children }: { to: string; label: strin
 			<SidebarMenuButton render={<Link to={to} />} isActive={active} tooltip={label} aria-label={label}>
 				{children}
 				<span className="anansi-sidebar-label">{label}</span>
-				{count !== undefined && <span className="anansi-sidebar-count mono">{count}</span>}
+				{count !== undefined && <span className="anansi-sidebar-count">{count}</span>}
 			</SidebarMenuButton>
 		</SidebarMenuItem>
 	);
@@ -98,8 +99,8 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
         return () => { controller.abort(); window.removeEventListener("anansi-connection-updated", update); };
 	}, []);
 	const topics = tags.filter((tag) => tag.kind === "topic" && tag.count > 0).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-	const extensionText = extension ? extensionLabel(extension) : "Extension status unavailable";
-	const extensionColor = extension?.connection === "connected" ? "var(--ok)" : extension ? "var(--accent-text)" : "var(--faint)";
+	const status = extensionStatus(extension);
+	const extensionTitle = status.state === "online" && extension?.extensionVersion ? `${status.label} · v${extension.extensionVersion}` : status.label;
 
 	return (
 		<Sidebar className="anansi-rail" collapsible="icon">
@@ -122,7 +123,7 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 								<SidebarMenuButton render={<Link to="/" search={{ archived: true }} />} isActive={archivedView} tooltip="Archived" aria-label="Archived">
 									<NavIcon active={archivedView} path="M4 7h16v13H4zM3 4h18v3H3zM9 11h6" />
 									<span className="anansi-sidebar-label">Archived</span>
-									<span className="anansi-sidebar-count mono">{count(archived)}</span>
+									<span className="anansi-sidebar-count">{count(archived)}</span>
 								</SidebarMenuButton>
 							</SidebarMenuItem>
 							<Item to="/creators" label="Authors" count={count(authors)} active={path === "/creators"}>
@@ -142,7 +143,7 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 				</SidebarGroup>
 
 				<SidebarGroup className="anansi-rail-sources-group">
-					<SidebarGroupLabel className="anansi-rail-sources mono">Sources</SidebarGroupLabel>
+					<SidebarGroupLabel className="anansi-rail-sources sr-only">Sources</SidebarGroupLabel>
 					<SidebarGroupContent>
 						<SidebarMenu>
 							{LIBRARY_SOURCES.map((source) => {
@@ -151,7 +152,7 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 										<SidebarMenuButton render={<Link to="/" search={{ source: [source] }} />} tooltip={sourceLabel(source)} aria-label={sourceLabel(source)}>
 											<span className="anansi-source-icon"><SourceMark source={source} size={15} /></span>
 											<span className="anansi-sidebar-label">{sourceLabel(source)}</span>
-											<span className="anansi-sidebar-count mono">{count(bySource[source] ?? 0)}</span>
+											<span className="anansi-sidebar-count">{count(bySource[source] ?? 0)}</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
 								);
@@ -161,14 +162,14 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 				</SidebarGroup>
 
 				{topics.length > 0 && <SidebarGroup className="anansi-rail-topics-group">
-					<SidebarGroupLabel className="anansi-rail-topics mono">Topics</SidebarGroupLabel>
+					<SidebarGroupLabel className="anansi-rail-topics">Topics</SidebarGroupLabel>
 					<SidebarGroupContent>
 						<SidebarMenu>
 							{topics.map((topic) => <SidebarMenuItem key={topic.label}>
 								<SidebarMenuButton render={<Link to="/" search={{ tag: [topic.label] }} />} tooltip={topic.label} aria-label={topic.label}>
-									<span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: topic.color || "#6b7280" }} />
+									<span aria-hidden="true" className="anansi-topic-dot" />
 									<span className="anansi-sidebar-label">{topic.label}</span>
-									<span className="anansi-sidebar-count mono">{topic.count}</span>
+									<span className="anansi-sidebar-count">{topic.count}</span>
 								</SidebarMenuButton>
 							</SidebarMenuItem>)}
 						</SidebarMenu>
@@ -177,11 +178,10 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 			</SidebarContent>
 
 			<SidebarFooter className="anansi-rail-footer">
-				<div className="anansi-rail-extension" title={extensionText} aria-label={extensionText}>
-					<span className="anansi-rail-extension-icon" style={{ color: extensionColor }}><ExtensionIcon /></span>
-					<span className="anansi-rail-extension-dot" style={{ background: extensionColor }} />
-					<span className="mono anansi-sidebar-label" style={{ fontSize: 10.5, color: extensionColor }}>{extensionText}</span>
-				</div>
+				<Link to="/sources" className="anansi-rail-extension" title={extensionTitle} aria-label={extensionTitle} data-state={status.state}>
+					<span className="anansi-rail-extension-icon"><ExtensionIcon /><StatusDot status={status} /></span>
+					<span className="anansi-sidebar-label">{status.label}</span>
+				</Link>
 				<RailSocialLinks />
 			</SidebarFooter>
 		</Sidebar>

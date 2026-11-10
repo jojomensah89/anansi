@@ -43,9 +43,9 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
   if (!session.data.configured) {
     return (
       <GateFrame>
-        <h1 style={titleStyle}>Library access is not configured</h1>
+        <h1 style={titleStyle}>Sign-in isn’t set up</h1>
         <p style={copyStyle}>
-          Set <span className="mono">LIBRARY_TOKEN</span> or <span className="mono">ANANSI_SECRET</span> on this Anansi server, then reload this page.
+          Set <code style={codeStyle}>LIBRARY_TOKEN</code> or <code style={codeStyle}>ANANSI_SECRET</code> on the server, then reload.
         </p>
       </GateFrame>
     );
@@ -59,12 +59,12 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
   return (
     <GateFrame>
       <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 12, background: "var(--accent)", color: "var(--ink)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 18 }}>A</div>
-      <h1 style={titleStyle}>Connect to your library</h1>
+      <h1 style={titleStyle}>Sign in to Anansi</h1>
       <p style={copyStyle}>
-        Enter the <span className="mono">LIBRARY_TOKEN</span> when one is configured; otherwise use <span className="mono">ANANSI_SECRET</span>. It is exchanged for a secure browser session and is not stored in the page.
+        Use your <code style={codeStyle}>LIBRARY_TOKEN</code>, or <code style={codeStyle}>ANANSI_SECRET</code> if no library token is set. It’s swapped for a browser session and never stored in the page.
       </p>
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
-        <label htmlFor="library-token" style={{ fontSize: 12, color: "var(--muted)" }}>Secret key</label>
+        <label htmlFor="library-token" style={{ fontSize: 12, color: "var(--muted)" }}>Token</label>
         <input
           id="library-token"
           type="password"
@@ -94,9 +94,10 @@ function GateFrame({ children }: { children: ReactNode }) {
 }
 
 const titleStyle = { fontSize: 20, margin: 0, color: "var(--text)" } as const;
-const copyStyle = { fontSize: 13, lineHeight: 1.6, margin: 0, color: "var(--muted)" } as const;
+const copyStyle = { fontSize: 14, lineHeight: 1.6, margin: 0, color: "var(--muted)" } as const;
+const codeStyle = { fontFamily: "var(--mono)", fontSize: 13, color: "var(--text)" } as const;
 const primaryStyle = { minHeight: 38, border: "none", borderRadius: 6, padding: "0 14px", background: "var(--accent)", color: "var(--ink)", cursor: "pointer", font: "inherit", fontWeight: 600 } as const;
 
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : "The request failed.";
+  return error instanceof Error ? error.message : "The request failed";
 }

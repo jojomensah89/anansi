@@ -15,7 +15,7 @@ test("card tolerates an older quoted item without text or media", () => {
 	expect(() => renderToStaticMarkup(createElement(Card, { item }))).not.toThrow();
 });
 
-test("card exposes colored tags and a private-note control", () => {
+test("card shows tags as neutral chips and a private-note control", () => {
 	const item = {
 		id: "organized",
 		source: "x",
@@ -27,7 +27,9 @@ test("card exposes colored tags and a private-note control", () => {
 	const html = renderToStaticMarkup(createElement(Card, { item }));
 
 	expect(html).toContain("research");
-	expect(html).toContain("#22c55e22");
+	expect(html).not.toContain("#22c55e22");
+ expect(html).not.toContain("#22c55e");
+	expect(html).toMatch(/class="[^"]*anansi-tag-chip[^"]*"[^>]*>research</);
 	expect(html).toContain("Open private note");
 	expect(html).toContain("Add tags");
 });

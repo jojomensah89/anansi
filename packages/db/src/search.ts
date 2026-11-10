@@ -77,6 +77,7 @@ export interface SearchHit {
   authorAvatar?: string | null;
   /** Primary repository language for GitHub list cards, when stored. */
   language?: string | null;
+  subreddit?: string | null;
   /** Repository visibility, when GitHub supplied it. */
   visibility?: "public" | "private" | null;
   mediaCount?: number;
@@ -150,6 +151,7 @@ function cardProjection(hasNsfw = true): SQL {
       i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
       i.favorite, ${hasNsfw ? sql`i.nsfw` : sql`0 as nsfw`}, i.metrics as metricsJson,
       json_extract(i.raw, '$.language') as language,
+      json_extract(i.raw, '$.subreddit') as subreddit,
       json_extract(i.raw, '$.visibility') as visibility,
       (select count(*) from media m where m.item_id=i.id) as mediaCount,
       (select json_group_array(json_object('key',m.stored_key,'kind',m.kind,'url',m.origin_url))
@@ -177,6 +179,7 @@ function hydrateCardRow(rawRow: CardProjectionRow): SearchHit {
 		authorName: rawRow.authorName,
 		authorAvatar: rawRow.authorAvatar,
 		language: rawRow.language,
+        subreddit: rawRow.subreddit,
 		visibility: rawRow.visibility,
 		title: rawRow.title,
 		postedAt: rawRow.postedAt,
@@ -423,6 +426,8 @@ export async function findByAuthor(db: AnansiDb, handle: string, limit = 20) {
 }
 
 export interface ItemDetail {
+  captureTrail?: { observedAt: number; receivedAt: number; outcome: string } | null;
+  taggingState?: { status: string; lastError: string | null } | null;
   id: string;
   url: string;
   source: string;

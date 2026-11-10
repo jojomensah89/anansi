@@ -1,3 +1,4 @@
+import { sql as trailSql } from "drizzle-orm";
 import { coordinateSearch } from "./search-coordinator.ts";
 import { sql } from "drizzle-orm";
 import { runPreviewPass } from "./link-preview.ts";
@@ -167,7 +168,10 @@ const itemRoute: Route = {
 	path: /^\/api\/items\/([\w-]+)$/,
 	handle: async ({ env, params }) => {
 		const found = await getItem(env.db, params[0] ?? "");
-		return found ? json(found) : json({ error: "not found" }, 404);
+		if (!found) return json({ error: "not found" }, 404);
+    const events = await env.db.all<{ observedAt: number; receivedAt: number; outcome: string }>(trailSql`select observed_at as observedAt, received_at as receivedAt, outcome from capture_events where item_id = ${found.id} order by received_at desc limit 1`);
+    const jobs = await env.db.all<{ status: string; lastError: string | null }>(trailSql`select status, last_error as lastError from ai_enrichment_jobs where item_id = ${found.id} and kind = 'tagging' order by updated_at desc limit 1`);
+    return json({ ...found, captureTrail: events[0] ?? null, taggingState: jobs[0] ?? null });
 	},
 };
 

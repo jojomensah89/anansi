@@ -1,9 +1,13 @@
-import { WebPreviewCard } from "./web-preview-card.tsx";
+import { Checkbox } from "@anansi/ui/components/checkbox";
+import { Button } from "@anansi/ui/components/button";
+import { WebPreviewCard, webDomain } from "./web-preview-card.tsx";
 import { mediaUrl, shortDate, type CardMedia, type ItemRow } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
 import { GithubRepoCard } from "./github-repo-card.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 import { TagPopover } from "./tag-popover.tsx";
+import { TagChip } from "./tag-chip.tsx";
+import { Bookmark, Star } from "lucide-react";
 
 /**
  * One grid card.
@@ -40,7 +44,6 @@ export function Card({
   const quoted = item.quoted;
   const quotedText = typeof quoted?.text === "string" ? quoted.text : "";
   const quotedMedia = quoted?.media ?? [];
-  const tags = item.tags ?? [];
 
   const changed = () => {
 		onChanged?.();
@@ -49,14 +52,14 @@ export function Card({
 	return (
 		<div style={{ position: "relative" }}>
 		<div
-		  className="anansi-card"
+		  data-source={item.source} className={`anansi-card${selectable ? " is-selecting" : ""}`}
 		  role="button"
 		  tabIndex={0}
 		  aria-label={`${selectable ? (selected ? "Deselect" : "Select") : "Open"} ${item.title ?? item.authorName ?? item.author ?? "saved item"}`}
 		  aria-pressed={selectable ? !!selected : undefined}
 		  onClick={() => (selectable ? onToggle?.(item) : onOpen?.(item))}
       onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
           event.preventDefault();
           if (selectable) onToggle?.(item);
           else onOpen?.(item);
@@ -74,37 +77,15 @@ export function Card({
         // dead space, and an uneven bottom edge is the better trade.
         cursor: "pointer",
         position: "relative",
-        animation: "rise 160ms ease-out both",
       }}
     >
-      {selectable && (
-        <span
-          style={{
-            position: "absolute",
-            top: 9,
-            left: 9,
-            zIndex: 2,
-            width: 19,
-            height: 19,
-            borderRadius: 4,
-            border: `1px solid ${selected ? "var(--accent)" : "var(--edge-strong)"}`,
-            background: selected ? "var(--accent)" : "#0b0e11aa",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          {selected && (
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 12l5 5L20 6" />
-            </svg>
-          )}
-        </span>
-      )}
+      {selectable && <Checkbox aria-label={`Select ${item.title ?? item.authorName ?? "save"}`} checked={!!selected} onClick={event=>event.stopPropagation()} onCheckedChange={()=>onToggle?.(item)} style={{position:"absolute",top:12,right:12,zIndex:2,width:20,height:20,background:selected?"var(--accent)":"var(--card)",color:"var(--accent-text-on-accent)"}} />}
 
-      {item.source === "web" ? <WebPreviewCard item={item} onPreview={changed} footer={<CardOrganization item={item} tags={tags} onChanged={changed} />} /> : isRepo ? (
+
+      {!isRepo && <div className="capture-card-identity"><Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} name={item.authorName} size={28} /><span>{item.source === "reddit" && item.subreddit ? `r/${item.subreddit}` : item.authorName ?? item.author ?? (item.source === "web" ? webDomain(item.url) : null)}{item.source === "x" && item.author && <small className="post-handle">@{item.author}</small>}{item.source === "reddit" && item.author && <small className="post-handle">u/{item.author}</small>}</span><span className="capture-card-source"><SourceMark source={item.source} faviconUrl={item.media?.find(m => m.kind === "favicon")?.key ? mediaUrl(item.media.find(m => m.kind === "favicon")!.key) : undefined} size={14} /></span></div>}
+      {item.source === "web" ? <WebPreviewCard item={item} onPreview={changed} footer={<CardFooter item={item} selectable={selectable} onOpen={onOpen} onChanged={changed} />} /> : isRepo ? (
 		<>
-			<GithubRepoCard item={item} footer={<CardOrganization item={item} tags={tags} onChanged={changed} />} />
+			<GithubRepoCard item={item} footer={<CardFooter item={item} selectable={selectable} onOpen={onOpen} onChanged={changed} />} />
 		</>
       ) : (
         <>
@@ -116,33 +97,21 @@ export function Card({
             shaped.
           */}
           <div style={{ padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} size={42} />
-              <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                {item.authorName && item.authorName !== item.author && (
-                  <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {item.authorName}
-                  </span>
-                )}
-                <span className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
-                  {item.author ?? "unknown"}
-                </span>
-              </span>
-            </div>
+            {item.title && item.source !== "x" && item.source !== "tiktok" && <div style={{ fontSize:14, fontWeight:600 }}>{item.title}</div>}
 
-            {item.excerpt.trim() && (
+            {(item.excerpt.trim() || (item.source === "tiktok" && item.title)) && (
               <div
                 style={{
-                  fontSize: 13,
+                  fontSize: item.source === "x" ? 16 : "var(--text-body)",
                   lineHeight: 1.55,
                   color: "var(--text-dim)",
                   display: "-webkit-box",
-                  WebkitLineClamp: media.length > 0 ? 4 : 8,
+                  WebkitLineClamp: item.source === "tiktok" ? 2 : media.length > 0 ? 4 : 8,
                   WebkitBoxOrient: "vertical",
                   overflow: "hidden",
                 }}
               >
-                {item.excerpt}
+                {item.excerpt.trim() || item.title}
               </div>
             )}
           </div>
@@ -150,34 +119,34 @@ export function Card({
           {/* Media gets its own gutter so the image never touches the card edge. */}
           {media.length > 0 && (
             <div style={{ margin: "10px 12px 0" }}>
-              <MediaGrid media={media} dim={selectable && !selected} inset />
+              <MediaGrid topCrop={item.source === "tiktok"} media={media} dim={selectable && !selected} inset />
             </div>
           )}
 
-          <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ padding: quoted ? "10px 12px 12px" : 0, display: "flex", flexDirection: "column", gap: 10 }}>
             {quoted && (
               <div
                 style={{
                   border: "1px solid var(--edge)",
                   borderRadius: 8,
                   padding: 10,
-                  background: "#0e1216",
+                  background: "var(--rail)",
                   display: "flex",
                   flexDirection: "column",
                   gap: 8,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <Avatar src={quoted.avatar} seed={quoted.handle ?? quoted.name} size={17} />
-                  <span style={{ fontSize: 11.5, fontWeight: 600 }}>{quoted.name ?? quoted.handle}</span>
-                  <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
-                    @{quoted.handle ?? "unknown"}
+                  <Avatar src={quoted.avatar} seed={quoted.handle ?? quoted.name} name={quoted.name} size={17} />
+                  <span style={{ fontSize: "var(--text-body)", fontWeight: 600 }}>{quoted.name ?? quoted.handle}</span>
+                  <span style={{ fontSize: "var(--text-meta)", color: "var(--muted)" }}>
+                    {quoted.handle ? `@${quoted.handle}` : null}
                   </span>
                 </div>
                 {quotedText.trim() && (
                   <div
                     style={{
-                      fontSize: 12,
+                      fontSize: "var(--text-body)",
                       lineHeight: 1.5,
                       color: "var(--text-dim)",
                       display: "-webkit-box",
@@ -193,71 +162,32 @@ export function Card({
               </div>
             )}
 
-            {/* The platform mark sits here, not in the top-right corner where a
-                close button lives — up there it reads as "dismiss this". */}
-            <div className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)" }}>
-              <CardOrganization item={item} tags={tags} onChanged={changed} />
-              {/*
-                Stated, not implied by absence. The item is still here because a
-                library keeps what you saved; without a word saying why it looks
-                identical to one that is still bookmarked.
-              */}
-              {item.platformSaved === 0 && (
-                <span
-                  title={
-                    item.removedFromSourceAt
-                      ? `Removed at source on ${new Date(item.removedFromSourceAt * 1000).toLocaleDateString()}`
-                      : "Removed at source"
-                  }
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    color: "var(--fainter)",
-                    border: "1px solid var(--line)",
-                    borderRadius: 4,
-                    padding: "1px 6px",
-                  }}
-                >
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                    <path d="M6 6l12 12M18 6 6 18" />
-                  </svg>
-                  Removed at source
-                </span>
-              )}
-              {item.favorite && <span title="Favorite" aria-label="Favorite" style={{ color: "var(--accent)" }}>★</span>}
-              <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-                {shortDate(item.postedAt)}
-                <span style={{ color: "var(--fainter)", display: "flex" }}>
-                  <SourceMark source={item.source} size={20} />
-                </span>
-              </span>
-            </div>
+
           </div>
+          {item.source === "reddit" && <div className="reddit-metrics">{item.metrics?.score != null && <span>{item.metrics.score} points</span>}{item.metrics?.comments != null && <span>{item.metrics.comments} comments</span>}</div>}<CardFooter item={item} selectable={selectable} onOpen={onOpen} onChanged={changed} />
         </>
       )}
 		</div>
-		{item.hasNote && !selectable && (
-			<button
-				type="button"
-				onClick={() => onOpen?.(item, true)}
-				aria-label="Open private note"
-				title="Has private note"
-				style={{ position: "absolute", top: 8, right: 8, zIndex: 4, width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--edge)", borderRadius: 5, background: "#0b0e11b3", color: "var(--faint)", cursor: "pointer" }}
-			>
-				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 4.5h14v15H5z" /><path d="M8 8h8M8 12h6" /></svg>
-			</button>
-		)}
 		</div>
 	);
 }
 
+export function CardFooter({ item, selectable, onOpen, onChanged }: { item: ItemRow; selectable?: boolean; onOpen?: (item: ItemRow, focusNote?: boolean) => void; onChanged: () => void }) {
+ return <footer className="capture-card-footer">
+ <CardOrganization item={item} tags={item.tags ?? []} onChanged={onChanged} />
+ {item.platformSaved === 0 && <span title="Removed at source">Removed</span>}
+ {item.favorite && <Star aria-label="Favorite" role="img" size={14} strokeWidth={1.5} fill="currentColor" />}
+ <time>{shortDate(item.source === "web" ? item.savedAt : item.postedAt)}</time>
+ <Button variant="ghost" type="button" disabled={selectable} aria-label={item.hasNote ? "Open private note" : "Add private note"} title="Private note" onClick={event => {event.stopPropagation();onOpen?.(item, true)}}><Bookmark aria-hidden="true" size={14} strokeWidth={1.5} fill={item.hasNote ? "currentColor" : "none"} /></Button>
+ </footer>;
+}
+
 export function CardOrganization({ item, tags, onChanged }: { item: ItemRow; tags: NonNullable<ItemRow["tags"]>; onChanged: () => void }) {
 	return (
-		<div className="anansi-card-org" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", flexShrink: 0 }} onClick={(event) => event.stopPropagation()}>
-			{tags.slice(0, 2).map((tag) => <span key={tag.label} className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, minHeight: 21, padding: "0 7px", borderRadius: 5, background: `${tag.color || "#6b7280"}22`, color: "var(--text-dim)", fontSize: 10 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: tag.color || "#6b7280" }} />{tag.label}</span>)}
+		<div className="anansi-card-org" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap", minWidth: 0, overflow: "hidden" }} onClick={(event) => event.stopPropagation()}>
+			{tags.slice(0, 2).map((tag) => <TagChip key={tag.label} label={tag.label} />)}
 			{tags.length > 2 && <TagPopover itemId={item.id} current={tags.map((tag) => tag.label)} onChanged={onChanged} mode="overflow" overflowCount={tags.length - 2} />}
-			<TagPopover itemId={item.id} current={tags.map((tag) => tag.label)} onChanged={onChanged} />
+			<TagPopover itemId={item.id} current={tags.map((tag) => tag.label)} onChanged={onChanged} iconOnly />
 		</div>
 	);
 }
@@ -269,7 +199,7 @@ export function CardOrganization({ item, tags, onChanged }: { item: ItemRow; tag
  * two, four goes 2×2. Past four X itself stops showing them, so neither does
  * this — it counts the rest instead.
  */
-function MediaGrid({ media, dim, inset }: { media: CardMedia[]; dim?: boolean; inset?: boolean }) {
+function MediaGrid({ media, dim, inset, vertical, topCrop }: { vertical?: boolean; topCrop?: boolean; media: CardMedia[]; dim?: boolean; inset?: boolean }) {
   const shown = media.slice(0, 4);
   const single = shown.length === 1;
 
@@ -293,7 +223,7 @@ function MediaGrid({ media, dim, inset }: { media: CardMedia[]; dim?: boolean; i
             position: "relative",
             // A lone image keeps a readable shape; a set is squared off so
             // rows line up rather than stair-stepping.
-            aspectRatio: single ? "16 / 10" : "1 / 1",
+            aspectRatio: vertical ? "3 / 4" : single ? "16 / 10" : "1 / 1",
             gridColumn: shown.length === 3 && i === 0 ? "span 2" : undefined,
           }}
         >
@@ -301,11 +231,11 @@ function MediaGrid({ media, dim, inset }: { media: CardMedia[]; dim?: boolean; i
             src={mediaUrl(m.key)}
             alt=""
             loading="lazy"
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: vertical || topCrop ? "center top" : undefined, display: "block" }}
           />
           {m.kind === "video_poster" && (
-            <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ width: 34, height: 34, borderRadius: "50%", background: "#0b0e11b3", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span aria-label="Video" style={{ position: "absolute", ...(vertical ? { right: 8, bottom: 8 } : { inset: 0 }), display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ width: vertical ? 26 : 34, height: vertical ? 26 : 34, borderRadius: "50%", background: "var(--card)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="var(--text)"><path d="M8 5v14l11-7z" /></svg>
               </span>
             </span>
@@ -314,19 +244,18 @@ function MediaGrid({ media, dim, inset }: { media: CardMedia[]; dim?: boolean; i
       ))}
       {media.length > 4 && (
         <span
-          className="mono"
           style={{
             position: "absolute",
             right: 8,
             bottom: 8,
-            fontSize: 10,
+            fontSize: "var(--text-body)",
             padding: "2px 6px",
             borderRadius: 3,
             background: "#0b0e11cc",
-            color: "var(--text-dim)",
+            color: "#fff",
           }}
         >
-          +{media.length - 4}
+          +{media.length - 4}<span className="sr-only"> more images</span>
         </span>
       )}
     </div>

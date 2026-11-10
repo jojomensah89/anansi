@@ -26,7 +26,7 @@ function Settings() {
       setData(next);
       setSemanticLimitDraft(String(next.settings.semanticBudgetLimit));
       setWatchingTagging(next.settings.autoTaggingEnabled === 1 && next.taggingProgress.pending > 0);
-    }).catch((e) => setError(e instanceof Error ? e.message : "Unable to load settings"));
+    }).catch((e) => setError(e instanceof Error ? e.message : "Could not load settings"));
   }, []);
   useEffect(() => {
     if (!watchingSemantic) return;
@@ -43,7 +43,7 @@ function Settings() {
         if ((pollCount >= 5 && idlePolls >= 3) || pollCount >= 60) setWatchingSemantic(false);
       }).catch((e) => {
         if (stopped) return;
-        setError(e instanceof Error ? e.message : "Unable to refresh semantic indexing progress");
+        setError(e instanceof Error ? e.message : "Could not refresh indexing progress");
         setWatchingSemantic(false);
       });
     }, 2000);
@@ -62,7 +62,7 @@ function Settings() {
         }
       }).catch((e) => {
         if (stopped) return;
-        setError(e instanceof Error ? e.message : "Unable to refresh tagging progress");
+        setError(e instanceof Error ? e.message : "Could not refresh tagging progress");
         setWatchingTagging(false);
         setReclassifying(false);
       });
@@ -79,11 +79,11 @@ function Settings() {
       if (value) {
         setError(null);
         setSavingSemantic(true);
-        api.semanticPreview().then(setSemanticPreview).catch((e) => setError(e instanceof Error ? e.message : "Unable to estimate semantic indexing"))
+        api.semanticPreview().then(setSemanticPreview).catch((e) => setError(e instanceof Error ? e.message : "Could not estimate indexing"))
           .finally(() => setSavingSemantic(false));
         return;
       }
-      if (!window.confirm("Turn off semantic search and delete its indexed chunk text and vectors? Your saved items and keyword search will remain.")) return;
+      if (!window.confirm("Turn off search by meaning and delete its index? Your saves and keyword search stay.")) return;
     }
     setData({ ...data, settings: { ...data.settings, [key]: value ? 1 : 0 } });
     if (key === "autoTaggingEnabled" && !value) {
@@ -95,7 +95,7 @@ function Settings() {
       setWatchingTagging(next.settings.autoTaggingEnabled === 1 && next.taggingProgress.pending > 0);
       if (key === "semanticSearchEnabled") setWatchingSemantic(value && next.settings.semanticIndexPaused !== 1);
     }).catch((e) => {
-      setError(e instanceof Error ? e.message : "Unable to save settings");
+      setError(e instanceof Error ? e.message : "Could not save settings");
       void api.ai().then((latest) => setData(latest)).catch(() => undefined);
     });
   };
@@ -103,12 +103,12 @@ function Settings() {
     if (!data || !semanticPreview) return;
     const limit = Number(semanticLimitDraft);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000_000) {
-      setError("Monthly app credit limit must be between 1 and 1,000,000.");
+      setError("Enter a cap between 1 and 1,000,000");
       return;
     }
     const remaining = Math.max(0, limit - data.settings.semanticBudgetUsed);
     if (semanticPreview.runtime === "cloudflare" && semanticPreview.estimate.estimatedCredits > remaining) {
-      setError(`Backfill needs ${semanticPreview.estimate.estimatedCredits} app credits, but the selected limit leaves ${remaining} this month. Raise the limit or wait for the monthly reset.`);
+      setError(`Indexing needs ${semanticPreview.estimate.estimatedCredits} credits but only ${remaining} are left this month. Raise the cap or wait for the reset.`);
       return;
     }
     setSavingSemantic(true);
@@ -119,24 +119,24 @@ function Settings() {
       setSemanticPreview(null);
       setWatchingSemantic(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to enable semantic search");
+      setError(e instanceof Error ? e.message : "Could not turn on search by meaning");
     } finally { setSavingSemantic(false); }
   };
   const saveSemanticLimit = async () => {
     const limit = Number(semanticLimitDraft);
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000_000) { setError("Monthly app credit limit must be between 1 and 1,000,000."); return; }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000_000) { setError("Enter a cap between 1 and 1,000,000"); return; }
     try {
       const next = await api.updateAi({ semanticBudgetLimit: limit });
       setData(next);
       setError(null);
-    } catch (e) { setError(e instanceof Error ? e.message : "Unable to save the monthly limit"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save the cap"); }
   };
   const setIndexPaused = async (paused: boolean) => {
     try {
       const next = await api.updateAi({ semanticIndexPaused: paused });
       setData(next);
       setWatchingSemantic(!paused && next.settings.semanticSearchEnabled === 1);
-    } catch (e) { setError(e instanceof Error ? e.message : "Unable to update indexing state"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not update indexing"); }
   };
   const reclassify = async () => {
     setReclassifying(true);
@@ -147,7 +147,7 @@ function Settings() {
       setReclassifying(queued);
       setWatchingTagging(queued);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to reclassify topics");
+      setError(e instanceof Error ? e.message : "Could not reclassify topics");
       setReclassifying(false);
     }
   };
@@ -155,44 +155,43 @@ function Settings() {
     <Rail total={counts?.items ?? 0} authors={counts?.authors ?? 0} archived={counts?.archived ?? 0} bySource={counts?.bySource ?? {}} ready={counts !== null} />
     <main className="anansi-settings-page">
       <h1 className="anansi-settings-title">Settings</h1>
-      <p className="anansi-settings-subtitle">Manage access to your library, sync and preferences.</p>
       <ConnectedClients />
       <SyncControls settings />
       {error && <p role="alert" style={{ color: "var(--accent-text)" }}>{error}</p>}
       {!data ? (error ? null : slow ? <SettingsSkeleton /> : null) :
         <section className="anansi-settings-section">
           <h2 className="anansi-settings-heading">AI features</h2>
-      <p className="anansi-settings-subtitle">{data?.runtime === "ollama" ? "Local semantic search runs through Ollama on this machine; automatic tags remain separate." : "Optional AI features run in your Cloudflare account and never replace manual tags."}</p>
-          {!data.available && <p className="anansi-settings-unavailable">AI bindings are unavailable in this environment. Keyword search and manual tags continue to work.</p>}
-          {data.runtime === "ollama" && <p className="anansi-settings-unavailable">Local AI runs through Ollama on this machine. Start Ollama and pull the configured models; keyword search and manual tags continue to work while AI jobs warm or recover.</p>}
+      <p className="anansi-settings-subtitle">{data.runtime === "ollama" ? "Runs through Ollama on this machine" : "Runs in your Cloudflare account. Manual tags are never replaced"}</p>
+          {!data.available && <p className="anansi-settings-unavailable">AI isn’t available here. Keyword search and manual tags still work</p>}
+          {data.runtime === "ollama" && <p className="anansi-settings-unavailable">Start Ollama and pull the configured models. Keyword search and manual tags work meanwhile</p>}
           <div className="anansi-settings-list">
-            <Toggle icon={<CpuIcon />} label="Enable AI semantic search" badge="Smart" description="Find content by meaning, not exact wording. Existing and future saves are indexed in the background." checked={data.settings.semanticSearchEnabled === 1} disabled={savingSemantic || data.capabilities?.semanticSearch === false} onChange={(v) => toggle("semanticSearchEnabled", v)} />
+            <Toggle icon={<CpuIcon />} label="Search by meaning" description="Finds saves by what they’re about, not exact words. Indexes in the background" checked={data.settings.semanticSearchEnabled === 1} disabled={savingSemantic || data.capabilities?.semanticSearch === false} onChange={(v) => toggle("semanticSearchEnabled", v)} />
             {data.settings.semanticSearchEnabled === 1 && <div style={{ margin: "-2px 0 12px 42px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span className="mono anansi-settings-progress">{data.semanticIndex.indexed} chunks indexed · {data.semanticIndex.pending} pending · {data.semanticIndex.total} total{watchingSemantic ? " · updating…" : ""}</span>
-              <button type="button" className="mono" onClick={() => void setIndexPaused(data.settings.semanticIndexPaused !== 1)} style={smallButtonStyle}>{data.settings.semanticIndexPaused === 1 ? "Resume indexing" : "Pause indexing"}</button>
+              <span className="anansi-settings-progress">{data.semanticIndex.indexed.toLocaleString()} of {data.semanticIndex.total.toLocaleString()} chunks indexed{data.semanticIndex.pending ? ` · ${data.semanticIndex.pending.toLocaleString()} pending` : ""}{watchingSemantic ? " · updating…" : ""}</span>
+              <button type="button" onClick={() => void setIndexPaused(data.settings.semanticIndexPaused !== 1)} style={smallButtonStyle}>{data.settings.semanticIndexPaused === 1 ? "Resume indexing" : "Pause indexing"}</button>
             </div>}
             {data.runtime === "cloudflare" && <div style={{ margin: "0 0 12px 42px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <label className="mono" htmlFor="semantic-credit-limit" style={{ color: "var(--muted)", fontSize: 10.5 }}>Monthly app credit cap</label>
+              <label htmlFor="semantic-credit-limit" style={metaStyle}>Monthly credit cap</label>
               <input id="semantic-credit-limit" type="number" min={1} max={1_000_000} value={semanticLimitDraft} onChange={(event) => setSemanticLimitDraft(event.target.value)} style={{ width: 100, background: "var(--surface)", color: "var(--text)", border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 7px" }} />
-              <span className="mono" style={{ color: "var(--faint)", fontSize: 10.5 }}>{data.settings.semanticBudgetUsed} used · resets {data.settings.semanticBudgetMonth}</span>
-              <button type="button" className="mono" onClick={() => void saveSemanticLimit()} style={smallButtonStyle}>Save cap</button>
-              <p className="mono" style={{ flexBasis: "100%", margin: "2px 0 0", color: "var(--faint)", fontSize: 10.5 }}>1 credit covers up to 1,000 characters sent in one embedding input, rounded up. This tracks workload, not a provider bill.</p>
+              <span style={metaStyle}>{data.settings.semanticBudgetUsed.toLocaleString()} used · resets {data.settings.semanticBudgetMonth}</span>
+              <button type="button" onClick={() => void saveSemanticLimit()} aria-label="Save credit cap" style={smallButtonStyle}>Save</button>
+              <p style={{ ...metaStyle, flexBasis: "100%", margin: "2px 0 0" }}>1 credit is up to 1,000 characters indexed. It tracks workload, not your bill</p>
             </div>}
             {semanticPreview && <div role="dialog" aria-label="Semantic search indexing estimate" style={{ margin: "0 0 14px 42px", padding: 12, border: "1px solid var(--edge)", borderRadius: 8, background: "var(--surface)" }}>
-              <strong>Review indexing estimate</strong>
-              <p className="mono" style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>{semanticPreview.estimate.itemCount} saved items · {semanticPreview.estimate.newChunks} new chunks ({semanticPreview.estimate.totalChunks} total) · {semanticPreview.estimate.estimatedCredits} estimated {semanticPreview.runtime === "cloudflare" ? "app credits" : "workload units"}{semanticPreview.runtime === "cloudflare" ? ` · ${Math.max(0, Number(semanticLimitDraft) - data.settings.semanticBudgetUsed)} available this month` : " · local provider; no hosted credits are used"}.</p>
-              {semanticPreview.runtime === "cloudflare" && <p className="mono" style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>Cloudflare receives only normalized titles and captured text, split into chunks. Indexing runs in the background; the cap falls back to keyword search.</p>}
+              <strong>Indexing estimate</strong>
+              <p style={{ ...metaStyle, lineHeight: 1.5 }}>{semanticPreview.estimate.itemCount.toLocaleString()} saves · {semanticPreview.estimate.newChunks.toLocaleString()} new chunks of {semanticPreview.estimate.totalChunks.toLocaleString()} · about {semanticPreview.estimate.estimatedCredits.toLocaleString()} {semanticPreview.runtime === "cloudflare" ? "credits" : "workload units"}{semanticPreview.runtime === "cloudflare" ? ` · ${Math.max(0, Number(semanticLimitDraft) - data.settings.semanticBudgetUsed).toLocaleString()} left this month` : " · runs locally, no credits used"}</p>
+              {semanticPreview.runtime === "cloudflare" && <p style={{ ...metaStyle, lineHeight: 1.5 }}>Cloudflare receives only titles and captured text. Past the cap, search falls back to keywords.</p>}
               <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="mono" disabled={savingSemantic} onClick={() => void enableSemantic()} style={smallButtonStyle}>{savingSemantic ? "Enabling…" : "Confirm and index"}</button>
-                <button type="button" className="mono" disabled={savingSemantic} onClick={() => setSemanticPreview(null)} style={smallButtonStyle}>Cancel</button>
+                <button type="button" disabled={savingSemantic} onClick={() => void enableSemantic()} style={smallButtonStyle}>{savingSemantic ? "Starting…" : "Start indexing"}</button>
+                <button type="button" disabled={savingSemantic} onClick={() => setSemanticPreview(null)} style={smallButtonStyle}>Cancel</button>
               </div>
             </div>}
-            <Toggle icon={<SparkIcon />} label="Enable automatic tags" badge="Beta" description={data.capabilities?.autoTagging === false ? "No local or hosted tag model is configured." : "Apply concise topic tags to new saves."} checked={data.settings.autoTaggingEnabled === 1} disabled={data.capabilities?.autoTagging === false} onChange={(v) => toggle("autoTaggingEnabled", v)} />
+            <Toggle icon={<SparkIcon />} label="Automatic tags" badge="Beta" description={data.capabilities?.autoTagging === false ? "No tag model is configured" : "Tags new saves by topic"} checked={data.settings.autoTaggingEnabled === 1} disabled={data.capabilities?.autoTagging === false} onChange={(v) => toggle("autoTaggingEnabled", v)} />
           </div>
-          <p className="mono anansi-settings-progress">{data.taggingProgress.pending} AI topics pending · {data.taggingProgress.complete} complete · {data.taggingProgress.failed} failed</p>
+          <p className="anansi-settings-progress">{data.taggingProgress.complete.toLocaleString()} tagged · {data.taggingProgress.pending.toLocaleString()} pending{data.taggingProgress.failed ? ` · ${data.taggingProgress.failed.toLocaleString()} failed` : ""}</p>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
-            <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>Canonical topics {data.taxonomyVersion}</span>
-            <button type="button" className="mono" disabled={reclassifying || watchingTagging || data.capabilities?.autoTagging === false} onClick={() => void reclassify()} style={{ border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 8px", background: "transparent", color: "var(--muted)", fontSize: 10.5, cursor: reclassifying || watchingTagging ? "wait" : "pointer" }}>{reclassifying ? "Reclassifying…" : "Reclassify AI topics"}</button>
+            <span style={metaStyle}>Topic list {data.taxonomyVersion}</span>
+            <button type="button" disabled={reclassifying || watchingTagging || data.capabilities?.autoTagging === false} onClick={() => void reclassify()} style={{ ...smallButtonStyle, cursor: reclassifying || watchingTagging ? "wait" : "pointer" }}>{reclassifying ? "Reclassifying…" : "Reclassify topics"}</button>
           </div>
         </section>}
       <section className="anansi-settings-section" style={{ marginTop: 28 }}>
@@ -200,9 +199,8 @@ function Settings() {
         <div className="anansi-settings-list">
           <Toggle
             icon={<ShieldIcon />}
-            label="Include sensitive (NSFW) content"
-            badge="Filter"
-            description="Display saved bookmarks and posts flagged as sensitive or adult content by X and Reddit."
+            label="Show sensitive content"
+            description="Posts X and Reddit mark as sensitive or adult"
             checked={showNsfw}
             onChange={setShowNsfw}
           />
@@ -212,12 +210,13 @@ function Settings() {
   </div>;
 }
 
-const smallButtonStyle: React.CSSProperties = { border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 8px", background: "transparent", color: "var(--muted)", fontSize: 10.5, cursor: "pointer" };
+const smallButtonStyle: React.CSSProperties = { border: "1px solid var(--edge)", borderRadius: 5, padding: "5px 10px", background: "transparent", color: "var(--muted)", fontSize: 12, cursor: "pointer" };
+const metaStyle: React.CSSProperties = { color: "var(--muted)", fontSize: 12 };
 
-function Toggle({ icon, label, badge, description, checked, disabled = false, onChange }: { icon: React.ReactNode; label: string; badge: "Smart" | "Beta" | "Filter"; description: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
+function Toggle({ icon, label, badge, description, checked, disabled = false, onChange }: { icon: React.ReactNode; label: string; badge?: "Beta"; description: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
   return <div className="anansi-settings-row">
     <span className="anansi-settings-icon" aria-hidden="true">{icon}</span>
-    <span className="anansi-settings-copy"><strong>{label}</strong><span className={`anansi-settings-badge anansi-settings-badge-${badge.toLowerCase()}`}>{badge}</span><span className="anansi-settings-description">{description}</span></span>
+    <span className="anansi-settings-copy"><strong>{label}</strong>{badge && <span className={`anansi-settings-badge anansi-settings-badge-${badge.toLowerCase()}`}>{badge}</span>}<span className="anansi-settings-description">{description}</span></span>
     <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className="anansi-settings-toggle" data-state={checked ? "on" : "off"} onClick={() => onChange(!checked)}><span /></button>
   </div>;
 }

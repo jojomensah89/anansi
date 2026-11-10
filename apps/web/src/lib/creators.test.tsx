@@ -1,9 +1,11 @@
 import { expect, test } from "bun:test";
-import { authorSharePercent, formatAuthorShare } from "../routes/creators.tsx";
+import { authorHandleLine } from "./author-handle.ts";
 
-test("author share uses the whole library as its denominator", () => {
-	expect(authorSharePercent(12, 100)).toBe(12);
-	expect(formatAuthorShare(12, 100)).toBe("12.0%");
-	expect(formatAuthorShare(1, 5000)).toBe("<0.1%");
-	expect(formatAuthorShare(1, 0)).toBe("0.0%");
+test("an author tile shows a handle only when it adds to the name", () => {
+	expect(authorHandleLine({ authorName: "Jimmy Reilly", authorHandle: "thejimmyreilly" })).toBe("@thejimmyreilly");
+	// Web authors are their domain: the name already says it.
+	expect(authorHandleLine({ authorName: "github.com", authorHandle: "github.com" })).toBeNull();
+	expect(authorHandleLine({ authorName: "GitHub.com", authorHandle: "@github.com" })).toBeNull();
+	expect(authorHandleLine({ authorName: null, authorHandle: "anansi" })).toBeNull();
+	expect(authorHandleLine({ authorName: "Anansi", authorHandle: null })).toBeNull();
 });

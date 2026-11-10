@@ -34,7 +34,7 @@ const SOURCE_PRESENTATION: Record<VisibleLibrarySource, SourcePresentation> = {
 	x: {
 		name: "X bookmarks",
 		host: "x.com",
-		note: "Bookmarks captured live and through a resumable history import.",
+		note: "Captured live, plus a resumable history import",
 		support: "supported",
 		toggleable: true,
 		requiresExtension: true,
@@ -42,7 +42,7 @@ const SOURCE_PRESENTATION: Record<VisibleLibrarySource, SourcePresentation> = {
 	reddit: {
 		name: "Reddit saves",
 		host: "reddit.com",
-		note: "Saved posts and comments captured live and through history import.",
+		note: "Posts and comments, captured live and by history import",
 		support: "supported",
 		toggleable: true,
 		requiresExtension: true,
@@ -50,7 +50,7 @@ const SOURCE_PRESENTATION: Record<VisibleLibrarySource, SourcePresentation> = {
 	web: {
 		name: "Web pages & bookmarks",
 		host: "Any website",
-		note: "Pages, selections, and optional Chrome bookmark mirroring.",
+		note: "Pages, selections and, optionally, Chrome bookmarks",
 		support: "supported",
 		toggleable: false,
 		requiresExtension: true,
@@ -58,7 +58,7 @@ const SOURCE_PRESENTATION: Record<VisibleLibrarySource, SourcePresentation> = {
 	github: {
 		name: "GitHub stars",
 		host: "github.com",
-		note: "Starred repositories captured live and through a resumable history import.",
+		note: "Starred repos, captured live and by history import",
 		support: "supported",
 		toggleable: true,
 		requiresExtension: true,
@@ -66,7 +66,7 @@ const SOURCE_PRESENTATION: Record<VisibleLibrarySource, SourcePresentation> = {
 	tiktok: {
 		name: "TikTok favorites",
 		host: "tiktok.com",
-		note: "Import favorites from your signed-in TikTok browser tab through the extension.",
+		note: "Imported from your signed-in TikTok tab",
 		support: "supported",
 		toggleable: true,
 		requiresExtension: true,

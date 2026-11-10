@@ -1,4 +1,6 @@
-import { CardOrganization } from "./card.tsx";
+import { ToggleGroup, ToggleGroupItem } from "@anansi/ui/components/toggle-group";
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@anansi/ui/components/tooltip";
+import { CardFooter } from "./card.tsx";
 import { WebPreviewCard } from "./web-preview-card.tsx";
 import { mediaUrl, shortDate, type ItemRow } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
@@ -44,7 +46,7 @@ export function RowView({ items, onOpen, onChanged }: { items: ItemRow[]; onChan
               color: "inherit",
             }}
           >
-            {item.source === "web" ? <WebPreviewCard item={item} compact onPreview={onChanged} footer={<CardOrganization item={item} tags={item.tags ?? []} onChanged={()=>onChanged?.()} />} /> : thumb ? (
+            {item.source === "web" ? <WebPreviewCard item={item} compact onPreview={onChanged} footer={<CardFooter item={item} onOpen={onOpen} onChanged={()=>onChanged?.()} />} /> : thumb ? (
               <span style={{ position: "relative", flexShrink: 0 }}>
                 <img
                   src={mediaUrl(thumb.key)}
@@ -61,25 +63,25 @@ export function RowView({ items, onOpen, onChanged }: { items: ItemRow[]; onChan
                 )}
               </span>
             ) : (
-              <span style={{ width: 64, height: 64, borderRadius: 6, background: "var(--card)", flexShrink: 0 }} />
+              <span aria-hidden="true" style={{ width: 64, height: 64, borderRadius: 8, background: "var(--raised)", flexShrink: 0, display: "grid", placeItems: "center" }}><SourceMark source={item.source} faviconUrl={item.media?.find(m => m.kind === "favicon")?.key ? mediaUrl(item.media.find(m => m.kind === "favicon")!.key) : undefined} size={24} /></span>
             )}
 
             {item.source !== "web" && <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} size={16} />
-                <span style={{ fontSize: 12.5 }}>{item.authorName ?? item.author}</span>
-                <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
-                  @{item.author}
-                </span>
+                <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} name={item.authorName} size={16} />
+                <span style={{ fontSize: "var(--text-body)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.authorName ?? item.author}</span>
+                {item.author && item.author !== (item.authorName ?? item.author) && <span style={{ fontSize: "var(--text-meta)", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                  {item.source === "reddit" ? "u/" : item.source === "github" ? "" : "@"}{item.author}
+                </span>}
                 {item.quoted && (
-                  <span className="mono" style={{ fontSize: 9.5, color: "var(--faint)", border: "1px solid var(--line)", borderRadius: 3, padding: "1px 5px" }}>
-                    quote
+                  <span style={{ fontSize: "var(--text-meta)", color: "var(--muted)", border: "1px solid var(--line)", borderRadius: 4, padding: "0 6px" }}>
+                    Quote
                   </span>
                 )}
               </span>
               <span
                 style={{
-                  fontSize: 12.5,
+                  fontSize: "var(--text-body)",
                   lineHeight: 1.5,
                   color: "var(--text-dim)",
                   display: "-webkit-box",
@@ -93,11 +95,13 @@ export function RowView({ items, onOpen, onChanged }: { items: ItemRow[]; onChan
             </span>
 
             }
-            {item.source !== "web" && <span className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)", flexShrink: 0, paddingTop: 2 }}>
-              <span>{shortDate(item.postedAt)}</span>
-              <span style={{ color: "var(--fainter)", display: "flex" }}>
-                <SourceMark source={item.source} size={20} />
-              </span>
+            {item.source !== "web" && <span style={{ display: "flex", alignItems: "center", gap: 10, fontSize: "var(--text-meta)", color: "var(--muted)", fontVariantNumeric: "tabular-nums", flexShrink: 0, paddingTop: 2 }}>
+              <span style={{ whiteSpace: "nowrap" }}>{shortDate(item.postedAt)}</span>
+              {thumb && <span style={{ color: "var(--fainter)", display: "flex" }}>
+                <SourceMark source={item.source} faviconUrl={item.media?.find(m => m.kind === "favicon")?.key ? mediaUrl(item.media.find(m => m.kind === "favicon")!.key) : undefined} size={20} />
+              </span>}
+              {/* The placeholder tile already shows the mark; keep the column so dates still line up. */}
+              {!thumb && <span aria-hidden="true" style={{ width: 20, flexShrink: 0 }} />}
             </span>}
           </div>
         );
@@ -151,9 +155,9 @@ export function TimelineView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: 
               zIndex: 1,
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{group.label}</span>
-            <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
-              {group.items.length} posted
+            <span style={{ fontSize: "var(--text-body)", fontWeight: 600 }}>{group.label}</span>
+            <span style={{ fontSize: "var(--text-meta)", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+              {group.items.length}<span className="sr-only"> saves</span>
             </span>
             <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
           </div>
@@ -203,32 +207,5 @@ const MODES: { value: ViewMode; label: string; icon: string }[] = [
 ];
 
 export function ViewTabs({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
-  return (
-    <div style={{ display: "flex", gap: 2 }}>
-      {MODES.map((m) => (
-        <button
-          key={m.value}
-          type="button"
-          onClick={() => onChange(m.value)}
-          style={{
-            height: 30,
-            padding: "0 11px",
-            borderRadius: 5,
-            border: "1px solid transparent",
-            background: value === m.value ? "var(--raised)" : "transparent",
-            color: value === m.value ? "var(--text)" : "var(--muted)",
-            fontSize: 12.5,
-            cursor: "pointer",
-            font: "inherit",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <TabIcon d={m.icon} />
-          {m.label}
-        </button>
-      ))}
-    </div>
-  );
+  return <TooltipProvider><ToggleGroup value={[value]} onValueChange={values => {if(values[0]) onChange(values[0] as ViewMode);}} aria-label="Library view" style={{display:"flex",gap:2}}>{MODES.map(m => <Tooltip key={m.value}><TooltipTrigger render={<ToggleGroupItem value={m.value} aria-label={m.label} style={{width:32,height:32,padding:6,background:value===m.value?"var(--raised)":"transparent",color:"var(--text)",borderRadius:5}} />}><TabIcon d={m.icon}/></TooltipTrigger><TooltipContent>{m.label}</TooltipContent></Tooltip>)}</ToggleGroup></TooltipProvider>;
 }

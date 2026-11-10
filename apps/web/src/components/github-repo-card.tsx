@@ -1,5 +1,5 @@
-import { compact, type ItemRow, shortDate } from "../lib/api.ts";
-import type { ReactNode } from "react";
+import { compact, type ItemRow } from "../lib/api.ts";
+import type { CSSProperties, ReactNode } from "react";
 import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 
@@ -57,10 +57,10 @@ function Stat({ label, value }: { label: string; value: number | undefined }) {
 		<span
 			style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 44 }}
 		>
-			<span style={{ color: "#4b5563", fontSize: 11, lineHeight: 1.1 }}>
+			<span style={{ color: "#24292f", fontSize: 13, lineHeight: 1.2, fontVariantNumeric: "tabular-nums" }}>
 				{compact(value)}
 			</span>
-			<span style={{ color: "#7b8490", fontSize: 8.5, lineHeight: 1.1 }}>
+			<span style={{ color: "#57606a", fontSize: 12, lineHeight: 1.2 }}>
 				{label}
 			</span>
 		</span>
@@ -87,13 +87,13 @@ export function GithubRepoCard({ item, footer }: { item: ItemRow; footer?: React
 				}}
 			>
 				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					<Avatar src={item.authorAvatar} seed={owner} square size={42} />
+					<Avatar src={item.authorAvatar} seed={owner} name={item.authorName} square size={42} />
 					<span
 						style={{ display: "flex", flexDirection: "column", minWidth: 0 }}
 					>
 						<span
 							style={{
-								fontSize: 12.5,
+								fontSize: 14,
 								overflow: "hidden",
 								textOverflow: "ellipsis",
 								whiteSpace: "nowrap",
@@ -109,7 +109,7 @@ export function GithubRepoCard({ item, footer }: { item: ItemRow; footer?: React
 				>
 					<span
 						style={{
-							fontSize: 13.5,
+							fontSize: 14,
 							fontWeight: 700,
 							lineHeight: 1.3,
 							overflow: "hidden",
@@ -123,11 +123,11 @@ export function GithubRepoCard({ item, footer }: { item: ItemRow; footer?: React
 						<span
 							style={{
 								flexShrink: 0,
-								padding: "1px 5px",
+								padding: "0 6px",
 								border: "1px solid var(--edge-strong)",
 								borderRadius: 999,
 								color: "var(--faint)",
-								fontSize: 9.5,
+								fontSize: 12,
 							}}
 						>
 							Private
@@ -138,7 +138,7 @@ export function GithubRepoCard({ item, footer }: { item: ItemRow; footer?: React
 				{item.excerpt.trim() && (
 					<div
 						style={{
-							fontSize: 13,
+							fontSize: 14,
 							lineHeight: 1.55,
 							color: "var(--text-dim)",
 							display: "-webkit-box",
@@ -173,12 +173,12 @@ export function GithubRepoCard({ item, footer }: { item: ItemRow; footer?: React
 					}}
 				>
 					<div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-						<Avatar src={item.authorAvatar} seed={owner} square size={32} />
+						<Avatar src={item.authorAvatar} seed={owner} name={item.authorName} square size={32} />
 						<div style={{ minWidth: 0, flex: 1 }}>
 							<div
 								style={{
 									color: "#57606a",
-									fontSize: 12.5,
+									fontSize: 13,
 									lineHeight: 1.25,
 									overflow: "hidden",
 									textOverflow: "ellipsis",
@@ -203,7 +203,8 @@ export function GithubRepoCard({ item, footer }: { item: ItemRow; footer?: React
 								className="mono"
 								style={{
 									color: "#6e7781",
-									fontSize: 9.5,
+									fontSize: 12,
+									lineHeight: 1.3,
 									marginTop: 5,
 									overflow: "hidden",
 									textOverflow: "ellipsis",
@@ -213,7 +214,11 @@ export function GithubRepoCard({ item, footer }: { item: ItemRow; footer?: React
 								github.com/{owner}/{name}
 							</div>
 						</div>
-						<SourceMark source="github" size={16} />
+						{/* The panel is white in both themes, so the mark takes GitHub's
+						    own subtle grey instead of the theme ink (white in dark). */}
+						<span style={{ display: "flex", "--source-mark-ink": "#8c959f" } as CSSProperties}>
+							<SourceMark source="github" size={16} />
+						</span>
 					</div>
 
 					<div
@@ -240,50 +245,7 @@ export function GithubRepoCard({ item, footer }: { item: ItemRow; footer?: React
 				/>
 			</div>
 
-			<div
-				style={{
-					padding: "10px 12px 12px",
-					display: "flex",
-					alignItems: "center",
-					gap: 10,
-				}}
-			>
-				{footer}
-				{item.platformSaved === 0 && (
-					<span
-						title={
-							item.removedFromSourceAt
-								? `Removed at source on ${new Date(item.removedFromSourceAt * 1000).toLocaleDateString()}`
-								: "Removed at source"
-						}
-						style={{
-							color: "var(--fainter)",
-							border: "1px solid var(--line)",
-							borderRadius: 4,
-							padding: "1px 6px",
-							fontSize: 10,
-						}}
-					>
-						Removed at source
-					</span>
-				)}
-				<span
-					style={{
-						marginLeft: "auto",
-						display: "flex",
-						alignItems: "center",
-						gap: 8,
-					}}
-				>
-					<span
-						className="mono"
-						style={{ fontSize: 10, color: "var(--faint)" }}
-					>
-						{shortDate(item.postedAt)}
-					</span>
-					<SourceMark source="github" size={20} />
-				</span>
-			</div>
+			{footer}
 		</>
 	);
 }

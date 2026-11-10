@@ -1,3 +1,6 @@
+import { Input } from "@anansi/ui/components/input";
+import { Popover, PopoverTrigger, PopoverContent } from "@anansi/ui/components/popover";
+import { Button } from "@anansi/ui/components/button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
@@ -98,48 +101,47 @@ export function LibraryActions({ current, onApply }: {
   };
 
   return (
-    <details style={{ position: "relative" }}>
-      <summary style={summaryStyle}>Saved views</summary>
-      <div style={{ position: "absolute", right: 0, top: 36, zIndex: 70, width: 310, padding: 10, border: "1px solid var(--edge-strong)", borderRadius: 8, background: "var(--card)", boxShadow: "0 16px 40px #0009" }}>
-        <div className="mono" style={{ fontSize: 10, color: "var(--faint)", margin: "2px 3px 8px" }}>A saved view remembers these filters</div>
+    <Popover>
+      <PopoverTrigger style={summaryStyle}>Saved views</PopoverTrigger>
+      <PopoverContent align="end" style={{width:310,padding:10}}>
         {collections.isPending && collectionsSlow && <SavedViewsSkeleton />}
-        {collections.isError && <div role="alert" style={{ ...statusStyle, color: "#f2a7a7" }}>{message(collections.error)} <button type="button" onClick={() => void collections.refetch()} style={linkStyle}>Retry</button></div>}
+        {collections.isError && <div role="alert" style={{ ...statusStyle, color: "var(--danger)" }}>{message(collections.error)} <Button variant="ghost" type="button" onClick={() => void collections.refetch()} style={linkStyle}>Retry</Button></div>}
         {collections.data?.collections.map((collection) => (
           <div key={collection.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 3px", borderBottom: "1px solid var(--line-soft)" }}>
-            <button type="button" onClick={() => onApply(collection)} style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", color: "var(--text-dim)", cursor: "pointer", textAlign: "left", font: "inherit", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{collection.name}</button>
-            <button type="button" aria-label={`Update ${collection.name} with current filters`} onClick={() => update.mutate(collection)} disabled={update.isPending} style={linkStyle}>Update</button>
-            <button type="button" aria-label={`Delete ${collection.name}`} onClick={() => remove.mutate(collection.id)} disabled={remove.isPending} style={linkStyle}>Delete</button>
+            <Button variant="ghost" type="button" onClick={() => onApply(collection)} style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", color: "var(--text-dim)", cursor: "pointer", textAlign: "left", font: "inherit", fontSize: "var(--text-body)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{collection.name}</Button>
+            <Button variant="ghost" type="button" aria-label={`Update ${collection.name} with current filters`} onClick={() => update.mutate(collection)} disabled={update.isPending} style={linkStyle}>Update</Button>
+            <Button variant="ghost" type="button" aria-label={`Delete ${collection.name}`} onClick={() => remove.mutate(collection.id)} disabled={remove.isPending} style={linkStyle}>Delete</Button>
           </div>
         ))}
-        {collections.data?.collections.length === 0 && <div style={statusStyle}>No saved views yet.</div>}
+        {collections.data?.collections.length === 0 && <div style={statusStyle}>No saved views</div>}
         <form onSubmit={submit} style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <label htmlFor="collection-name" className="sr-only">Saved view name</label>
-          <input id="collection-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name this view" maxLength={80} style={{ flex: 1, minWidth: 0, height: 30, borderRadius: 5, border: "1px solid var(--edge)", background: "var(--ink)", color: "var(--text)", padding: "0 8px", font: "inherit", fontSize: 12 }} />
-          <button type="submit" disabled={!name.trim() || save.isPending} style={smallButton}>Save</button>
+          <Input id="collection-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name this view" maxLength={80} style={{ flex: 1, minWidth: 0, height: 30, borderRadius: 5, border: "1px solid var(--edge)", background: "var(--ink)", color: "var(--text)", padding: "0 8px", font: "inherit", fontSize: "var(--text-body)" }} />
+          <Button variant="ghost" type="submit" disabled={!name.trim() || save.isPending} style={smallButton}>Save</Button>
         </form>
-        <button type="button" disabled={exporting} onClick={() => void exportAll()} style={{ ...smallButton, width: "100%", marginTop: 8, background: "transparent", color: "var(--muted)" }}>{exporting ? "Preparing export…" : "Download library data (no media files)"}</button>
+        <Button variant="ghost" type="button" disabled={exporting} onClick={() => void exportAll()} style={{ ...smallButton, width: "100%", marginTop: 8, background: "transparent", color: "var(--muted)" }}>{exporting ? "Preparing export…" : "Export library (without media)"}</Button>
         <label style={{ ...smallButton, display: "block", textAlign: "center", marginTop: 8, cursor: restoring ? "wait" : "pointer" }}>
           {restoring ? "Restoring…" : "Restore into an empty library"}
-          <input type="file" accept=".json,application/json" disabled={restoring} style={{ display: "none" }} onChange={(event) => {
+          <Input type="file" accept=".json,application/json" disabled={restoring} style={{ display: "none" }} onChange={(event) => {
             const file = event.currentTarget.files?.[0];
             event.currentTarget.value = "";
             if (file) void restoreFile(file);
           }} />
         </label>
         {restoreProgress && <p role="status" style={{ ...statusStyle, lineHeight: 1.5 }}>{restoreProgress}</p>}
-        {abandonableBackupId && <button type="button" style={{ ...smallButton, width: "100%" }} onClick={() => {
+        {abandonableBackupId && <Button variant="ghost" type="button" style={{ ...smallButton, width: "100%" }} onClick={() => {
           void api.restoreAbort(abandonableBackupId).then(() => {
             setAbandonableBackupId(null);
             setRestoreProgress("Empty restore session cleared. Choose a corrected export.");
           }).catch((error) => toast.error("Could not clear restore session", { description: message(error) }));
-        }}>Clear empty restore session</button>}
-      </div>
-    </details>
+        }}>Clear empty restore session</Button>}
+      </PopoverContent>
+    </Popover>
   );
 }
 
-const summaryStyle = { display: "flex", alignItems: "center", height: 30, padding: "0 11px", borderRadius: 5, border: "1px solid var(--edge)", background: "var(--card)", color: "var(--text-dim)", cursor: "pointer", fontSize: 12.5, listStyle: "none" } as const;
-const smallButton = { height: 30, padding: "0 9px", borderRadius: 5, border: "1px solid var(--edge)", background: "var(--raised)", color: "var(--text)", cursor: "pointer", font: "inherit", fontSize: 11.5 } as const;
-const linkStyle = { border: "none", background: "transparent", color: "var(--faint)", cursor: "pointer", font: "inherit", fontSize: 10.5 } as const;
-const statusStyle = { padding: "8px 3px", color: "var(--faint)", fontSize: 11.5 } as const;
+const summaryStyle = { display: "flex", alignItems: "center", height: 32, padding: "0 12px", borderRadius: 6, border: "1px solid var(--edge)", background: "var(--card)", color: "var(--text-dim)", cursor: "pointer", fontSize: "var(--text-body)", listStyle: "none" } as const;
+const smallButton = { height: 30, padding: "0 9px", borderRadius: 5, border: "1px solid var(--edge)", background: "var(--raised)", color: "var(--text)", cursor: "pointer", font: "inherit", fontSize: "var(--text-body)" } as const;
+const linkStyle = { border: "none", background: "transparent", color: "var(--faint)", cursor: "pointer", font: "inherit", fontSize: "var(--text-body)" } as const;
+const statusStyle = { padding: "8px 3px", color: "var(--faint)", fontSize: "var(--text-body)" } as const;
 const message = (error: unknown) => error instanceof Error ? error.message : "The request failed.";

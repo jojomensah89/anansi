@@ -1,7 +1,9 @@
+import { Button } from "@anansi/ui/components/button";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { libraryFreshnessOptions } from "../lib/library-query.ts";
+import { expectIncomingSaves, libraryKeys } from "../lib/library-query.ts";
 
 function extensionSync(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -28,11 +30,7 @@ function extensionSync(): Promise<boolean> {
 export function SyncControls({ settings = false }: { settings?: boolean }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const health = useQuery({
-    queryKey: ["sync-health"],
-    queryFn: () => api.sources(),
-    ...libraryFreshnessOptions,
-  });
+  const queryClient = useQueryClient();
   const config = useQuery({
     queryKey: ["sync-settings"],
     queryFn: async () => {
@@ -45,7 +43,8 @@ export function SyncControls({ settings = false }: { settings?: boolean }) {
         githubError: string | null;
       }>;
     },
-    ...libraryFreshnessOptions,
+    // Only the Settings page shows these; the toolbar button never reads them.
+    enabled: settings,
   });
   async function save(value: {
     agentTabs: boolean;
@@ -70,11 +69,11 @@ export function SyncControls({ settings = false }: { settings?: boolean }) {
       <section id="sync" className="anansi-settings-section sync-settings">
         <h2 className="anansi-settings-heading">Sync</h2>
         {config.isPending ? (
-          <p>Loading sync settings...</p>
+          <p role="status">Loading…</p>
         ) : config.isError ? (
           <p role="alert">
             Could not load sync settings{" "}
-            <button onClick={() => void config.refetch()}>Try again</button>
+            <Button variant="ghost" onClick={() => void config.refetch()}>Try again</Button>
           </p>
         ) : (
           config.data && (
@@ -111,7 +110,7 @@ export function SyncControls({ settings = false }: { settings?: boolean }) {
                     in the extension.
                   </p>
                 </div>
-                <button
+                <Button variant="ghost"
                   type="button"
                   role="switch"
                   aria-label="Let agents check X and TikTok"
@@ -126,7 +125,7 @@ export function SyncControls({ settings = false }: { settings?: boolean }) {
                   }
                 >
                   <span />
-                </button>
+                </Button>
               </div>
               <div className="anansi-settings-row sync-username"><div className="anansi-settings-copy">
                 <label htmlFor="github-username">Public GitHub username</label>
@@ -136,14 +135,14 @@ export function SyncControls({ settings = false }: { settings?: boolean }) {
                   defaultValue={config.data.githubUsername ?? ""}
                   maxLength={39}
                 />
-                <button type="submit">Save username</button>
+                <Button variant="ghost" type="submit" aria-label="Save GitHub username">Save</Button>
                 <p>
                   Public stars:{" "}
                   {config.data.githubCheckedAt
                     ? `checked ${new Date(config.data.githubCheckedAt * 1000).toLocaleString()}`
                     : "not checked yet"}
                   {config.data.githubError
-                    ? "; could not check stars. Try again later."
+                    ? " · last check failed"
                     : ""}
                 </p>
               </div></div>
@@ -155,34 +154,31 @@ export function SyncControls({ settings = false }: { settings?: boolean }) {
     );
   return (
     <div className="sync-toolbar">
-      <button
+      <Button variant="outline"
+        className="toolbar-button"
         disabled={busy}
         onClick={async () => {
           setBusy(true);
           try {
             const reachable = await extensionSync();
             await api.requestSync(true, reachable);
+            expectIncomingSaves();
+            void queryClient.invalidateQueries({ queryKey: libraryKeys.stats() });
             setMessage(
               reachable
                 ? "Sync requested"
-                : "Extension unreachable; queued for next check-in",
+                : "Extension offline, will sync on next check-in",
             );
           } catch {
-            setMessage("Could not request sync; try again");
+            setMessage("Sync failed, try again");
           } finally {
             setBusy(false);
           }
         }}
       >
-        {busy ? "Requesting..." : "Sync now"}
-      </button>
-      <span>
-        {health.data?.extension.connection === "connected"
-          ? "Browser online"
-          : health.data
-            ? "Browser offline"
-            : "Checking browser..."}
-      </span>
+        <RefreshCw aria-hidden="true" strokeWidth={1.5} />
+        <span className="toolbar-button-label">{busy ? "Syncing" : "Sync now"}</span>
+      </Button>
       <span role="status" className="sync-feedback">
         {message}
       </span>

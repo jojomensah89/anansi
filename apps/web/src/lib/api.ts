@@ -339,10 +339,7 @@ export function sourceLabel(source: string): string {
 export function shortDate(unix: number | null): string {
   if (!unix) return "";
   const d = new Date(unix * 1000);
-  const now = Date.now();
-  const hours = (now - d.getTime()) / 3_600_000;
-  if (hours < 24) return `${Math.max(1, Math.round(hours))}h`;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return d.toLocaleDateString("en-GB", { timeZone: "UTC", day: "numeric", month: "short", ...(d.getUTCFullYear() !== new Date().getUTCFullYear() ? { year: "numeric" as const } : {}) });
 }
 
 export function compact(n: number | undefined): string {

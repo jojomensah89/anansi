@@ -1,4 +1,7 @@
+import { Button } from "@anansi/ui/components/button";
+import { PhoneActions } from "../components/phone-actions.tsx";
 import { SyncControls } from "../components/sync-controls.tsx";
+import { Search } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -6,7 +9,7 @@ import { Rail } from "../components/rail.tsx";
 import { Card } from "../components/card.tsx";
 import { Palette } from "../components/palette.tsx";
 import { Detail } from "../components/detail.tsx";
-import { FilterChips, useFilterBar, type Filters } from "../components/filters.tsx";
+import { FilterChips, FilterTrigger, useFilterBar, type Filters } from "../components/filters.tsx";
 import { SelectBar } from "../components/selectbar.tsx";
 import { RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
 import { useMasonry } from "../components/masonry.tsx";
@@ -19,7 +22,7 @@ import {
   useSlowLoad,
 } from "../components/skeleton.tsx";
 import { api, type Collection, type ItemRow, type SemanticSearchStatus } from "../lib/api.ts";
-import { libraryFreshnessOptions, libraryKeys, libraryStatsChanged, libraryStatsFingerprint, useLibraryQuery } from "../lib/library-query.ts";
+import { expectIncomingSaves, libraryFreshnessOptions, libraryKeys, libraryStatsChanged, libraryStatsFingerprint, useLibraryQuery } from "../lib/library-query.ts";
 import { useHideRemoved, useShowNsfw } from "../lib/settings.ts";
 import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
 
@@ -46,7 +49,7 @@ function SemanticSearchNotice({ query, status }: { query: string | undefined; st
   const notice = semanticNoticeFor(query, status);
   if (!notice) return null;
   return (
-    <div role="status" aria-live="polite" style={{ margin: "0 20px 10px", padding: "7px 10px", border: "1px solid var(--edge)", borderRadius: 5, color: "var(--faint)", fontSize: 11.5, background: "color-mix(in srgb, var(--card) 82%, transparent)" }}>
+    <div role="status" aria-live="polite" style={{ margin: "0 20px 10px", padding: "7px 10px", border: "1px solid var(--edge)", borderRadius: 5, color: "var(--faint)", fontSize: "var(--text-body)", background: "color-mix(in srgb, var(--card) 82%, transparent)" }}>
       {notice.message}
       {notice.status.pending !== undefined && notice.status.pending > 0 && (
         <span className="mono" style={{ marginLeft: 8, color: "var(--fainter)" }}>{notice.status.pending} pending</span>
@@ -122,7 +125,7 @@ function Library() {
   const ordering = view === "timeline" ? "posted" : "saved";
   const library = useLibraryQuery({ filters, query: search.q ?? "", order: ordering, hideRemoved, showNsfw });
   const items = library.items;
-  const masonry = useMasonry(items);
+  const masonry = useMasonry(items, 340);
   const stats = useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000, ...libraryFreshnessOptions });
   const total = stats.data?.items ?? 0;
   const authors = stats.data?.authors ?? 0;
@@ -131,6 +134,7 @@ function Library() {
 
   useEffect(() => {
     // Sync help only: the library works the same if this request fails.
+    expectIncomingSaves();
     void api.requestSync().catch(() => {});
   }, []);
 
@@ -141,7 +145,7 @@ function Library() {
     const previous = previousStatsFingerprint.current;
     previousStatsFingerprint.current = fingerprint;
     if (libraryStatsChanged(previous, fingerprint)) {
-      // Stats are the bounded two-second change probe. Refresh only the active
+      // Stats are the change probe (see libraryPollInterval). Refresh only the active
       // filter/search/order chain when the library's counts actually change.
       void queryClient.invalidateQueries({ queryKey: library.key, exact: true });
     }
@@ -222,7 +226,7 @@ function Library() {
   }), [filters, hideRemoved, ordering, search.q]);
 
   return (
-    <div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+    <div className={`anansi-shell capture-workspace${search.item ? " inspector-open" : ""}`} style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
       <Rail total={total} authors={authors} archived={stats.data?.archived ?? 0} bySource={counts} ready={statsReady} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -234,10 +238,10 @@ function Library() {
             has to have the library passing beneath it for the effect to be
             anything at all.
           */}
-          <div className="glass" style={{ position: "sticky", top: 0, zIndex: 30 }}>
+          <div className="glass workspace-controls" style={{ position: "sticky", top: 0, zIndex: 30 }}>
             <div
               style={{
-                height: 46,
+                height: 60,
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
@@ -245,14 +249,56 @@ function Library() {
               }}
             >
               <span style={{ fontSize: 14, fontWeight: 600 }}>{search.q ? "Search results" : search.archived ? "Archived" : "Library"}</span>
-              <span className="mono" style={{ fontSize: 11, color: "var(--faint)", display: "flex", alignItems: "center", gap: 5 }}>
-                {statsReady && `${visibleCount.toLocaleString()} saved items`}
-                {!statsReady && statsSlow && (
-                  <>
-                    <CountBone digits={5} height={9} /> saved items
-                  </>
-                )}
+              {/* The expanded rail already shows this count; the header keeps it only when the rail does not. */}
+              <span className="workspace-count" style={{ fontSize: "var(--text-meta)", color: "var(--muted)", fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center", gap: 4 }}>
+                {statsReady && <>{visibleCount.toLocaleString()}<span className="sr-only"> saves</span></>}
+                {!statsReady && statsSlow && <CountBone digits={5} height={9} />}
               </span>
+              <div className="workspace-search-sync">                <Button variant="ghost"
+                  type="button"
+                  onClick={() => setPaletteOpen(true)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    height: 32,
+                    padding: "0 8px 0 12px",
+                    border: "1px solid var(--edge)",
+                    borderRadius: 6,
+                    background: "var(--card)",
+                    width: 232,
+                    cursor: "pointer",
+                    font: "inherit",
+                  }}
+                >
+                  <Search aria-hidden="true" size={16} strokeWidth={1.5} color="var(--muted)" />
+                  <span style={{ fontSize: "var(--text-body)", color: "var(--fainter)" }}>
+                    {search.q ? search.q : `Search`}
+                  </span>
+                  <span
+                    className="mono"
+                    style={{
+                      marginLeft: "auto",
+                      fontSize: "var(--text-meta)",
+                      color: "var(--muted)",
+                      border: "1px solid var(--edge)",
+                      borderRadius: 3,
+                      padding: "1px 4px",
+                    }}
+                  >
+                    ⌘K
+                  </span>
+                </Button>
+
+                {search.q && (
+                  <Button variant="ghost" type="button" onClick={() => void navigate({ search: toLibrarySearch(filters, view, { item: search.item }), replace: true })} style={{ height: 32, border: "none", borderRadius: 6, background: "transparent", color: "var(--muted)", cursor: "pointer", font: "inherit", fontSize: "var(--text-body)" }}>
+                    Clear
+                  </Button>
+                )}
+                {stats.isError && <Button variant="ghost" type="button" onClick={() => void stats.refetch()} style={{ border: "none", background: "transparent", color: "var(--danger)", cursor: "pointer", font: "inherit" }}>Retry counts</Button>}
+
+                <SyncControls/>
+</div>
             </div>
 
             {/*
@@ -270,60 +316,14 @@ function Library() {
                 flexWrap: "wrap",
               }}
             >
-              <ViewTabs value={view} onChange={setView} />
+              <ViewTabs value={view} onChange={setView} /><FilterTrigger bar={bar} align="left" />
 
               <div className="library-toolbar-actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-                <button
+                <PhoneActions><LibraryActions current={collectionFilters} onApply={applyCollection} /><Button variant="ghost" type="button" onClick={() => { setSelecting(s => !s); setPicked(new Set()); }}>Select</Button></PhoneActions><div className="desktop-actions"><LibraryActions current={collectionFilters} onApply={applyCollection} /></div>
+
+                <Button variant="ghost"
                   type="button"
-                  onClick={() => setPaletteOpen(true)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    height: 30,
-                    padding: "0 10px 0 9px",
-                    border: "1px solid var(--edge)",
-                    borderRadius: 5,
-                    background: "var(--card)",
-                    width: 232,
-                    cursor: "pointer",
-                    font: "inherit",
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--fainter)" strokeWidth="1.8" strokeLinecap="round">
-                    <circle cx="11" cy="11" r="6.5" />
-                    <path d="m20 20-4.2-4.2" />
-                  </svg>
-                  <span style={{ fontSize: 12.5, color: "var(--fainter)" }}>
-                    {search.q ? search.q : `Search ${visibleCount.toLocaleString()} saved items`}
-                  </span>
-                  <span
-                    className="mono"
-                    style={{
-                      marginLeft: "auto",
-                      fontSize: 10,
-                      color: "var(--faintest)",
-                      border: "1px solid var(--edge)",
-                      borderRadius: 3,
-                      padding: "1px 4px",
-                    }}
-                  >
-                    ⌘K
-                  </span>
-                </button>
-
-                {search.q && (
-                  <button type="button" onClick={() => void navigate({ search: toLibrarySearch(filters, view, { item: search.item }), replace: true })} style={{ height: 30, border: "none", background: "transparent", color: "var(--faint)", cursor: "pointer", font: "inherit", fontSize: 11.5 }}>
-                    Clear search
-                  </button>
-                )}
-                {stats.isError && <button type="button" onClick={() => void stats.refetch()} style={{ border: "none", background: "transparent", color: "#f2a7a7", cursor: "pointer", font: "inherit" }}>Counts unavailable · retry</button>}
-
-                <SyncControls/>
-                <LibraryActions current={collectionFilters} onApply={applyCollection} />
-
-                <button
-                  type="button"
+                  className="desktop-actions"
                   onClick={() => {
                     setSelecting((s) => !s);
                     setPicked(new Set());
@@ -331,15 +331,15 @@ function Library() {
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 7,
-                    height: 30,
-                    padding: "0 11px",
-                    borderRadius: 5,
+                    gap: 8,
+                    height: 32,
+                    padding: "0 12px",
+                    borderRadius: 6,
                     cursor: "pointer",
                     font: "inherit",
-                    fontSize: 12.5,
+                    fontSize: "var(--text-body)",
                     background: selecting ? "var(--accent)" : "var(--card)",
-                    color: selecting ? "var(--ink)" : "var(--text-dim)",
+                    color: selecting ? "var(--accent-text-on-accent)" : "var(--text-dim)",
                     border: `1px solid ${selecting ? "var(--accent)" : "var(--edge)"}`,
                   }}
                 >
@@ -347,12 +347,12 @@ function Library() {
                     <path d="M4 12l5 5L20 6" />
                   </svg>
                   Select
-                </button>
+                </Button>
               </div>
             </div>
 
-            <FilterChips bar={bar} matched={!library.hasNextPage && !library.isPending && !library.isError ? items.length : null} />
-            <SemanticSearchNotice query={search.q} status={library.semantic} />
+            <div className={`workspace-filter-row${bar.anyApplied ? " has-filters" : ""}`}><FilterChips bar={bar} matched={!library.hasNextPage && !library.isPending && !library.isError ? items.length : null} />
+            </div><SemanticSearchNotice query={search.q} status={library.semantic} />
           </div>
 
           <div style={{ padding: "16px 20px" }}>
@@ -367,17 +367,17 @@ function Library() {
           {firstLoad && !library.isError && (search.q || view === "row") && <RowsSkeleton />}
           {firstLoad && !library.isError && !search.q && view === "timeline" && <RowsSkeleton count={6} />}
           {library.isError && (
-            <div role="alert" style={{ color: "var(--muted)", fontSize: 13, padding: 12 }}>
+            <div role="alert" style={{ color: "var(--muted)", fontSize: "var(--text-body)", padding: 12 }}>
               {library.error instanceof Error ? library.error.message : "The library could not be loaded."}
-              <button type="button" onClick={() => void library.refetch()} style={{ marginLeft: 10, border: "1px solid var(--edge)", borderRadius: 5, background: "var(--card)", color: "var(--text-dim)", padding: "5px 9px", cursor: "pointer" }}>Retry</button>
+              <Button variant="ghost" type="button" onClick={() => void library.refetch()} style={{ marginLeft: 10, border: "1px solid var(--edge)", borderRadius: 5, background: "var(--card)", color: "var(--text-dim)", padding: "5px 9px", cursor: "pointer" }}>Retry</Button>
             </div>
           )}
 
           {!library.isPending && !library.isError && items.length === 0 && (
-            <div style={{ padding: "40px 12px", color: "var(--muted)", fontSize: 13.5 }}>
-              {search.q ? `No results for “${search.q}” in this view.` : bar.anyApplied ? "Nothing matches these filters." : "Your library is ready for its first save."}
-              <div className="mono" style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 6 }}>
-                {search.q || bar.anyApplied ? "Try a broader search or clear one filter above." : "Use the Anansi extension to save a page, star, post, or selection."}
+            <div style={{ padding: "40px 12px", color: "var(--muted)", fontSize: "var(--text-body)" }}>
+              <div style={{ color: "var(--text-dim)" }}>{search.q ? `No results for “${search.q}”` : bar.anyApplied ? "Nothing matches these filters" : "Nothing saved yet"}</div>
+              <div style={{ fontSize: "var(--text-meta)", color: "var(--muted)", marginTop: 4 }}>
+                {search.q ? "Try fewer words or clear a filter" : bar.anyApplied ? "Clear a filter to see more" : "Save a page, post or star with the Anansi extension"}
               </div>
             </div>
           )}
@@ -414,9 +414,9 @@ function Library() {
               <LoadMoreSkeleton />
             )}
             {library.isFetchNextPageError && (
-              <div role="alert" style={{ display: "flex", alignItems: "center", gap: 9, color: "#f2a7a7", fontSize: 12, padding: 8 }}>
+              <div role="alert" style={{ display: "flex", alignItems: "center", gap: 9, color: "#f2a7a7", fontSize: "var(--text-body)", padding: 8 }}>
                 More results could not be loaded.
-                <button type="button" onClick={() => void library.fetchNextPage()} style={{ border: "1px solid var(--edge)", borderRadius: 5, background: "var(--card)", color: "var(--text-dim)", padding: "4px 8px", cursor: "pointer" }}>Retry</button>
+                <Button variant="ghost" type="button" onClick={() => void library.fetchNextPage()} style={{ border: "1px solid var(--edge)", borderRadius: 5, background: "var(--card)", color: "var(--text-dim)", padding: "4px 8px", cursor: "pointer" }}>Retry</Button>
               </div>
             )}
           </div>

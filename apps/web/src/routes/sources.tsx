@@ -13,6 +13,7 @@ import {
 import { useHideRemoved } from "../lib/settings.ts";
 import {
 	extensionLabel,
+	extensionStatus,
 	type SourceTone,
 	sourcePresentation,
 } from "../lib/source-state.ts";
@@ -28,20 +29,20 @@ const TONE: Record<
 	ok: {
 		text: "var(--ok)",
 		dot: "var(--ok)",
-		border: "#2d4a3d",
-		background: "#17231f",
+		border: "var(--ok-edge)",
+		background: "var(--ok-soft)",
 	},
 	accent: {
 		text: "var(--accent-text)",
 		dot: "var(--accent)",
-		border: "#4a3c22",
+		border: "var(--edge-strong)",
 		background: "var(--accent-soft)",
 	},
 	warn: {
-		text: "#e7b86b",
-		dot: "#d99b43",
-		border: "#554020",
-		background: "#261f14",
+		text: "var(--warn)",
+		dot: "var(--warn)",
+		border: "var(--warn-edge)",
+		background: "var(--warn-soft)",
 	},
 	muted: {
 		text: "var(--muted)",
@@ -56,6 +57,12 @@ const TONE: Record<
 		background: "transparent",
 	},
 };
+
+/** The banner is titled "Anansi extension", so its status drops the repeated noun. */
+function bannerLabel(extension: ExtensionHealth): string {
+	const label = extensionLabel(extension).replace(/^Extension /, "");
+	return label.charAt(0).toUpperCase() + label.slice(1);
+}
 
 function ago(unix: number | null): string {
 	if (!unix) return "never";
@@ -163,13 +170,7 @@ function Sources() {
 						padding: "0 22px",
 					}}
 				>
-					<span style={{ fontSize: 14, fontWeight: 600 }}>Sources</span>
-					<span
-						className="mono"
-						style={{ fontSize: 12, color: "var(--faint)" }}
-					>
-						capture and import status
-					</span>
+					<h1 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Sources</h1>
 					<Tabs value={tab} onChange={setTab} />
 				</header>
 
@@ -178,8 +179,7 @@ function Sources() {
 					{!data && !loadFailed && slow && <SourceCardsSkeleton />}
 					{loadFailed && (
 						<Notice>
-							Source status could not be loaded. The library is still available,
-							but Anansi cannot confirm extension health right now.
+							Could not load source status. Your library is unaffected.
 						</Notice>
 					)}
 
@@ -269,7 +269,7 @@ function ExtensionBanner({ extension }: { extension: ExtensionHealth }) {
 		extension.queue.queued +
 		extension.queue.uploading +
 		extension.queue.retrying;
-	const tone = connected ? TONE.ok : TONE.warn;
+	const tone = TONE[extensionStatus(extension).tone];
 
 	return (
 		<section
@@ -319,26 +319,26 @@ function ExtensionBanner({ extension }: { extension: ExtensionHealth }) {
 						}}
 					/>
 				</span>
-				<span className="mono" style={{ fontSize: 12, color: tone.text }}>
-					{extensionLabel(extension)}
+				<span style={{ fontSize: 12, color: tone.text }}>
+					{bannerLabel(extension)}
 					{!connected && !neverConnected && extension.lastSeenAt
 						? ` · last seen ${ago(extension.lastSeenAt)}`
 						: ""}
 				</span>
 			</span>
 			<span
-				className="mono"
 				style={{
 					marginLeft: "auto",
 					fontSize: 12,
-					color: "var(--faint)",
+					color: "var(--muted)",
 					textAlign: "right",
+					fontVariantNumeric: "tabular-nums",
 				}}
 			>
 				{connected
-					? `${extension.activeClients} active ${extension.activeClients === 1 ? "browser" : "browsers"}${queued ? ` · ${queued} waiting` : " · queue clear"}`
+					? `${extension.activeClients} ${extension.activeClients === 1 ? "browser" : "browsers"}${queued ? ` · ${queued} waiting` : ""}`
 					: neverConnected
-						? "Open the extension once to begin reporting"
+						? "Open the extension once to start"
 						: "Open the browser to resume capture"}
 				{extension.queue.failed > 0 && (
 					<span style={{ display: "block", color: TONE.warn.text }}>
@@ -389,10 +389,7 @@ function SourceCard({
 						}}
 					>
 						<span style={{ fontSize: 13.5, fontWeight: 600 }}>{row.name}</span>
-						<span
-							className="mono"
-							style={{ fontSize: 12, color: "var(--faint)" }}
-						>
+						<span style={{ fontSize: 12, color: "var(--muted)" }}>
 							{row.host}
 						</span>
 					</span>
@@ -429,17 +426,8 @@ function SourceCard({
 				)}
 
 				<div style={{ marginTop: 14 }}>
-					<div
-						className="mono"
-						style={{
-							marginBottom: 8,
-							fontSize: 12,
-							letterSpacing: "0.08em",
-							textTransform: "uppercase",
-							color: "var(--fainter)",
-						}}
-					>
-						Stored capture provenance
+					<div style={{ marginBottom: 8, fontSize: 12, color: "var(--muted)" }}>
+						How saves arrived
 					</div>
 					<div
 						style={{
@@ -448,26 +436,18 @@ function SourceCard({
 							gap: "9px 10px",
 						}}
 					>
-						<Fact label="live" value={row.live} />
-						<Fact label="imported" value={row.imported} />
-						<Fact label="manual" value={manual} />
+						<Fact label="Live" value={row.live} />
+						<Fact label="Imported" value={row.imported} />
+						<Fact label="Manual" value={manual} />
 						<Fact label="Chrome" value={row.chromeBookmarks} />
-						<Fact label="legacy" value={row.legacyUnknown} />
-						<Fact label="authors" value={row.authors} />
+						<Fact label="Legacy" value={row.legacyUnknown} />
+						<Fact label="Authors" value={row.authors} />
 					</div>
 				</div>
 
 				{row.items === 0 && row.support !== "coming_next" && (
-					<p
-						className="mono"
-						style={{
-							margin: "13px 0 0",
-							fontSize: 12,
-							lineHeight: 1.5,
-							color: "var(--faint)",
-						}}
-					>
-						No items from this source have been stored yet.
+					<p style={{ margin: "13px 0 0", fontSize: 12, lineHeight: 1.5, color: "var(--muted)" }}>
+						Nothing saved yet
 					</p>
 				)}
 			</div>
@@ -483,12 +463,9 @@ function SourceCard({
 					borderTop: "1px solid var(--line)",
 				}}
 			>
-				<span
-					className="mono"
-					style={{ fontSize: 12, color: "var(--faint)" }}
-				>
-					last capture {ago(row.lastCaptureAt)}
-          {["x", "reddit", "github", "tiktok"].includes(row.source) && <>{"; "}{check?.lastCheckedAt ? `checked ${ago(check.lastCheckedAt)}` : "not checked yet"}{check?.lastErrorCode ? "; check could not finish" : ""}</>}
+				<span style={{ fontSize: 12, color: "var(--muted)" }}>
+					Last capture {ago(row.lastCaptureAt)}
+          {["x", "reddit", "github", "tiktok"].includes(row.source) && <>{" · "}{check?.lastCheckedAt ? `checked ${ago(check.lastCheckedAt)}` : "not checked yet"}{check?.lastErrorCode ? " · last check failed" : ""}</>}
 				</span>
 				{row.items > 0 && (
 					<Link
@@ -498,6 +475,7 @@ function SourceCard({
 							marginLeft: "auto",
 							fontSize: 12,
 							color: "var(--accent-text)",
+							whiteSpace: "nowrap",
 						}}
 					>
 						View {row.items.toLocaleString()}
@@ -513,7 +491,6 @@ function Status({ text, tone: toneName }: { text: string; tone: SourceTone }) {
 	const tone = TONE[toneName];
 	return (
 		<div
-			className="mono"
 			style={{
 				display: "inline-flex",
 				alignItems: "center",
@@ -546,12 +523,11 @@ function Fact({ label, value }: { label: string; value: number }) {
 			style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}
 		>
 			<span
-				className="mono"
-				style={{ fontSize: 13, color: value ? "var(--text)" : "var(--faint)" }}
+				style={{ fontSize: 14, color: value ? "var(--text)" : "var(--muted)", fontVariantNumeric: "tabular-nums" }}
 			>
 				{value.toLocaleString()}
 			</span>
-			<span style={{ fontSize: 12, color: "var(--faint)" }}>{label}</span>
+			<span style={{ fontSize: 12, color: "var(--muted)" }}>{label}</span>
 		</span>
 	);
 }
@@ -585,17 +561,16 @@ function ModeBadge({
 }) {
 	return (
 		<span
-			className="mono"
 			style={{
 				marginLeft: push ? "auto" : undefined,
 				fontSize: 12,
 				padding: "2px 6px",
 				borderRadius: 3,
 				border: "1px solid var(--edge)",
-				color: mode === "manual" ? "var(--faint)" : "var(--accent)",
+				color: mode === "manual" ? "var(--muted)" : "var(--accent-text)",
 			}}
 		>
-			{mode}
+			{mode.charAt(0).toUpperCase() + mode.slice(1)}
 		</span>
 	);
 }
@@ -669,10 +644,9 @@ function LibraryPreference({
 					Hide items removed at the source
 				</span>
 				<span
-					style={{ fontSize: 12, color: "var(--faint)", lineHeight: 1.5 }}
+					style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}
 				>
-					Anansi keeps previously captured items. Turn this on when you want the
-					library to mirror only what remains saved on each platform.
+					Off keeps everything Anansi has captured
 				</span>
 			</span>
 			<Toggle

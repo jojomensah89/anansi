@@ -1,0 +1,41 @@
+/* Anansi semantic palette. Dark is the default; .light is explicit. */
+:root, .dark {
+ --source-mark-ink:#fff;
+ --ink:#0b0e11; --rail:#0e1216; --card:#12161a; --raised:#171d23;
+ --line:#293039; --line-soft:#20262d; --edge:#343e48; --edge-strong:#465360;
+ --text:#e6ebef; --text-dim:#c4cbd4; --muted:#a2aeb9;
+ --accent:#c4cbd4; --accent-hover:#e3e7ed; --accent-soft:#293039; --accent-text-on-accent:#0b0e11;
+ --ok:#76cda5; --warn:#e7b86b; --danger:#f2a7a7;
+ --ok-soft:#17231f; --ok-edge:#2d4a3d; --warn-soft:#261f14; --warn-edge:#554020;
+}
+html.light {
+ --source-mark-ink:#000;
+ --ink:#f8fafc; --rail:#f1f4f7; --card:#ffffff; --raised:#edf1f5;
+ --line:#d8dfe7; --line-soft:#e8edf2; --edge:#cbd3dd; --edge-strong:#aab6c4;
+ --text:#202832; --text-dim:#344252; --muted:#516172;
+ --accent:#353e49; --accent-hover:#222b35; --accent-soft:#e8ebef; --accent-text-on-accent:#ffffff;
+ --ok:#166844; --warn:#8a5a00; --danger:#a32323;
+ --ok-soft:#e7f3ec; --ok-edge:#b5d8c4; --warn-soft:#fbf3e3; --warn-edge:#e3cc9c;
+}
+:root, .dark, html.light {
+ --background:var(--ink); --foreground:var(--text); --surface:var(--card); --surface-raised:var(--raised); --hairline:var(--line);
+ --faint:var(--muted); --fainter:var(--muted); --faintest:var(--muted);
+ --accent-text:var(--accent); --accent-selected:var(--accent-soft); --accent-focus:var(--accent); --accent-link:var(--accent);
+ --accent-foreground:var(--accent-text-on-accent); --primary:var(--accent); --primary-foreground:var(--accent-text-on-accent);
+ --secondary:var(--raised); --secondary-foreground:var(--text); --muted-foreground:var(--muted);
+ --popover:var(--card); --popover-foreground:var(--text); --card-foreground:var(--text);
+ --border:var(--line); --input:var(--edge); --ring:var(--accent); --sidebar:var(--rail); --sidebar-foreground:var(--text);
+ --sidebar-accent:var(--raised); --sidebar-accent-foreground:var(--text); --sidebar-primary:var(--accent); --sidebar-primary-foreground:var(--accent-text-on-accent); --sidebar-border:var(--line); --sidebar-ring:var(--accent);
+ --text-body:14px; --text-meta:12px; --text-title:20px; --ease-ui:cubic-bezier(.23,1,.32,1);
+}
+.ui-body {font-size:var(--text-body);line-height:1.6;color:var(--text-dim)}
+.ui-meta {font-size:var(--text-meta);line-height:1.5;color:var(--muted)}
+.ui-section-title {font-size:var(--text-meta);line-height:1.5;color:var(--muted);font-weight:500;margin:0 0 12px}
+.capture-trail {display:flex;flex-wrap:wrap;gap:16px;list-style:none;padding:12px 0;margin:0 0 20px;border-block:1px solid var(--line);font-size:var(--text-meta);color:var(--muted)}
+.capture-trail li {display:flex;align-items:center;gap:8px}
+.capture-trail li::before {content:'';height:6px;width:6px;border-radius:50%;background:var(--accent)}
+.capture-trail [data-state=missing]::before {background:transparent;outline:1px solid var(--muted)}
+.capture-trail [data-state=error] {color:var(--danger)}
+.capture-trail [data-state=error]::before {background:var(--danger)}
+
+:root {--sans:"Instrument Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}

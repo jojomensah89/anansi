@@ -30,24 +30,39 @@ describe("GitHub repository card", () => {
     expect(githubLanguageColor(null)).toBe("#c8d0da");
   });
 
-  test("renders the white repository preview with stored metadata", () => {
+  test("restores the white social preview and original hierarchy with stored metadata", () => {
     const html = renderToStaticMarkup(createElement(GithubRepoCard, { item: repo() }));
 
     expect(html).toContain("Vyom-26/");
     expect(html).toContain("BMX_Racer");
-    expect(html).toContain("github.com/Vyom-26/BMX_Racer");
+    expect(html).not.toContain("<img");
     expect(html).toContain("Issues");
     expect(html).toContain("Stars");
     expect(html).toContain("Forks");
     expect(html).toContain(`background:${githubLanguageColor("TypeScript")}`);
     expect(html).not.toContain("Contributors");
+    expect(html).toContain("background:#fff");
+    expect(html).toContain("border:1px solid #d8dee4");
+    // The original card: a bold owner/repo title line between the author
+    // header and the description, then a monospace URL line in the panel.
+    const title = html.indexOf(">Vyom-26/BMX_Racer<");
+    expect(title).toBeGreaterThan(html.indexOf(">Vyom-26<"));
+    expect(title).toBeLessThan(html.indexOf("A cel-shaded"));
+    expect(html.slice(0, title)).toMatch(/font-weight:700[^>]*$/);
+    expect(html).toContain("github.com/Vyom-26/BMX_Racer");
+    expect(html.indexOf("github.com/Vyom-26/BMX_Racer")).toBeGreaterThan(html.indexOf("A cel-shaded"));
+    expect(html).toMatch(/class="mono"[^>]*>github\.com\/Vyom-26\/BMX_Racer</);
+    const sizes = [...html.matchAll(/font-size:([\d.]+)px/g)].map((m) => Number(m[1]));
+    expect(sizes.length).toBeGreaterThan(0);
+    expect(Math.min(...sizes)).toBeGreaterThanOrEqual(12);
+    expect(html.match(/data-source=/g)?.length ?? 0).toBeLessThanOrEqual(1);
   });
 
 	test("renders a neutral strip when language metadata is absent", () => {
     const html = renderToStaticMarkup(createElement(GithubRepoCard, { item: repo({ language: null }) }));
 
-    expect(html).toContain('title="Language unavailable"');
-		expect(html).toContain("background:#e5e7eb");
+    expect(html).not.toContain("TypeScript");
+		expect(html).toContain("Language unavailable");
 	});
 
 	test("shows Private only when that visibility was stored", () => {

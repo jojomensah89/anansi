@@ -19,7 +19,7 @@ async function call(path = "", method = "GET", body?: unknown) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok)
-    throw new Error("Could not update connected clients. Please try again.");
+    throw new Error("Could not update connected clients");
   return response.json() as Promise<{
     id: string;
     clients: Client[];
@@ -261,10 +261,7 @@ export function ConnectedClients() {
       className="anansi-settings-section clients-section"
     >
       <div className="client-section-head">
-        <div>
-          <h2 className="anansi-settings-heading">Connected clients</h2>
-          <p>What can reach your library. Remove access at any time.</p>
-        </div>
+        <h2 className="anansi-settings-heading">Connected clients</h2>
         <div className="client-actions">
         <Button
           disabled={busy}
@@ -313,8 +310,8 @@ export function ConnectedClients() {
           <h3>{flow === "api" ? "Create API key" : "Create capture key"}</h3>
           <p>
             {flow === "api"
-              ? "Read-only access. This key can read your library, but cannot save, change or delete items."
-              : "Save-only access for your extension."}
+              ? "Read-only until you allow changes"
+              : "Save-only, for connecting the extension by hand"}
           </p>
           <label htmlFor="new-client-name">Name</label>
           <Input
@@ -323,7 +320,7 @@ export function ConnectedClients() {
             maxLength={100}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="For example, research assistant"
+            placeholder="Research assistant"
           />
           <div className="client-actions">
             <Button type="submit" disabled={busy || !name.trim()}>
@@ -348,15 +345,15 @@ export function ConnectedClients() {
           </h3>
           <p>
             {reveal.pairing
-              ? seconds === 0 ? "Code expired" : `One-time code - expires in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
-              : "It will not be shown again. Keep it somewhere safe."}
+              ? seconds === 0 ? "This code has expired" : `Expires in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+              : "Shown once. Store it somewhere safe"}
           </p>
           {!reveal.pairing || seconds > 0 ? (
             <>
               <div className="client-code"><code>{reveal.key}</code><Copy value={reveal.key} /></div>
             </>
           ) : (
-            <><p>This code has expired.</p><Button onClick={() => void action(async () => {
+            <><Button onClick={() => void action(async () => {
               const issued = await call("", "POST", {kind:"pairing",name:"Browser extension"});
               expiresAt.current = Date.now() + 300000; setSeconds(300); setReveal({key:issued.key,pairing:true,id:issued.id});
             })}>Get a new code</Button></>
@@ -391,20 +388,14 @@ export function ConnectedClients() {
       )}
       {!data ? (
         error ? null : (
-          <p role="status">Loading connected clients...</p>
+          <p role="status">Loading clients…</p>
         )
       ) : (
         <>
-          <p className="client-summary">
-            {active.length + (data.legacyActive ? 1 : 0)} active
-          </p>
           {active.length === 0 && !data.legacyActive && (
             <div className="client-empty">
-              <h3>Your library has no connected clients</h3>
-              <p>
-                Connect the extension to save from your browser, or create a
-                read-only API key.
-              </p>
+              <h3>No connected clients</h3>
+              <p>Connect the extension to save from your browser, or create an API key</p>
             </div>
           )}
           <div className="client-table-wrap">
@@ -413,7 +404,7 @@ export function ConnectedClients() {
                 <tr>
                   <th>Name</th>
                   <th>Type</th>
-                  <th>What it can do</th>
+                  <th>Access</th>
                   <th>Last used</th>
                   <th>
                     <span className="sr-only">Actions</span>
@@ -457,7 +448,6 @@ export function ConnectedClients() {
       )}
       <details className="client-disclosure">
         <summary>Manual capture key</summary>
-        <p>Use a capture key when connecting manually.</p>
         <Button
           variant="outline"
           onClick={() => {
@@ -484,8 +474,8 @@ export function ConnectedClients() {
             </h3>
             <p id="revoke-description">
               {confirm === "old"
-                ? "Every extension and script using the old shared token will stop working. Reconnect each extension and replace script keys first. Owner sign-in remains available."
-                : "This client will immediately lose access to your library. Your saved items stay. To reconnect, create a new key."}
+                ? "Every extension and script using it stops working. Reconnect extensions and replace script keys first. Your own sign-in keeps working."
+                : "It loses access right away. Your saves stay."}
             </p>
             <div className="client-actions">
               <Button
@@ -510,7 +500,7 @@ export function ConnectedClients() {
                 }
               >
                 {busy
-                  ? "Removing?"
+                  ? "Removing…"
                   : confirm === "old"
                     ? "Retire token"
                     : "Revoke access"}

@@ -48,14 +48,6 @@ function CopyButton({
   );
 }
 
-function ClientGlyph({ glyph }: { glyph: string }) {
-  return (
-    <span className="mcp-client-glyph" aria-hidden="true">
-      {glyph}
-    </span>
-  );
-}
-
 const emptySubscribe = () => () => {};
 const getClientOrigin = () => (typeof window !== "undefined" ? window.location.origin : "");
 const getServerOrigin = () => "";
@@ -100,9 +92,7 @@ export function McpServerPage() {
         <div className="mcp-wrap">
           <header className="mcp-header">
             <h1>MCP server</h1>
-            <p>
-              Connect an agent to your saved library. You decide what it can change.
-            </p>
+            <p>Connect an agent to your library</p>
           </header>
 
           <section className="mcp-endpoint-card" aria-labelledby="mcp-endpoint-heading">
@@ -111,8 +101,7 @@ export function McpServerPage() {
               <code className="mcp-endpoint">{endpoint}</code>
               <CopyButton target="endpoint" value={endpoint} copied={copied} onCopy={copy} />
               <div className="mcp-endpoint-meta">
-                <span className="mcp-status-pill"><span className="mcp-status-dot" />{MCP_TOOL_CATALOG.length} read / {MCP_WRITE_TOOL_CATALOG.length} optional write</span>
-                <span>Streamable HTTP · OAuth or API key</span>
+                <span>Streamable HTTP</span>
               </div>
             </div>
           </section>
@@ -122,14 +111,14 @@ export function McpServerPage() {
               <div className="mcp-card-heading">
                 <div>
                   
-                  <h2 id="mcp-connect-heading">Choose how to connect</h2>
+                  <h2 id="mcp-connect-heading">Connect</h2>
                 </div>
               </div>
 
               <div className="mcp-step">
                 
                 <div className="mcp-step-content">
-                  <h3>Choose your client</h3>
+                  <h3>Client</h3>
                   <div className="mcp-client-list" role="tablist" aria-label="MCP clients">
                     {MCP_CLIENTS.map((client) => {
                       const active = selectedClient === client.id;
@@ -142,7 +131,6 @@ export function McpServerPage() {
                           onClick={() => setSelectedClient(client.id)}
                           className={`mcp-client-button${active ? " is-active" : ""}`}
                         >
-                          <ClientGlyph glyph={client.glyph} />
                           {client.label}
                         </button>
                       );
@@ -155,10 +143,10 @@ export function McpServerPage() {
                 
                 <div className="mcp-step-content">
                   <div className="mcp-auth-options" aria-label="Connection method">
-                    <button aria-pressed={mode === "oauth"} onClick={() => setMode("oauth")}><strong>Sign in with OAuth</strong><span>Recommended - approve in your browser</span></button>
+                    <button aria-pressed={mode === "oauth"} onClick={() => setMode("oauth")}><strong>Sign in with OAuth</strong><span>Recommended</span></button>
                     <button aria-pressed={mode === "key"} onClick={() => setMode("key")}><strong>Use an API key</strong><span>For scripts and CLI tools</span></button>
                   </div>
-                  <p className="mcp-step-copy">{mode === "oauth" ? "Add this setup to your client, then sign in and approve access in your browser. In Claude Desktop or claude.ai, add the URL as a custom connector." : <>Create a key in <a href="/settings#connected-clients">Settings &gt; Connected clients</a>, then replace <code>{MCP_TOKEN_PLACEHOLDER}</code>. Keep your key private.</>}</p>
+                  <p className="mcp-step-copy">{mode === "oauth" ? "Add this to your client, then approve access in your browser. In Claude Desktop or claude.ai, add the address as a custom connector." : <>Create a key in <a href="/settings#connected-clients">Settings › Connected clients</a>, then replace <code>{MCP_TOKEN_PLACEHOLDER}</code>.</>}</p>
                   <div className="mcp-code-wrap">
                     <pre><code>{snippet}</code></pre>
                     <CopyButton target="snippet" value={snippet} copied={copied} onCopy={copy} />
@@ -174,9 +162,9 @@ export function McpServerPage() {
                   
                   <h2 id="mcp-tools-heading">Tools</h2>
                 </div>
-                <span className="mcp-tool-count mono">{MCP_TOOL_CATALOG.length + MCP_WRITE_TOOL_CATALOG.length}</span>
+                <span className="mcp-tool-count" aria-label={`${MCP_TOOL_CATALOG.length + MCP_WRITE_TOOL_CATALOG.length} tools`}>{MCP_TOOL_CATALOG.length + MCP_WRITE_TOOL_CATALOG.length}</span>
               </div>
-              <p className="mcp-tools-intro">Search uses meaning when AI is on and keywords otherwise. Write tools need your permission.</p>
+              <p className="mcp-tools-intro">Search matches by meaning when AI is on, by keyword otherwise.</p>
               <div className="mcp-tool-list">
                 {[...MCP_TOOL_CATALOG, ...MCP_WRITE_TOOL_CATALOG].map((tool) => (
                   <div className="mcp-tool-row" key={tool.name}>

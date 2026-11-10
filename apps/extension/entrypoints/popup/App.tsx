@@ -273,7 +273,7 @@ export default function App() {
             setStats(null);
             const state = connectionFromStatus(configResponse.status);
             setConnectionState(state.kind === "unauthorized"
-              ? { ...state, message: "Credential mismatch — check INGEST_TOKEN or ANANSI_SECRET on your Worker" }
+              ? { ...state, message: "Key rejected — check INGEST_TOKEN or ANANSI_SECRET on the server" }
               : state);
           }
           return;
@@ -362,23 +362,23 @@ export default function App() {
         signal: AbortSignal.timeout(10_000),
       });
       if (res.status === 401 || res.status === 403) {
-        setConnectError("That code or key isn't valid. It may have expired, been used or been revoked. In Anansi, go to Settings and press Connect extension for a new code.");
+        setConnectError("That code or key was rejected. It may have expired, been used or been revoked. Get a new code in Anansi under Settings › Connect extension.");
         setIsConnecting(false);
         return;
       }
       if (res.status === 404) {
-        setConnectError("Worker endpoint not found. Make sure this is an Anansi deployment.");
+        setConnectError("No Anansi library at this address");
         setIsConnecting(false);
         return;
       }
       if (!res.ok) {
-        setConnectError(`Worker returned HTTP ${res.status}.`);
+        setConnectError(`Server returned HTTP ${res.status}`);
         setIsConnecting(false);
         return;
       }
       const data = await res.json();
       if (!validatePopupRemoteConfig(data)) {
-        setConnectError("Incompatible server version. Update or redeploy Anansi.");
+        setConnectError("Incompatible server. Update or redeploy Anansi");
         return;
       }
       await browser.storage.local.set({
@@ -394,7 +394,7 @@ export default function App() {
           setConnectionState(CONNECTED_CONNECTION);
           setShowSettings(true);
           setLegacyQueueNeedsDecision(true);
-          setConnectError(updated.error ?? "Pending captures need an explicit destination.");
+          setConnectError(updated.error ?? "Choose where pending captures go");
           connectionSucceeded = true;
           return;
         }
@@ -402,7 +402,7 @@ export default function App() {
         else await clearExtensionConnection();
         await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
         await command({ action: "connection-updated" });
-        setConnectError(updated?.error ?? "Could not update the connection. Retry after checking the extension.");
+        setConnectError(updated?.error ?? "Could not update the connection. Try again");
         return;
       }
       setConnection(validated);
@@ -413,7 +413,7 @@ export default function App() {
       refresh();
       connectionSucceeded = true;
     } catch (err) {
-      setConnectError((err as Error).message || "Could not connect to Worker.");
+      setConnectError((err as Error).message || "Could not reach the library");
     } finally {
       if (!connectionSucceeded) {
         await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
@@ -562,7 +562,7 @@ export default function App() {
    */
   const running = rows.filter((s) => viewOf(s).state === "running").length;
   const summary =
-    running > 0 ? `${running} running` : outbox.total > 0 ? `${outbox.total} in the outbox` : "nothing waiting";
+    running > 0 ? `${running} importing` : outbox.total > 0 ? "" : "Nothing waiting";
 
   // Whatever last went wrong, with anything credential-shaped removed.
   const diagnostics = [
@@ -664,10 +664,7 @@ export default function App() {
         >
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-              {connection ? "Connection Settings" : "Connect to Anansi"}
-            </div>
-            <div style={{ fontSize: 12, color: S.muted, lineHeight: 1.4 }}>
-              Enter your library address and the one-time connection code from Settings.
+              {connection ? "Connection" : "Connect to Anansi"}
             </div>
           </div>
 
@@ -773,7 +770,7 @@ export default function App() {
           </div>
           {connection && (
             <div style={{ fontSize: 12, color: S.muted, lineHeight: 1.4 }}>
-              Disconnect keeps pending captures on this device and pauses delivery until you reconnect.
+              Pending captures stay on this device until you reconnect.
             </div>
           )}
         </form>
@@ -810,12 +807,11 @@ export default function App() {
           <span
             style={{
               marginLeft: "auto",
-              fontFamily: S.mono,
               fontSize: 12,
-              color: connectionState.kind === "loading" ? S.faint : S.warn,
+              color: connectionState.kind === "loading" ? S.muted : S.warn,
             }}
           >
-            {connectionState.message.toLowerCase()}
+            {connectionState.message}
           </span>
         )}
       </div>
@@ -832,10 +828,9 @@ export default function App() {
             gap: 8,
             color: TONES[outbox.tone],
             fontSize: 12,
-            fontFamily: S.mono,
           }}
         >
-          <span>outbox · {outbox.text}</span>
+          <span>Outbox · {outbox.text}</span>
           {outbox.canRetry && (
             <button
               type="button"
@@ -1106,7 +1101,7 @@ export default function App() {
                   ? result.delivery === "uploaded"
                     ? "saved"
                     : "Saved on this device; waiting to upload"
-                  : (result?.error ?? "could not save that page"),
+                  : (result?.error ?? "Could not save this page"),
               );
               setTimeout(() => setSaving(null), 4000);
               refresh();
@@ -1188,8 +1183,8 @@ export default function App() {
                 (mirroring === null
                   ? "Checking…"
                   : mirroring
-                    ? "Mirroring — new bookmarks arrive as you make them"
-                    : "Off. Turning it on asks Chrome for access")}
+                    ? "On · new bookmarks arrive as you make them"
+                    : "Off · asks Chrome for access")}
             </span>
           </span>
           <button
@@ -1243,7 +1238,7 @@ export default function App() {
           <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
             <span style={{ fontSize: 12.5, fontWeight: 600 }}>Save confirmations</span>
             <span style={{ fontSize: 12, color: S.muted }}>
-              {saveConfirmations ? "Shown beside the button" : "Off. Problems are still shown"}
+              {saveConfirmations ? "Shown beside the button" : "Off · errors still show"}
             </span>
           </span>
           <button
@@ -1335,7 +1330,7 @@ export default function App() {
           borderTop: `1px solid ${S.line}`,
         }}
       >
-        <span className="mono" style={{ fontSize: 12, color: S.faintest, fontFamily: S.mono }}>
+        <span style={{ fontSize: 12, color: S.muted }}>
           {summary}
         </span>
         <button
@@ -1361,7 +1356,7 @@ export default function App() {
 
       {diagnostics.length > 0 && (
         <details className="anansi-diagnostics" style={{ borderTop: `1px solid ${S.line}`, padding: "9px 16px 12px" }}>
-          <summary style={{ fontSize: 12, color: S.faint, fontFamily: S.mono }}>Details</summary>
+          <summary style={{ fontSize: 12, color: S.muted }}>Details</summary>
           <div
             style={{
               marginTop: 7,

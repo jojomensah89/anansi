@@ -9,10 +9,10 @@ test("web fallback has domain and title without invented media",()=>{const s=ren
 test("row renders readable title and domain",()=>{const s=renderToStaticMarkup(createElement(WebPreviewCard,{item,compact:true}));expect(s).toContain("example.com");expect(s).toContain("A useful page");});
 
 
-test("grid and row web footers retain organization, saved date and globe",()=>{
+test("grid and row web footers render supplied footer once",()=>{
  for(const compact of [false,true]) {
  const s=renderToStaticMarkup(createElement(WebPreviewCard,{item:{...item,savedAt:1794000000},compact,footer:createElement("span",null,"+ Add tags")}));
- expect(s).toContain("data-web-footer");expect(s).toContain("Add tags");expect(s).toContain("Nov");expect(s).toContain("<svg");
+ expect(s).toContain("data-web-footer");expect(s).toContain("Add tags");expect(s.split("Add tags")).toHaveLength(2);expect(s).not.toContain("aria-label=\"Web\"");
  }
 });
 

@@ -1,3 +1,5 @@
+import { Input } from "@anansi/ui/components/input";
+import { Button } from "@anansi/ui/components/button";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
 
@@ -55,7 +57,7 @@ export function SelectBar({
   };
 
   return (
-    <div
+    <div className="workspace-bulk"
       style={{
         position: "fixed",
         left: "50%",
@@ -65,13 +67,13 @@ export function SelectBar({
         display: "flex",
         flexDirection: "column",
         gap: 8,
-        animation: "rise 140ms ease-out both",
+        animation: "rise 140ms var(--ease-ui) both",
       }}
     >
       {tagging && (
         <div
           style={{
-            background: "#10151a",
+            background: "var(--card)",
             border: "1px solid var(--edge-strong)",
             borderRadius: 8,
             padding: 12,
@@ -81,7 +83,7 @@ export function SelectBar({
             gap: 9,
           }}
         >
-          <input
+          <Input
             ref={input}
             value={label}
             onChange={(e) => setLabel(e.target.value)}
@@ -98,36 +100,32 @@ export function SelectBar({
               border: "1px solid var(--edge)",
               borderRadius: 5,
               color: "var(--text)",
-              fontSize: 12.5,
-              fontFamily: "var(--mono)",
+              fontSize: "var(--text-body)",
               outline: "none",
             }}
           />
           {tags.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxWidth: 300 }}>
               {tags.map((t) => (
-                <button
+                <Button variant="ghost"
                   key={t.label}
                   type="button"
                   onClick={() => applyTag(t.label)}
-                  className="mono"
                   style={{
                     display: "flex",
                     gap: 6,
-                    fontSize: 10.5,
+                    fontSize: "var(--text-body)",
                     padding: "4px 8px",
                     borderRadius: 4,
                     background: "transparent",
                     border: "1px solid var(--line)",
                     color: "var(--muted)",
                     cursor: "pointer",
-                    fontFamily: "var(--mono)",
                   }}
                 >
-					<span style={{ width: 7, height: 7, borderRadius: "50%", background: t.color || "#6b7280" }} />
                   {t.label}
-                  <span style={{ color: "var(--fainter)" }}>{t.count}</span>
-                </button>
+                  <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{t.count}</span>
+                </Button>
               ))}
             </div>
           )}
@@ -141,22 +139,22 @@ export function SelectBar({
           gap: 10,
           padding: "11px 14px",
           borderRadius: 8,
-          background: "#10151a",
+          background: "var(--card)",
           border: "1px solid var(--edge-strong)",
           boxShadow: "0 18px 44px -14px #000000cc",
         }}
       >
-        <span className="mono" style={{ fontSize: 12, color: "var(--accent)" }}>
+        <span role="status" style={{ fontSize: "var(--text-body)", color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
           {ids.length} selected
         </span>
-        <button
+        <Button variant="ghost"
           type="button"
           onClick={onSelectAll}
-          className="mono"
-          style={{ fontSize: 11, color: "var(--faint)", background: "none", border: "none", cursor: "pointer", fontFamily: "var(--mono)" }}
+          aria-label={`Select all ${loaded} loaded items`}
+          style={{ fontSize: "var(--text-body)", color: "var(--muted)", background: "none", border: "none", cursor: "pointer" }}
         >
-          select all {loaded} loaded
-        </button>
+          Select all {loaded}
+        </Button>
 
         <div style={{ display: "flex", gap: 7, marginLeft: 14 }}>
           <Action label="Tag" onClick={() => setTagging((t) => !t)} busy={busy} />
@@ -181,24 +179,23 @@ export function SelectBar({
             }}
             busy={busy}
           />
-          <button
+          <Button variant="ghost"
             type="button"
             onClick={onClear}
-            className="mono"
+            aria-keyshortcuts="Escape"
             style={{
               height: 30,
               padding: "0 10px",
               borderRadius: 5,
               border: "1px solid var(--line)",
               background: "transparent",
-              color: "var(--faint)",
-              fontSize: 11,
+              color: "var(--muted)",
+              fontSize: "var(--text-body)",
               cursor: "pointer",
-              fontFamily: "var(--mono)",
             }}
           >
-            esc
-          </button>
+            Clear
+          </Button>
         </div>
       </div>
     </div>
@@ -207,7 +204,7 @@ export function SelectBar({
 
 function Action({ label, onClick, busy }: { label: string; onClick: () => void; busy: boolean }) {
   return (
-    <button
+    <Button variant="ghost"
       type="button"
       onClick={onClick}
       disabled={busy}
@@ -220,12 +217,12 @@ function Action({ label, onClick, busy }: { label: string; onClick: () => void; 
         border: "1px solid var(--edge)",
         background: "var(--card)",
         color: busy ? "var(--faint)" : "var(--text-dim)",
-        fontSize: 12.5,
+        fontSize: "var(--text-body)",
         cursor: busy ? "wait" : "pointer",
         font: "inherit",
       }}
     >
       {label}
-    </button>
+    </Button>
   );
 }

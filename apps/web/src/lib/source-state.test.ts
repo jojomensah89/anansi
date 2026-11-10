@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionHealth, SourceRow } from "./api.ts";
-import { extensionLabel, sourcePresentation } from "./source-state.ts";
+import { extensionLabel, extensionStatus, sourcePresentation } from "./source-state.ts";
 
 const extension = (
 	connection: ExtensionHealth["connection"] = "connected",
@@ -135,7 +135,7 @@ describe("sourcePresentation", () => {
 
 	test("TikTok ready state points to the extension import", () => {
 		expect(sourcePresentation(row({ source: "tiktok", name: "TikTok favorites" }), extension())).toEqual({
-			state: "ready", text: "Ready to import through the extension", tone: "ok",
+			state: "ready", text: "Ready to import", tone: "ok",
 		});
 	});
 
@@ -144,5 +144,19 @@ describe("sourcePresentation", () => {
 		expect(extensionLabel(extension("never_connected"))).toBe(
 			"Extension never connected",
 		);
+	});
+});
+
+describe("extension status dot", () => {
+	test("one meaning per state: online green, syncing accent, lost amber, never grey", () => {
+		expect(extensionStatus(extension())).toMatchObject({ state: "online", tone: "ok", label: "Extension online" });
+		expect(extensionStatus(extension(), true)).toMatchObject({ state: "syncing", tone: "accent" });
+		const running = { ...extension(), sources: { x: { phase: "running", queued: 0, uploading: 0, retrying: 0, failed: 0 } } } as ExtensionHealth;
+		expect(extensionStatus(running).state).toBe("syncing");
+		expect(extensionStatus(extension("disconnected"))).toMatchObject({ state: "offline", tone: "warn", label: "Extension offline" });
+		expect(extensionStatus(extension("never_connected"))).toMatchObject({ state: "never", tone: "muted" });
+		// A lost connection never reads as syncing, even with a stale running phase.
+		expect(extensionStatus({ ...running, connection: "disconnected" }).state).toBe("offline");
+		expect(extensionStatus(null)).toMatchObject({ state: "unknown", tone: "muted" });
 	});
 });

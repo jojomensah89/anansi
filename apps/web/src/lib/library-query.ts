@@ -10,9 +10,27 @@ export interface LibraryPageRequest {
 
 export type LibraryPageLoader = (request: LibraryPageRequest) => Promise<Page>;
 
-/** Poll active library data only while this browser tab is visible. */
-export function libraryPollInterval(visibilityState: DocumentVisibilityState | undefined) {
-  return visibilityState === "visible" ? 2_000 : false;
+/**
+ * How often to check for new saves, only while this tab is visible.
+ *
+ * Saves arrive in bursts: right after a sync is asked for, the extension is
+ * importing and the grid should fill in as it goes. The rest of the time
+ * nothing changes on its own, and a focus refetch covers coming back to the
+ * tab, so a slow check is enough.
+ */
+const FAST_POLL_MS = 3_000;
+const IDLE_POLL_MS = 60_000;
+const SYNC_WINDOW_MS = 2 * 60_000;
+let fastUntil = 0;
+
+/** Check for new saves quickly for a while, because a sync was just requested. */
+export function expectIncomingSaves(now = Date.now()) {
+  fastUntil = now + SYNC_WINDOW_MS;
+}
+
+export function libraryPollInterval(visibilityState: DocumentVisibilityState | undefined, now = Date.now()) {
+  if (visibilityState !== "visible") return false;
+  return now < fastUntil ? FAST_POLL_MS : IDLE_POLL_MS;
 }
 
 export const libraryFreshnessOptions = {
