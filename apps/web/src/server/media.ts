@@ -1,4 +1,4 @@
-import type { FetchBudget } from "./fetch-budget.ts";
+import { FetchBudget } from "./fetch-budget.ts";
 import { sql } from "drizzle-orm";
 import { join } from "node:path";
 import { claimMediaJobs, completeMediaJob, failMediaJob } from "@anansi/db";
@@ -188,15 +188,7 @@ export async function fetchPendingMedia(db: AnansiDb, source: MediaSource, limit
       const {bytes,contentType}=await fetchThumbnail(variant(row.originUrl),source.runtime ?? (source.bucket ? "worker":"local"), row.kind === "card" || row.kind === "favicon", budget);
       const flat=row.id.replace(/-/g,"");
       const key=`${flat.slice(0,2)}/${flat.slice(2,4)}/${flat}-${row.token.replace(/-/g, "")}.${TYPES[contentType]}`;
-      if (source.put) await source.put(key,bytes,contentType);
-      else if (source.bucket?.put) await source.bucket.put(key,bytes,{httpMetadata:{contentType}});
-      else if (source.dir) {
-        const {mkdir}=await import("node:fs/promises");
-        const {dirname}=await import("node:path");
-        const path=join(source.dir,key);
-        await mkdir(dirname(path),{recursive:true});
-        await Bun.write(path,bytes);
-      }
+      await storeImage(source,key,bytes,contentType);
       await completeMediaJob(db,row.id,row.token,key);
       stored++;
     } catch (error) {
@@ -237,4 +229,108 @@ export async function cleanupOrphanedMedia(db: AnansiDb, source: MediaSource, li
     await db.run(sql`DELETE FROM media_orphan_objects WHERE stored_key = ${key}`);
   }
   return removed;
+}
+
+async function storeImage(source: MediaSource, key: string, bytes: ArrayBuffer, contentType: string) {
+  if (source.put) await source.put(key,bytes,contentType);
+  else if (source.bucket?.put) await source.bucket.put(key,bytes,{httpMetadata:{contentType}});
+  else if (source.dir) {
+    const {mkdir}=await import("node:fs/promises");
+    const {dirname}=await import("node:path");
+    const path=join(source.dir,key);
+    await mkdir(dirname(path),{recursive:true});
+    await Bun.write(path,bytes);
+  }
+}
+
+/**
+ * The avatar URLs the library actually shows: each author's latest one (see
+ * authorAvatarProjection) plus the own avatar of saves without a handle. An
+ * author's superseded pictures are neither fetched nor kept.
+ */
+const shownAvatarUrls = sql`
+  SELECT (SELECT l.author_avatar FROM items l
+          WHERE l.source = h.source AND l.author_handle = h.author_handle
+            AND l.author_avatar IS NOT NULL AND l.author_avatar <> ''
+          ORDER BY l.saved_at DESC, l.id DESC LIMIT 1) AS url
+  FROM (SELECT DISTINCT source, author_handle FROM items
+        WHERE author_handle IS NOT NULL AND author_handle <> ''
+          AND author_avatar IS NOT NULL AND author_avatar <> '') h
+  UNION
+  SELECT author_avatar FROM items
+  WHERE (author_handle IS NULL OR author_handle = '')
+    AND author_avatar IS NOT NULL AND author_avatar <> ''`;
+
+/** Bounded cache GC. Keep the row on failed deletion so the next pass retries. */
+export async function cleanupOrphanedAvatars(db: AnansiDb, source: MediaSource, limit = 4): Promise<number> {
+  const count = Math.min(4, Math.max(0, Math.floor(limit)));
+  const now = Math.floor(Date.now() / 1000);
+  const rows = await db.all<{ origin_url: string; stored_key: string | null }>(sql`
+    SELECT origin_url, stored_key FROM author_avatars a
+    WHERE origin_url NOT IN (${shownAvatarUrls})
+      AND (claim_token IS NULL OR next_run_at <= ${now})
+    ORDER BY origin_url LIMIT ${count}`);
+  let removed = 0;
+  for (const row of rows) {
+    const key = row.stored_key;
+    if (key) {
+      const refs = await db.all(sql`SELECT origin_url FROM author_avatars
+        WHERE stored_key = ${key} AND origin_url <> ${row.origin_url} LIMIT 1`);
+      const mediaRefs = await db.all(sql`SELECT id FROM media WHERE stored_key = ${key} LIMIT 1`);
+      if (!refs.length && !mediaRefs.length) {
+        if (!/^[a-f0-9]{2}\/[a-f0-9]{2}\/[a-f0-9]{64}\.(?:webp|jpg|jpeg|png|gif|avif|ico)$/.test(key)) continue;
+        if (!source.bucket?.delete && !source.dir) continue;
+        try {
+          if (source.bucket?.delete) await source.bucket.delete(key);
+          else if (source.dir) {
+            const { unlink } = await import("node:fs/promises");
+            await unlink(join(source.dir, key)).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== "ENOENT") throw error;
+            });
+          }
+        } catch { continue; }
+      }
+    }
+    await db.run(sql`DELETE FROM author_avatars WHERE origin_url = ${row.origin_url}
+      AND origin_url NOT IN (${shownAvatarUrls})`);
+    removed++;
+  }
+  return removed;
+}
+
+/** A URL is claimed once across items/authors and concurrent passes. Cache is rebuildable. */
+export async function fetchPendingAvatars(db: AnansiDb, source: MediaSource, limit=2, budget=new FetchBudget()) {
+  const result={stored:0,failed:0};
+  await cleanupOrphanedAvatars(db, source);
+  if (!source.put && !source.bucket?.put && !source.dir) return result;
+  if (!budget.canStart()) return result;
+  const count=Math.min(4,Math.max(0,Math.floor(limit)));
+  await db.run(sql`INSERT OR IGNORE INTO author_avatars(origin_url)
+    SELECT url FROM (${shownAvatarUrls}) WHERE url IS NOT NULL
+    AND url NOT IN (SELECT origin_url FROM author_avatars)
+    LIMIT ${count}`);
+  const now=Math.floor(Date.now()/1000);
+  const rows=await db.all<{origin_url:string;attempts:number}>(sql`SELECT origin_url,attempts FROM author_avatars
+    WHERE stored_key IS NULL AND attempts<3 AND next_run_at<=${now} ORDER BY next_run_at,origin_url LIMIT ${count}`);
+  for (const row of rows) {
+    if (!budget.canStart()) break;
+    const token=crypto.randomUUID();
+    const claimed=await db.all(sql`UPDATE author_avatars SET claim_token=${token},attempts=attempts+1,next_run_at=${now+120}
+      WHERE origin_url=${row.origin_url} AND stored_key IS NULL AND attempts=${row.attempts} AND next_run_at<=${now} RETURNING origin_url`);
+    if (!claimed.length) continue;
+    try {
+      const {bytes,contentType}=await fetchThumbnail(row.origin_url,source.runtime ?? (source.bucket ? "worker":"local"),false,budget);
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)), b=>b.toString(16).padStart(2,"0")).join("");
+      const key=`${hash.slice(0,2)}/${hash.slice(2,4)}/${hash}.${TYPES[contentType]}`;
+      // Content-addressing also deduplicates different signed URLs for the same image.
+      const existing=await db.all(sql`SELECT origin_url FROM author_avatars WHERE stored_key=${key} LIMIT 1`);
+      if (!existing.length) await storeImage(source,key,bytes,contentType);
+      await db.run(sql`UPDATE author_avatars SET stored_key=${key},claim_token=NULL WHERE origin_url=${row.origin_url} AND claim_token=${token}`);
+      result.stored++;
+    } catch {
+      await db.run(sql`UPDATE author_avatars SET claim_token=NULL,next_run_at=${now+300*2**row.attempts} WHERE origin_url=${row.origin_url} AND claim_token=${token}`);
+      result.failed++;
+    }
+  }
+  return result;
 }

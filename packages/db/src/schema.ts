@@ -89,6 +89,7 @@ export const items = sqliteTable(
     index("items_posted").on(t.postedAt),
     index("items_archived").on(t.archivedAt),
     index("items_author").on(t.authorHandle),
+    index("items_author_avatar_latest").on(t.source, t.authorHandle, t.savedAt, t.id).where(sql`author_avatar IS NOT NULL AND author_avatar <> ''`),
     index("items_nsfw").on(t.nsfw),
   ],
 );
@@ -412,3 +413,12 @@ export const oauthTokens = sqliteTable("oauth_tokens", {
 export const clientSecurity = sqliteTable("client_security", {
  id: integer("id").primaryKey(), retiredAt: integer("retired_at"),
 });
+
+/** Rebuildable avatar cache; exports retain original URLs and can refill it. */
+export const authorAvatars = sqliteTable("author_avatars", {
+  originUrl: text("origin_url").primaryKey(),
+  storedKey: text("stored_key"),
+  attempts: integer("attempts").notNull().default(0),
+  nextRunAt: integer("next_run_at").notNull().default(0),
+  claimToken: text("claim_token"),
+}, (table) => [index("author_avatars_pending").on(table.storedKey, table.nextRunAt)]);

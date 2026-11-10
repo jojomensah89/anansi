@@ -37,7 +37,7 @@ import {
 	type ExtensionPlatformSource,
 	type ExtensionSourceConfig,
 } from "@anansi/sources";
-import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
+import { fetchPendingAvatars, fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import type { AiBinding, VectorizeBinding } from "./ai.ts";
 import { createVectorIndex } from "./ai.ts";
 import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
@@ -133,6 +133,13 @@ const itemsRoute: Route = {
 	method: "GET",
 	path: "/api/items",
 	handle: async ({ env, q }) => {
+    // First page only: scrolling must not repeat the background avatar pass.
+    if (env.media && !q.get("cursor")) {
+      const work = fetchPendingAvatars(env.db, env.media);
+      // Never hold the page for avatar downloads.
+      const quiet = work.catch(() => {});
+      if (env.waitUntil) env.waitUntil(quiet); else void quiet;
+    }
 		try {
 			return json(
 				await previewState(env.db, await listItems(env.db, {
@@ -337,6 +344,13 @@ const creatorsRoute: Route = {
 	method: "GET",
 	path: "/api/creators",
 	handle: async ({ env, q }) => {
+    // First page only: scrolling must not repeat the background avatar pass.
+    if (env.media && !q.get("cursor")) {
+      const work = fetchPendingAvatars(env.db, env.media);
+      // Never hold the page for avatar downloads.
+      const quiet = work.catch(() => {});
+      if (env.waitUntil) env.waitUntil(quiet); else void quiet;
+    }
 		try {
 			return json(await creatorPage(env.db, {
 				query: q.get("q") ?? "",

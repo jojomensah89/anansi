@@ -1,3 +1,4 @@
+import { authorAvatarProjection } from "./author-avatar.ts";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { highlights, itemTagOverrides, itemTags, items, media, sourceSettings, tags } from "./schema.ts";
 import type { AnansiDb, NewDbItem } from "./types.ts";
@@ -370,7 +371,7 @@ export async function creatorPage(db: AnansiDb, options: CreatorPageOptions = {}
 			select source,
 			       author_handle as authorHandle,
 			       max(author_name) as authorName,
-			       max(author_avatar) as authorAvatar,
+			       ${authorAvatarProjection(sql`items`)} as authorAvatar,
 			       count(*) as saves,
 			       max(posted_at) as lastPosted
 			from items

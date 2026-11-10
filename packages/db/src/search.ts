@@ -1,3 +1,4 @@
+import { authorAvatarProjection } from "./author-avatar.ts";
 import { sql, type SQL } from "drizzle-orm";
 import type { AnansiDb } from "./types.ts";
 import { visibleSourceClause } from "./visibility.ts";
@@ -146,7 +147,7 @@ function hasNsfwColumn(db: AnansiDb): boolean {
 function cardProjection(hasNsfw = true): SQL {
 	return sql`
       i.id, i.url, i.author_handle as author, i.author_name as authorName,
-      i.author_avatar as authorAvatar, i.title, i.posted_at as postedAt,
+      ${authorAvatarProjection(sql`i`)} as authorAvatar, i.title, i.posted_at as postedAt,
       i.saved_at as savedAt, i.saved_at_exact as savedAtExact, i.source,
       i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
       i.favorite, ${hasNsfw ? sql`i.nsfw` : sql`0 as nsfw`}, i.metrics as metricsJson,
@@ -606,7 +607,7 @@ export async function getItems(
 
   const rows = await db.all<DetailRow>(sql`
     select id, url, source, author_handle as author, author_name as authorName,
-           author_avatar as authorAvatar, platform_saved as platformSaved,
+           ${authorAvatarProjection(sql`items`)} as authorAvatar, platform_saved as platformSaved,
            removed_from_source_at as removedFromSourceAt, title, body,
            posted_at as postedAt, saved_at as savedAt, saved_at_exact as savedAtExact,
            metrics, raw, article_text as articleText, article_format as articleFormat,

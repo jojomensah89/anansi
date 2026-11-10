@@ -1,5 +1,5 @@
 import { FetchBudget } from "./fetch-budget.ts";
-import { fetchPendingMedia, type MediaSource } from "./media.ts";
+import { fetchPendingAvatars, fetchPendingMedia, type MediaSource } from "./media.ts";
 import { parsePreview } from "@anansi/sources/link-preview";
 import { isFetchableMediaUrl } from "./media.ts";
 import { publicFetch } from "./public-fetch.ts";
@@ -63,6 +63,7 @@ export async function processLinkPreviews(db: AnansiDb, runtime: "local" | "work
 /** One budget covers pages, DNS and all resulting media hops. */
 export async function runPreviewPass(db: AnansiDb, source: MediaSource, ids?: string[]) {
   const budget = new FetchBudget();
+  await fetchPendingAvatars(db, source, 2, budget);
   // Interleave one page with its media rather than starving covers behind the backlog.
   while (budget.canStart()) {
     const before = budget.used;
