@@ -113,15 +113,41 @@ test("turning search by meaning off asks first and saves nothing until confirmed
 	expect(searchSwitch().getAttribute("aria-checked")).toBe("false");
 });
 
-test("a cap too small for the estimate is reported as an error inside the dialog", async () => {
+test("flipping the switch on enables immediately and keeps the estimate as quiet info", async () => {
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		const url = String(input);
+		calls.push({ url, method: init?.method ?? "GET", body: init?.body as string | undefined });
+		if (url === "/api/ai/semantic-preview") return Response.json(preview(300));
+		if (url === "/api/ai" && init?.method === "PATCH") return Response.json(settings());
+		return Response.json(settings());
+	}) as typeof fetch;
 	await act(async () => root.render(createElement(Harness, { initial: settings({ semanticSearchEnabled: 0 }) })));
 	await act(async () => flip());
 	await settle();
-	expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Turn on search by meaning?");
-	await act(async () => byText("Start indexing")!.click());
+	expect(document.querySelector('[role="dialog"], [role="alertdialog"]')).toBeNull();
+	expect(calls.find((c) => c.method === "PATCH")?.body).toBe('{"semanticSearchEnabled":true,"semanticBudgetLimit":1000,"confirmSemanticBackfill":true}');
+	expect(searchSwitch().getAttribute("aria-checked")).toBe("true");
+	expect(document.body.textContent).toContain("10 saves · about 300 credits to index · cap 1,000");
+	expect(document.body.textContent).toContain("5 indexed · 5 pending · 10 total");
+});
+
+test("an estimate above the remaining cap asks in a dialog and saves nothing until the cap is raised", async () => {
+	await act(async () => root.render(createElement(Harness, { initial: settings({ semanticSearchEnabled: 0 }) })));
+	await act(async () => flip());
 	await settle();
-	const alert = document.querySelector('[role="dialog"] [role="alert"]');
-	expect(alert?.textContent).toBe("Indexing needs 900 credits but only 600 are left this month. Raise the cap or wait for the reset");
-	expect(alert?.getAttribute("data-tone")).toBe("danger");
+	const dialog = document.querySelector('[role="alertdialog"]');
+	expect(dialog?.textContent).toContain("The cap is too low to index everything");
+	expect(dialog?.textContent).toContain("Raise the cap to 1,300");
 	expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
+	expect(searchSwitch().getAttribute("aria-checked")).toBe("false");
+
+	await act(async () => byText("Cancel")!.click());
+	await settle();
+	expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
+
+	await act(async () => flip());
+	await settle();
+	await act(async () => byText("Raise cap")!.click());
+	await settle();
+	expect(calls.find((c) => c.method === "PATCH")?.body).toBe('{"semanticSearchEnabled":true,"semanticBudgetLimit":1300,"confirmSemanticBackfill":true}');
 });

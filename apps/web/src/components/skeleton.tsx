@@ -87,44 +87,23 @@ export function Loading({ label, children }: { label: string; children: React.Re
   );
 }
 
-/** A neutral page shape used while a route component is still loading. */
-export function PageSkeleton() {
-  return (
-    <Loading label="Loading page">
-      <main style={{ minHeight: "100%", padding: "32px 22px" }}>
-        <div style={{ width: "min(100%, 860px)", margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
-          <Bone width={160} height={15} />
-          <Bone width="38%" height={8} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 10 }}>
-            {[0, 1, 2].map((index) => (
-              <div key={index} style={{ display: "flex", flexDirection: "column", gap: 9, padding: 14, border: "1px solid var(--line)", borderRadius: 8, background: "var(--card)" }}>
-                <Bone width="48%" height={10} delay={index * 60} />
-                <Bone width="82%" height={8} delay={index * 60 + 40} />
-                <Bone height={74} radius={5} delay={index * 60 + 80} />
-              </div>
-            ))}
-          </div>
-        </div>
-      </main>
-    </Loading>
-  );
-}
-
-/** Settings rows: a title and description on the left, a switch on the right. */
-export function SettingsSkeleton() {
-  return (
-    <Loading label="Loading settings">
-      {[0, 1].map((index) => (
-        <div key={index} className="settings-row">
-          <span className="settings-row-copy" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Bone width="36%" height={12} delay={index * 70} />
-            <Bone width="58%" height={10} delay={index * 70 + 40} />
-          </span>
-          <span className="settings-row-control"><Bone width={32} height={18} radius={9} delay={index * 70 + 80} /></span>
-        </div>
-      ))}
-    </Loading>
-  );
+/**
+ * The one loading state of a settings section: a single row where the rows will
+ * be. The page shell and section titles are already on screen, so nothing else
+ * about the page waits.
+ */
+export function SettingsSkeleton({ label = "Loading settings" }: { label?: string }) {
+	return (
+		<Loading label={label}>
+			<div className="settings-row">
+				<span className="settings-row-copy" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+					<Bone width="36%" height={14} />
+					<Bone width="58%" height={14} delay={40} />
+				</span>
+				<span className="settings-row-control"><Bone width={32} height={18} radius={9} delay={80} /></span>
+			</div>
+		</Loading>
+	);
 }
 
 /** Compact rows for a Saved Views panel that has not returned yet. */

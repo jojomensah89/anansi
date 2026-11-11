@@ -8,6 +8,7 @@ import { api } from "../lib/api.ts";
 import { requestExtensionSync } from "../lib/extension-bridge.ts";
 import { expectIncomingSaves, libraryKeys } from "../lib/library-query.ts";
 import { checkedLabel, SettingsRow } from "./settings-panel.tsx";
+import { SettingsSkeleton } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 
 type SyncConfig = {
@@ -80,8 +81,7 @@ export function SyncSettings() {
 			setMessage({ text: "Couldn't save sync settings", error: true });
 		}
 	}
-	if (config.isPending)
-		return <SettingsRow title="Sync" description={<span role="status">Loading</span>} />;
+	if (config.isPending) return <SettingsSkeleton label="Loading sync settings" />;
 	if (config.isError || !config.data)
 		return (
 			<SettingsRow

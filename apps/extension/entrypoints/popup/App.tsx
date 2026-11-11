@@ -2,7 +2,7 @@ import { TIKTOK_SYNC_SETTING } from "../../lib/library-sync.ts";
 import { retireOwnConnection } from "../../lib/library-connect.ts";
 import { SAVE_CONFIRMATION_SETTING } from "../../lib/save-toast.ts";
 import { parseExtensionConfig, type ExtensionRemoteConfig } from "@anansi/sources";
-import { createPersistedConfigCache } from "../../lib/config-cache.ts";
+import { createPersistedConfigCache, normalizeServerOrigin } from "../../lib/config-cache.ts";
 import { SourceMark } from "@anansi/ui/components/source-mark";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { requireOriginPermission } from "../../lib/connection-lifecycle.ts";
@@ -34,7 +34,7 @@ import {
   withoutStartingSource,
   initialImportSummary,
 } from "../../lib/popup-state.ts";
-import { sourceRowView, type SourceRowView } from "../../lib/popup-view.ts";
+import { IMPORT_ALL, permissionPromptLine, sourceRowView, type SourceRowView } from "../../lib/popup-view.ts";
 import type { Status } from "../background.ts";
 import { Icon } from "./icons.tsx";
 import "./App.css";
@@ -193,6 +193,8 @@ export default function App() {
   const [startingSources, setStartingSources] = useState<Set<string>>(() => new Set());
   const [pausingSources, setPausingSources] = useState<Set<string>>(() => new Set());
   const [isRetrying, setIsRetrying] = useState(false);
+  const [importingAll, setImportingAll] = useState(false);
+  const [importAllError, setImportAllError] = useState<string | null>(null);
   const [saveConfirmations, setSaveConfirmations] = useState(false);
   const [syncTiktok, setSyncTiktok] = useState(false);
   const [lastKnown, setLastKnown] = useState<readonly PopupSourceConfig[] | null>(null);
@@ -259,6 +261,25 @@ export default function App() {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [legacyQueueNeedsDecision, setLegacyQueueNeedsDecision] = useState(false);
   const [resolvingLegacyQueue, setResolvingLegacyQueue] = useState(false);
+  // The origin Chrome already grants, so the connect form only warns about a prompt that is coming.
+  const [grantedOrigin, setGrantedOrigin] = useState<string | null>(null);
+  const typedOrigin = normalizeServerOrigin(urlInput);
+
+  useEffect(() => {
+    if (!typedOrigin) return;
+    let current = true;
+    void Promise.resolve()
+      .then(() => browser.permissions.contains({ origins: [`${typedOrigin}/*`] }))
+      .then((granted) => {
+        if (current) setGrantedOrigin(granted ? typedOrigin : null);
+      })
+      .catch(() => {
+        if (current) setGrantedOrigin(null);
+      });
+    return () => {
+      current = false;
+    };
+  }, [typedOrigin]);
 
   useEffect(() => {
     void getExtensionConnection().then((conn) => {
@@ -572,6 +593,11 @@ export default function App() {
    */
   const rows = popupSourceRows(config?.sources ?? null, lastKnown);
   const initialImport = initialImportSummary(rows, snapshot?.runs ?? null);
+  // Import all is idle once every source it would start is already running.
+  const importAllBlocked =
+    importingAll ||
+    (initialImport.due.length > 0 &&
+      initialImport.due.every((source) => snapshot?.runs[source]?.phase === "running"));
 
   /**
    * Flip a source's capture switch.
@@ -641,6 +667,22 @@ export default function App() {
     });
   };
 
+  /** Starts every due first import, the same batch a fresh pairing starts. */
+  const importAll = async () => {
+    setImportingAll(true);
+    setImportAllError(null);
+    try {
+      const result = (await command({ action: "import-all" })) as { ok?: boolean; error?: string } | undefined;
+      // Nothing due is only a race with a run that just finished; the rows say the rest.
+      if (result && !result.ok && result.error !== "no sources due for import") {
+        setImportAllError(sentenceCase(result.error ?? "Could not start the import"));
+      }
+      refresh();
+    } finally {
+      setImportingAll(false);
+    }
+  };
+
   const act = (source: string, action: SourceRowView["action"]) => {
     if (action === "pause") {
       setPausingSources((previous) => new Set(previous).add(source));
@@ -706,6 +748,7 @@ export default function App() {
       : null;
 
   const inSettings = connectionLoaded && (!connection || showSettings);
+  const permissionLine = permissionPromptLine(typedOrigin, grantedOrigin === typedOrigin);
 
   const header = inSettings && connection ? (
     <header className="pop-head with-back">
@@ -802,6 +845,8 @@ export default function App() {
               <span className="body">{connectError}</span>
             </div>
           )}
+
+          {permissionLine && <p className="meta" style={{ margin: 0 }}>{permissionLine}</p>}
 
           {legacyQueueNeedsDecision && connection && (
             <div className="notice">
@@ -957,6 +1002,25 @@ export default function App() {
                   Got it
                 </button>
               </span>
+            </div>
+          )}
+
+          {initialImport.due.length > 0 && (
+            <div className="import-all">
+              <button
+                type="button"
+                className="btn primary block"
+                disabled={importAllBlocked}
+                aria-busy={importingAll}
+                onClick={() => void importAll()}
+              >
+                {importingAll ? "Starting…" : IMPORT_ALL}
+              </button>
+              {importAllError && (
+                <div className="status" data-tone="warn" role="alert">
+                  {importAllError}
+                </div>
+              )}
             </div>
           )}
 

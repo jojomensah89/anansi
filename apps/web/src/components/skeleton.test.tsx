@@ -3,21 +3,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
 	LoadMoreSkeleton,
-	PageSkeleton,
 	PaletteResultsSkeleton,
 	SavedViewsSkeleton,
 	SettingsSkeleton,
 } from "./skeleton.tsx";
 
-test("page and gate loading states use accessible skeleton regions", () => {
-	for (const [component, label] of [
-		[PageSkeleton, "Loading page"],
-		[SettingsSkeleton, "Loading settings"],
-	] as const) {
-		const html = renderToStaticMarkup(createElement(component));
-		expect(html).toContain(`>${label}</span>`);
-		expect(html).toContain('class="bone"');
-	}
+test("a settings section loads as one accessible row", () => {
+	const html = renderToStaticMarkup(createElement(SettingsSkeleton));
+	expect(html).toContain(">Loading settings</span>");
+	expect(html.match(/class="settings-row"/g)?.length).toBe(1);
+	expect(html).toContain('class="bone"');
 });
 
 test("inline loading states keep their content shape", () => {

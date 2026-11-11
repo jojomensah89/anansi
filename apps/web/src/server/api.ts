@@ -26,7 +26,7 @@ import {
 	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
 	InvalidListCursorError, InvalidSearchCursorError, InvalidCreatorCursorError,
 	getLibraryRestore,
-  getAiSettings, setAiSettings, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
+  getAiSettings, setAiSettings, reconcileAiJobs, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
   clearSemanticIndex, estimateSemanticBackfill, semanticIndexStats,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
@@ -472,6 +472,10 @@ const aiSettingsUpdateRoute: Route = {
       semanticBudgetLimit: body.semanticBudgetLimit as number | undefined,
       autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined,
     });
+    // Seed a bounded durable backfill immediately; cron continues larger libraries.
+    if (enablingSemantic || (body.autoTaggingEnabled === true && current.autoTaggingEnabled !== 1)) {
+      await reconcileAiJobs(env.db, 100);
+    }
     if (disablingSemantic) {
       await clearSemanticIndex(env.db);
       const index = env.vectorize ? createVectorIndex(env.vectorize, current.embeddingDimensions) : undefined;

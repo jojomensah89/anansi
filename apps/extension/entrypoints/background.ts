@@ -1458,15 +1458,24 @@ async function startCapture(
 	}
 }
 
-/** Fan out the existing full-import path without creating an aggregate run. */
-async function startAllCaptures(): Promise<BackgroundResult> {
+/**
+ * Fan out the existing full-import path without creating an aggregate run.
+ *
+ * `skip` leaves named sources out of this batch. A fresh pairing skips TikTok:
+ * it is opt-in and its import opens a window, so it waits for the user.
+ */
+async function startAllCaptures(
+	options: { skip?: readonly string[] } = {},
+): Promise<BackgroundResult> {
 	const config = await loadConfig(true);
 	if (!config?.enabled) {
 		return { ok: false, error: "capture disabled on server" };
 	}
-	const sources = await initialImportSources(config, (source) =>
-		persistentState().runs.initialImportDue(source),
-	);
+	const sources = (
+		await initialImportSources(config, (source) =>
+			persistentState().runs.initialImportDue(source),
+		)
+	).filter((source) => !options.skip?.includes(source));
 	if (sources.length === 0) {
 		return { ok: false, error: "no sources due for import" };
 	}
@@ -1900,6 +1909,8 @@ async function handlePopupCommand(
                 if (verified.status !== 200) return {ok:false,error:"Connection verification failed"};
                 await heartbeat().send();
                 await wakeDurableQueue();
+                // A fresh pairing starts the first history import on its own; TikTok stays opt-in.
+                void startAllCaptures({ skip: ["tiktok"] }).catch(() => {});
                 await armLibraryTabs();
                 const previous = (await browser.storage.local.get("anansiPreviousConnection")).anansiPreviousConnection as {origin:string;token:string} | undefined;
                 await retirePreviousConnection({origin:current.server,token:current.token},previous);
@@ -2161,7 +2172,7 @@ async function handleRuntimeMessage(
   return result.ok?{ok:true}:{ok:false,error:"Connection failed"};
  }
 	if ((message as {anansi?: string})?.anansi === "library-import") {
-		// The same full import the popup's "Import everything" starts.
+		// The same full import the popup's "Import all" starts.
 		const started = await startLibraryImport(
 			message,
 			{ url: sender.url, frameId: sender.frameId, fromTab: Boolean(sender.tab) },

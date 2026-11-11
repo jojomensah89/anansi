@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { describeSource, type SourceSnapshot } from "./popup-state.ts";
-import { IMPORT_EVERYTHING, sourceRowView } from "./popup-view.ts";
+import { IMPORT_ALL, permissionPromptLine, sourceRowView } from "./popup-view.ts";
 
 const NOW = 1_756_700_000_000;
 const EMPTY = { queued: 0, uploading: 0, retrying: 0, failed: 0 };
@@ -18,14 +18,31 @@ function row(snapshot: Partial<SourceSnapshot>, extra: Partial<Parameters<typeof
 }
 
 describe("sourceRowView", () => {
-	test("history that never finished importing has one label: Import everything", () => {
-		expect(row({}, { initialImportDue: true }).label).toBe(IMPORT_EVERYTHING);
-		expect(row({ held: 12 }, { initialImportDue: true }).label).toBe(IMPORT_EVERYTHING);
-		expect(row({ held: 12 }).label).toBe("Import");
-		for (const view of [row({}, { initialImportDue: true }), row({ held: 3 })]) {
-			expect(view.label).not.toMatch(/history/i);
-			expect(view.action).toBe("import");
+	test("a source whose first import is due shows its status and no button", () => {
+		for (const snapshot of [{}, { held: 12 }, { queue: { ...EMPTY, queued: 2 } }]) {
+			const view = row(snapshot, { initialImportDue: true });
+			expect(view).toMatchObject({ action: "none", label: "", busyLabel: "" });
 		}
+		expect(row({}, { initialImportDue: true }).status).toBe("Not imported yet");
+		expect(row({ queue: { ...EMPTY, queued: 2 } }, { initialImportDue: true }).status).toBe("2 captures waiting to send");
+	});
+
+	test("a source whose history is already in needs no import button", () => {
+		expect(row({})).toMatchObject({ action: "none", label: "", status: "Ready to import" });
+		expect(row({ held: 12 })).toMatchObject({ action: "none", label: "", status: "12 saved" });
+		expect(IMPORT_ALL).toBe("Import all");
+	});
+
+	test("a single source that was interrupted still gets its own button while the batch is due", () => {
+		expect(row({ lastErrorCode: "rate_limited" }, { initialImportDue: true })).toMatchObject({
+			action: "import",
+			label: "Try again",
+		});
+		expect(row({ paused: true }, { initialImportDue: true })).toMatchObject({ action: "import", label: "Resume" });
+		expect(row({ phase: "running", startedAt: NOW - 1000 }, { initialImportDue: true })).toMatchObject({
+			action: "pause",
+			label: "Pause",
+		});
 	});
 
 	test("a run in flight offers Pause and shows its progress", () => {
@@ -61,12 +78,28 @@ describe("sourceRowView", () => {
 	});
 });
 
+describe("permissionPromptLine", () => {
+	test("names the library's host before Chrome asks for access", () => {
+		expect(permissionPromptLine("https://anansi.example.dev", false)).toBe(
+			"Chrome will ask to let Anansi reach your library at anansi.example.dev",
+		);
+		expect(permissionPromptLine("http://localhost:8787", false)).toBe(
+			"Chrome will ask to let Anansi reach your library at localhost:8787",
+		);
+	});
+
+	test("says nothing when there is no valid address or Chrome already grants it", () => {
+		expect(permissionPromptLine(null, false)).toBeNull();
+		expect(permissionPromptLine("https://anansi.example.dev", true)).toBeNull();
+	});
+});
+
 describe("capture switch", () => {
 	const toggleable = { toggleable: true } as const;
 
-	test("an on source keeps its action before an on, enabled switch", () => {
+	test("an on source keeps its enabled switch without a redundant import", () => {
 		const view = row({ held: 3 }, { ...toggleable, enabled: true });
-		expect(view).toMatchObject({ action: "import", label: "Import" });
+		expect(view).toMatchObject({ action: "none", label: "" });
 		expect(view.switch).toEqual({ checked: true, disabled: false, label: "Capture TikTok" });
 		// Running rows keep Pause beside the switch.
 		expect(row({ phase: "running", startedAt: NOW - 1000 }, { ...toggleable, enabled: true })).toMatchObject({
@@ -97,7 +130,7 @@ describe("capture switch", () => {
 
 	test("a failed request is rolled back with a short row-level error", () => {
 		const keptOn = row({ held: 3 }, { ...toggleable, enabled: true, switchFailed: true });
-		expect(keptOn).toMatchObject({ status: "Couldn't turn off", tone: "warn", action: "import" });
+		expect(keptOn).toMatchObject({ status: "Couldn't turn off", tone: "warn", action: "none" });
 		expect(keptOn.switch).toMatchObject({ checked: true, disabled: false });
 		const keptOff = row({ enabled: false }, { ...toggleable, enabled: false, switchFailed: true });
 		expect(keptOff).toMatchObject({ status: "Couldn't turn on", tone: "warn", action: "none" });

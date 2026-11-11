@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { api } from "../lib/api.ts";
-import { PageSkeleton } from "./skeleton.tsx";
 
 const sessionKey = ["auth", "session"] as const;
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
@@ -27,9 +26,9 @@ export function ConnectionGate({ children }: { children: ReactNode }) {
     },
   });
 
-  if (session.isPending) {
-    return <PageSkeleton />;
-  }
+  // The session answers from the same origin in a few milliseconds, and the page
+  // draws its own placeholders once it mounts, so there is nothing to show here.
+  if (session.isPending) return null;
 
   if (session.isError) {
     return (

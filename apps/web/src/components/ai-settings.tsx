@@ -10,7 +10,6 @@ import {
 } from "@anansi/ui/components/alert-dialog";
 import { Badge } from "@anansi/ui/components/badge";
 import { Button } from "@anansi/ui/components/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@anansi/ui/components/dialog";
 import { Input } from "@anansi/ui/components/input";
 import { Progress } from "@anansi/ui/components/progress";
 import { Switch } from "@anansi/ui/components/switch";
@@ -53,9 +52,11 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 	const [error, setError] = useState<string | null>(null);
 	const [reclassifying, setReclassifying] = useState(false);
 	const [watchingTagging, setWatchingTagging] = useState(data.settings.autoTaggingEnabled === 1 && data.taggingProgress.pending > 0);
-	const [watchingSemantic, setWatchingSemantic] = useState(false);
-	const [preview, setPreview] = useState<Preview | null>(null);
-	const [previewError, setPreviewError] = useState<string | null>(null);
+	const [watchingSemantic, setWatchingSemantic] = useState(data.settings.semanticSearchEnabled === 1 && data.settings.semanticIndexPaused !== 1 && (data.semanticIndex.pending > 0 || data.embeddingProgress.pending > 0));
+	/** The last estimate, kept as quiet info once indexing is on. */
+	const [estimate, setEstimate] = useState<Preview | null>(null);
+	/** Set when the estimate is larger than what the cap leaves, so a dialog can ask. */
+	const [overCap, setOverCap] = useState<{ preview: Preview; needed: number; limit: number } | null>(null);
 	const [confirmOff, setConfirmOff] = useState(false);
 	const [capDraft, setCapDraft] = useState(data.settings.semanticBudgetLimit.toLocaleString());
 	const [saving, setSaving] = useState(false);
@@ -119,29 +120,37 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 		});
 	};
 
-	const askToEnable = () => {
+	/** Turning the switch on is the decision. Only a cap that cannot cover the estimate stops to ask. */
+	const turnOn = (raisedLimit?: number) => {
+		const limit = raisedLimit ?? parseCap(capDraft);
+		if (limit === null) { setError("Enter a cap between 1 and 1,000,000"); return; }
 		setError(null);
-		setPreviewError(null);
 		setSaving(true);
-		api.semanticPreview().then(setPreview).catch((e) => setError(message(e, "Could not estimate indexing"))).finally(() => setSaving(false));
+		void (async () => {
+			try {
+				const next = await api.semanticPreview();
+				if (capShortfall(next, limit, data.settings.semanticBudgetUsed)) {
+					setOverCap({ preview: next, needed: data.settings.semanticBudgetUsed + next.estimate.estimatedCredits, limit });
+					return;
+				}
+				const saved = await api.updateAi({ semanticSearchEnabled: true, semanticBudgetLimit: limit, confirmSemanticBackfill: true });
+				setData(saved);
+				setCapDraft(saved.settings.semanticBudgetLimit.toLocaleString());
+				setEstimate(next);
+				setWatchingSemantic(true);
+			} catch (e) {
+				setError(message(e, "Could not turn on search by meaning"));
+			} finally { setSaving(false); }
+		})();
 	};
 
-	const enableSemantic = async () => {
-		if (!preview) return;
-		const limit = parseCap(capDraft);
-		if (limit === null) { setPreviewError("Enter a cap between 1 and 1,000,000"); return; }
-		const shortfall = capShortfall(preview, limit, data.settings.semanticBudgetUsed);
-		if (shortfall) { setPreviewError(shortfall); return; }
-		setSaving(true);
-		setPreviewError(null);
-		try {
-			const next = await api.updateAi({ semanticSearchEnabled: true, semanticBudgetLimit: limit, confirmSemanticBackfill: true });
-			setData(next);
-			setPreview(null);
-			setWatchingSemantic(true);
-		} catch (e) {
-			setPreviewError(message(e, "Could not turn on search by meaning"));
-		} finally { setSaving(false); }
+	const raiseCap = () => {
+		if (!overCap) return;
+		const raised = Math.ceil(overCap.needed / 100) * 100;
+		setOverCap(null);
+		if (raised > 1_000_000) { setError("The estimate is above the largest cap, 1,000,000"); return; }
+		setCapDraft(raised.toLocaleString());
+		turnOn(raised);
 	};
 
 	const saveCap = async () => {
@@ -183,8 +192,10 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 	const cloudflare = data.runtime === "cloudflare";
 	const { indexed, total } = data.semanticIndex;
 	const percent = total > 0 ? Math.min(100, (indexed / total) * 100) : 0;
-	const remaining = Math.max(0, (parseCap(capDraft) ?? data.settings.semanticBudgetLimit) - data.settings.semanticBudgetUsed);
 	const tagging = data.taggingProgress;
+	const taggingTotal = tagging.complete + tagging.pending + tagging.failed;
+	const taggingPercent = taggingTotal > 0 ? (tagging.complete / taggingTotal) * 100 : 0;
+	const pending = Math.max(0, total - indexed);
 
 	return (
 		<>
@@ -197,28 +208,28 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 				control={
 					<Switch
 						aria-label="Search by meaning"
-						checked={semanticOn}
+						checked={semanticOn || (saving && overCap === null)}
 						disabled={saving || data.capabilities?.semanticSearch === false}
-						onCheckedChange={(next) => (next ? askToEnable() : setConfirmOff(true))}
+						onCheckedChange={(next) => (next ? turnOn() : setConfirmOff(true))}
 					/>
 				}
 			>
 				{semanticOn && (
 					<>
-						<div className="settings-kv">
+						<div className="settings-index">
 							<Progress value={percent} aria-label="Indexing progress" className="settings-progress" />
-							<span className="settings-figure">
-								{indexed.toLocaleString()} of {total.toLocaleString()} chunks
-								{paused ? " · paused" : watchingSemantic ? " · updating" : ""}
-							</span>
-							<Button variant="outline" size="sm" className="settings-push" onClick={() => void setIndexPaused(!paused)}>
+							<Button variant="outline" size="sm" className="settings-index-action" onClick={() => void setIndexPaused(!paused)}>
 								{paused ? <Play {...ICON} /> : <Pause {...ICON} />}
-								{paused ? "Resume indexing" : "Pause indexing"}
+								{paused ? "Resume" : "Pause"}
 							</Button>
+							<p className="settings-figure settings-index-figure">
+								{indexed.toLocaleString()} indexed · {pending.toLocaleString()} pending · {total.toLocaleString()} total
+								{paused ? " · paused" : watchingSemantic ? " · updating" : ""}
+							</p>
 						</div>
 						{cloudflare && (
 							<>
-								<div className="settings-kv">
+								<div className="settings-cap-row">
 									<label htmlFor="semantic-credit-limit" className="settings-label">Monthly credit cap</label>
 									<form className="settings-joined settings-cap" onSubmit={(event) => { event.preventDefault(); void saveCap(); }}>
 										<Input id="semantic-credit-limit" inputMode="numeric" value={capDraft} onChange={(event) => setCapDraft(event.target.value)} />
@@ -226,8 +237,18 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 									</form>
 									<span className="settings-muted">{data.settings.semanticBudgetUsed.toLocaleString()} used · resets {data.settings.semanticBudgetMonth}</span>
 								</div>
+								{estimate && (
+									<p className="settings-muted settings-estimate-line">
+										{estimate.estimate.itemCount.toLocaleString()} saves · about {estimate.estimate.estimatedCredits.toLocaleString()} credits to index · cap {data.settings.semanticBudgetLimit.toLocaleString()}
+									</p>
+								)}
 								<p className="settings-meta">1 credit indexes up to 1,000 characters. It tracks workload, not your bill</p>
 							</>
+						)}
+						{!cloudflare && estimate && (
+							<p className="settings-muted settings-estimate-line">
+								{estimate.estimate.itemCount.toLocaleString()} saves · {estimate.estimate.newChunks.toLocaleString()} chunks. Runs on this machine, no credits used
+							</p>
 						)}
 					</>
 				)}
@@ -245,58 +266,44 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 					/>
 				}
 			>
-				{(tagsOn || tagging.complete + tagging.pending + tagging.failed > 0) && <div className="settings-kv">
-					<span className="settings-figure">
-						{tagging.complete.toLocaleString()} tagged · {tagging.pending.toLocaleString()} pending
-						{tagging.failed > 0 && <span className="settings-inline-warn"> · {tagging.failed.toLocaleString()} failed</span>}
-					</span>
-					<span className="settings-muted">Topic list {data.taxonomyVersion}</span>
-					<Button
-						variant="outline"
-						size="sm"
-						className="settings-push"
-						disabled={reclassifying || watchingTagging || data.capabilities?.autoTagging === false}
-						onClick={() => void reclassify()}
-					>
-						<RefreshCw {...ICON} />
-						{reclassifying ? "Reclassifying" : "Reclassify topics"}
-					</Button>
-				</div>}
+				{(tagsOn || taggingTotal > 0) && (
+					<>
+						<div className="settings-index">
+							<Progress value={taggingPercent} aria-label="Tagging progress" className="settings-progress" />
+							<Button
+								variant="outline"
+								size="sm"
+								className="settings-index-action"
+								disabled={reclassifying || watchingTagging || data.capabilities?.autoTagging === false}
+								onClick={() => void reclassify()}
+							>
+								<RefreshCw {...ICON} />
+								{reclassifying ? "Reclassifying" : "Reclassify"}
+							</Button>
+							<p className="settings-figure settings-index-figure">
+								{tagging.complete.toLocaleString()} complete · {tagging.pending.toLocaleString()} pending
+								{tagging.failed > 0 && <span className="settings-inline-warn"> · {tagging.failed.toLocaleString()} failed</span>}
+							</p>
+						</div>
+						<p className="settings-muted">Topic list {data.taxonomyVersion}</p>
+					</>
+				)}
 			</SettingsRow>
 
-			<Dialog open={preview !== null} onOpenChange={(open) => { if (!open && !saving) setPreview(null); }}>
-				<DialogContent className="settings-dialog" showCloseButton={false}>
-					<DialogHeader>
-						<DialogTitle>Turn on search by meaning?</DialogTitle>
-					</DialogHeader>
-					{preview && (
-						<>
-							<dl className="settings-estimate">
-								<dt>Saves</dt><dd>{preview.estimate.itemCount.toLocaleString()}</dd>
-								<dt>Chunks to index</dt><dd>{preview.estimate.newChunks.toLocaleString()}</dd>
-								<dt>{preview.runtime === "cloudflare" ? "Credits needed" : "Workload"}</dt><dd>about {preview.estimate.estimatedCredits.toLocaleString()}</dd>
-								{preview.runtime === "cloudflare" && <><dt>Left this month</dt><dd>{remaining.toLocaleString()}</dd></>}
-							</dl>
-							{preview.runtime === "cloudflare" && (
-								<div className="settings-kv">
-									<label htmlFor="semantic-credit-limit-dialog" className="settings-label">Monthly credit cap</label>
-									<Input id="semantic-credit-limit-dialog" className="settings-cap-input" inputMode="numeric" value={capDraft} onChange={(event) => setCapDraft(event.target.value)} />
-								</div>
-							)}
-							<DialogDescription>
-								{preview.runtime === "cloudflare"
-									? "Cloudflare receives only titles and captured text. Past the cap, search falls back to keywords"
-									: "Runs on this machine. No credits are used"}
-							</DialogDescription>
-							{previewError && <p role="alert" className="settings-message" data-tone="danger">{previewError}</p>}
-						</>
-					)}
-					<DialogFooter>
-						<Button variant="outline" disabled={saving} onClick={() => setPreview(null)}>Cancel</Button>
-						<Button disabled={saving} onClick={() => void enableSemantic()}>{saving ? "Starting" : "Start indexing"}</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+			<AlertDialog open={overCap !== null} onOpenChange={(open) => { if (!open) setOverCap(null); }}>
+				<AlertDialogContent className="settings-dialog">
+					<AlertDialogHeader>
+						<AlertDialogTitle>The cap is too low to index everything</AlertDialogTitle>
+						<AlertDialogDescription>
+							{overCap && `Indexing needs about ${overCap.preview.estimate.estimatedCredits.toLocaleString()} credits and ${Math.max(0, overCap.limit - data.settings.semanticBudgetUsed).toLocaleString()} are left this month. Raise the cap to ${(Math.ceil(overCap.needed / 100) * 100).toLocaleString()} to start, or leave search by meaning off`}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction onClick={raiseCap}>Raise cap</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 
 			<AlertDialog open={confirmOff} onOpenChange={setConfirmOff}>
 				<AlertDialogContent className="settings-dialog">

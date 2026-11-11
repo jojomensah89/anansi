@@ -190,6 +190,13 @@
       "when": 1794340000000,
       "tag": "0026_author_avatars",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1794355200000,
+      "tag": "0027_tag_model",
+      "breakpoints": true
     }
   ]
 }

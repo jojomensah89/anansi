@@ -326,6 +326,15 @@
   padding-top: 8px;
 }
 
+/* The one first-import action, above the rows */
+
+.import-all {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 16px 10px;
+}
+
 /* Source rows */
 
 .srow {

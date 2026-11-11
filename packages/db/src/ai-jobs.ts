@@ -74,7 +74,7 @@ export async function getAiSettings(db: AnansiDb) {
   const [row] = await db.select().from(aiSettings).where(eq(aiSettings.id, 1));
   const now = Math.floor(Date.now() / 1000);
   const month = currentUtcMonth(now);
-  if (!row) return { id: 1, semanticSearchEnabled: 0, semanticIndexPaused: 0, semanticBudgetLimit: 10000, semanticBudgetUsed: 0, semanticBudgetMonth: month, semanticOptedInAt: null, semanticGeneration: 1, autoTaggingEnabled: 0, embeddingModel: "@cf/baai/bge-small-en-v1.5", embeddingDimensions: 384, tagModel: "@cf/meta/llama-3.1-8b-instruct", updatedAt: 0, quotaPauseReason: null, lastRunAt: null };
+  if (!row) return { id: 1, semanticSearchEnabled: 0, semanticIndexPaused: 0, semanticBudgetLimit: 10000, semanticBudgetUsed: 0, semanticBudgetMonth: month, semanticOptedInAt: null, semanticGeneration: 1, autoTaggingEnabled: 0, embeddingModel: "@cf/baai/bge-small-en-v1.5", embeddingDimensions: 384, tagModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", updatedAt: 0, quotaPauseReason: null, lastRunAt: null };
   return row.semanticBudgetMonth === month ? row : { ...row, semanticBudgetMonth: month, semanticBudgetUsed: 0 };
 }
 

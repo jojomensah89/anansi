@@ -206,7 +206,7 @@ export const aiSettings = sqliteTable("ai_settings", {
   autoTaggingEnabled: integer("auto_tagging_enabled").notNull().default(0),
   embeddingModel: text("embedding_model").notNull().default("@cf/baai/bge-small-en-v1.5"),
   embeddingDimensions: integer("embedding_dimensions").notNull().default(384),
-  tagModel: text("tag_model").notNull().default("@cf/clef-flash-9b"),
+  tagModel: text("tag_model").notNull().default("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
   updatedAt: integer("updated_at").notNull().default(0),
   quotaPauseReason: text("quota_pause_reason"),
   lastRunAt: integer("last_run_at"),

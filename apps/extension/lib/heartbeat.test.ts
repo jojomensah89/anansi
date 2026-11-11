@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parseExtensionHeartbeat } from "@anansi/sources";
 import { createHeartbeatClient } from "./heartbeat.ts";
 
 const ID = "123e4567-e89b-42d3-a456-426614174000";
@@ -27,7 +28,8 @@ function harness(options: { fail?: boolean } = {}) {
         queue: { queued: 1, uploading: 0, retrying: 0, failed: 0 },
         sources: {
           x: {
-            phase: "idle" as const,
+            phase: "running" as const,
+            lastCheckedAt: 999,
             queued: 1,
             uploading: 0,
             retrying: 0,
@@ -38,6 +40,7 @@ function harness(options: { fail?: boolean } = {}) {
     },
     transport: async (heartbeat) => {
       if (options.fail) throw new Error("Bearer secret at https://server.test/private");
+      expect(parseExtensionHeartbeat(JSON.parse(JSON.stringify(heartbeat)))).toEqual({ ok: true, heartbeat });
       sent.push(heartbeat);
     },
   });

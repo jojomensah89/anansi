@@ -22,7 +22,10 @@ export default {
     return secureResponse(denied ?? await startEntry.fetch(request));
   },
   async scheduled(_controller: ScheduledController, env: WorkerBindings): Promise<void> {
-    await runMediaSchedule(env);
-    await runAiSchedule(env);
+    // Media network failures must not prevent durable AI work from running.
+    const results = await Promise.allSettled([runMediaSchedule(env), runAiSchedule(env)]);
+    for (const result of results) {
+      if (result.status === "rejected") throw result.reason;
+    }
   },
 };

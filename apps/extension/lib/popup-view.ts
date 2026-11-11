@@ -6,12 +6,12 @@
  * exactly what pressing it does:
  *
  * - "Pause" while a run is in flight
- * - "Import everything" while this source's history has never finished
- *   importing (the popup used to say both "Import all history" and "Import
- *   remaining history" for this one action)
  * - "Try again" after something went wrong
  * - "Resume" after a pause
- * - "Import" otherwise
+ * - no action for a source whose history is already in
+ * - no action at all while this source's first import is due: the popup's
+ *   one "Import all" button above the list starts that batch, and the row only
+ *   says where it stands
  *
  * Status text never carries instructions the button already gives.
  *
@@ -67,7 +67,21 @@ export interface SourceRowInput {
 	switchFailed?: boolean;
 }
 
-export const IMPORT_EVERYTHING = "Import everything";
+/** The one action above the list that starts every due first import. */
+export const IMPORT_ALL = "Import all";
+
+/**
+ * The line above Connect, shown before Chrome's permission prompt appears.
+ * Null once Chrome already grants the library's origin, since no prompt follows.
+ */
+export function permissionPromptLine(origin: string | null, alreadyGranted: boolean): string | null {
+	if (!origin || alreadyGranted) return null;
+	try {
+		return `Chrome will ask to let Anansi reach your library at ${new URL(origin).host}`;
+	} catch {
+		return null;
+	}
+}
 
 function count(value: number): string {
 	return value.toLocaleString("en-US");
@@ -111,12 +125,13 @@ function rowBody(input: SourceRowInput): Omit<SourceRowView, "switch"> {
 	// on waits for the server's config before offering an import it might refuse.
 	if (input.enabled === false || view.state === "disabled")
 		return { status: "", tone: "muted", ...NO_ACTION };
-	const importLabel = initialImportDue ? IMPORT_EVERYTHING : "Import";
 	const importing: Pick<SourceRowView, "action" | "label" | "busyLabel"> = {
 		action: "import",
-		label: importLabel,
+		label: "Import",
 		busyLabel: "Starting…",
 	};
+	// The first import of every due source is started by the list's one button.
+	const idle: Pick<SourceRowView, "action" | "label" | "busyLabel"> = NO_ACTION;
 	const retry: Pick<SourceRowView, "action" | "label" | "busyLabel"> = {
 		action: "import",
 		label: "Try again",
@@ -141,18 +156,18 @@ function rowBody(input: SourceRowInput): Omit<SourceRowView, "switch"> {
 				...retry,
 			};
 		case "retrying":
-			return { status: view.text, tone: "warn", ...importing };
+			return { status: view.text, tone: "warn", ...idle };
 		case "queued":
-			return { status: view.text, tone: "muted", ...importing };
+			return { status: view.text, tone: "muted", ...idle };
 		case "paused":
 			return { status: "Paused. Nothing was lost", tone: "muted", ...importing, label: "Resume", busyLabel: "Resuming…" };
 		case "synced":
-			return { status: view.text, tone: "muted", ...importing };
+			return { status: view.text, tone: "muted", ...idle };
 		case "ready":
 			return {
-				status: initialImportDue ? "History not imported yet" : "Ready to import",
+				status: initialImportDue ? "Not imported yet" : "Ready to import",
 				tone: "muted",
-				...importing,
+				...idle,
 			};
 	}
 }

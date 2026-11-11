@@ -5,7 +5,7 @@ import { AiLoadError, AiSettings, useAiSettings } from "../components/ai-setting
 import { DataSettings } from "../components/data-settings.tsx";
 import { Rail } from "../components/rail.tsx";
 import { SettingsSection, SettingsRow } from "../components/settings-panel.tsx";
-import { SettingsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
+import { SettingsSkeleton } from "../components/skeleton.tsx";
 import { SyncSettings } from "../components/sync-controls.tsx";
 import { api } from "../lib/api.ts";
 import { useHideRemoved, useShowNsfw } from "../lib/settings.ts";
@@ -18,7 +18,6 @@ function Settings() {
 	const [showNsfw, setShowNsfw] = useShowNsfw();
 	const [hideRemoved, setHideRemoved] = useHideRemoved();
 	const ai = useAiSettings();
-	const slow = useSlowLoad(ai.data === null && !ai.loadError);
 	const aiLead = ai.data?.runtime === "ollama" ? "Runs through Ollama on this machine" : ai.data?.runtime === "cloudflare" ? "Runs in your Cloudflare account. Manual tags are never replaced" : ai.data ? "Manual tags are never replaced" : undefined;
 
 	return (
@@ -38,10 +37,8 @@ function Settings() {
 								<AiSettings data={ai.data} setData={ai.setData} />
 							) : ai.loadError ? (
 								<AiLoadError error={ai.loadError} onRetry={ai.reload} />
-							) : slow ? (
-								<SettingsSkeleton />
 							) : (
-								<SettingsRow title="AI" description={<span role="status">Loading</span>} />
+								<SettingsSkeleton label="Loading AI settings" />
 							)}
 						</SettingsSection>
 						<SettingsSection id="display" title="Display" lead="Kept in this browser">

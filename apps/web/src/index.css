@@ -909,7 +909,12 @@ button.anansi-tag-chip:hover {background:var(--accent-soft);color:var(--text)}
 .settings-notice{flex:1;display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--text-dim)}
 .settings-notice svg{width:16px;height:16px;flex:none;margin-top:2px}
 .settings-notice[data-tone=danger]{border-color:var(--danger);background:transparent;color:var(--danger)}
-.settings-progress{flex:1 1 200px;max-width:360px;gap:0}
+.settings-index{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;row-gap:8px;align-items:center}
+.settings-index .settings-progress{grid-column:1;width:100%;gap:0}
+.settings-index-action{grid-column:2;grid-row:1 / span 2}
+.settings-index-figure{grid-column:1;margin:0}
+.settings-cap-row{display:grid;grid-template-columns:160px auto minmax(0,1fr);align-items:center;gap:8px 16px}
+.settings-estimate-line{margin:0}
 .settings-progress [data-slot=progress-track]{height:6px;border-radius:3px;background:var(--raised);box-shadow:inset 0 0 0 1px var(--line-soft)}
 .settings-progress [data-slot=progress-indicator]{background:var(--accent);border-radius:3px;transition:width 240ms var(--ease-ui)}
 
@@ -1051,7 +1056,8 @@ html.light .connect-value{background:var(--raised)}
  .settings-row:has(.settings-github){flex-direction:column;gap:10px}
  .settings-row:has(.settings-github) .settings-row-control{margin-left:0;width:100%}
  .settings-github{width:100%}
- .settings-progress{max-width:none;flex-basis:100%}
+ .settings-cap-row{grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
+ .settings-cap-row > .settings-label{grid-column:1 / -1}
 }
 [data-slot=dialog-overlay],[data-slot=alert-dialog-overlay]{z-index:70}[data-slot=dialog-content],[data-slot=alert-dialog-content]{z-index:71}
 
