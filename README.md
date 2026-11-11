@@ -118,21 +118,13 @@ directory; the first hosted library starts empty. Keep the local copy as a
 backup if you need those captures, because this deployment path does not
 include a local-to-cloud import.
 
-In Cloudflare's deploy form, set the Vectorize index to **384 dimensions** and
-the **cosine** metric. Anansi's default hosted embedding model,
-`@cf/baai/bge-small-en-v1.5`, returns 384-dimensional vectors. The Deploy form
-does not infer these fixed index settings from Wrangler, so this is a required
-resource-setup value; using a different dimension or metric will break semantic
-search. The model and Vectorize index are only used after semantic search is
-enabled in Settings.
-
-During setup, enter your master secret when Cloudflare prompts for it:
-
-- `ANANSI_SECRET` — master secret protecting library sign-in, Chrome extension ingestion, and MCP clients. Optional `LIBRARY_TOKEN`, `INGEST_TOKEN`, and `MCP_TOKEN` override it for their respective roles. A distinct `INGEST_TOKEN` limits the extension key to extension endpoints.
-
-Generate with `openssl rand -hex 32`. Both Cloudflare AI features start off; enable
-Semantic search or Automatic tags from `/settings` only when you want to use
-your account's AI quota.
+In the deploy form, keep the repository root and default resource names. Enter
+`ANANSI_SECRET` (generate with `openssl rand -hex 32`), Vectorize dimensions
+**384**, and metric **cosine**. Wrangler cannot encode these two index creation
+settings. These are the Anansi-specific inputs beyond the standard account and
+repository choices. D1 and R2 are provisioned automatically. Both AI features
+start off; missing AI bindings leave capture, keyword search, export and restore
+available.
 
 #### Hosted semantic search
 
@@ -158,11 +150,10 @@ At the cap, Anansi sends no more embedding requests; captures still save, and
 search requests that cannot be embedded fall back to keyword results. You can
 change the cap in Settings.
 
-After the first successful deploy, open the Worker project’s **Settings → Build
-→ Build Variables and Secrets** and add `BUN_VERSION=1.4.2` for subsequent
-builds. The first button build uses Cloudflare's default Bun version and must
-pass the clean-account acceptance check before this button is announced as
-ready.
+Workers Builds honors the root `packageManager: bun@1.4.2`; no manual
+`BUN_VERSION` is needed. Accept the detected `bun run build` and `bun run deploy`
+commands. Deploy applies pending D1 SQL migrations before publishing.
+See [fresh-account acceptance](docs/deploy-acceptance.md) for the timed checklist.
 
 After deployment returns `https://<worker>.workers.dev`:
 
@@ -174,7 +165,8 @@ After deployment returns `https://<worker>.workers.dev`:
 
 The Worker is the only public origin: the library is `/`, the API is `/api/*`,
 and MCP is `/mcp`. New schema changes start with `packages/db/src/schema.ts`
-and `bun run db:generate`; review and commit the new SQL migration, then push
+and hand-written SQL migrations in `packages/db/drizzle` with corresponding
+`meta/_journal.json` entries; review the new migration, then push
 to the connected repository. Workers Builds applies pending D1 migrations
 before publishing the Worker.
 
