@@ -138,14 +138,6 @@
   font-weight: 600;
 }
 
-.pop-head .host {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .pop-head .end {
   margin-left: auto;
 }
@@ -393,6 +385,19 @@
   flex: none;
 }
 
+/* A source switched off: the logo steps back, the name stays readable. */
+.srow .mark {
+  transition: opacity 150ms var(--ease);
+}
+
+.srow[data-off] .mark {
+  opacity: 0.4;
+}
+
+.srow[data-off] .title {
+  color: var(--text-dim);
+}
+
 /* Notices */
 
 .notice {
@@ -486,6 +491,13 @@
   transition: background-color 150ms var(--ease), border-color 150ms var(--ease);
 }
 
+/* A 32px-tall target around an 18px track, so the row's switch is easy to hit. */
+.switch::before {
+  content: "";
+  position: absolute;
+  inset: -8px -6px;
+}
+
 .switch::after {
   content: "";
   position: absolute;
@@ -493,9 +505,12 @@
   left: 2px;
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: 6px;
   background: var(--muted);
-  transition: transform 150ms var(--ease), background-color 150ms var(--ease);
+  transition:
+    transform 150ms var(--ease),
+    width 150ms var(--ease),
+    background-color 150ms var(--ease);
 }
 
 .switch[aria-checked="true"] {
@@ -508,9 +523,24 @@
   background: var(--on-accent);
 }
 
+/* Pressed: the thumb stretches toward where it will go, so the press is felt before the flip. */
+.switch:active:not(:disabled)::after {
+  width: 15px;
+}
+
+.switch[aria-checked="true"]:active:not(:disabled)::after {
+  transform: translateX(11px);
+}
+
 .switch:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.5;
+}
+
+/* Waiting on the library: already flipped, just not pressable again yet. */
+.switch[aria-busy="true"]:disabled {
+  cursor: progress;
+  opacity: 1;
 }
 
 /* Connection form */

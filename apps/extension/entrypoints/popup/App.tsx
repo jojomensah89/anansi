@@ -1,7 +1,8 @@
 import { TIKTOK_SYNC_SETTING } from "../../lib/library-sync.ts";
 import { retireOwnConnection } from "../../lib/library-connect.ts";
 import { SAVE_CONFIRMATION_SETTING } from "../../lib/save-toast.ts";
-import type { ExtensionRemoteConfig } from "@anansi/sources";
+import { parseExtensionConfig, type ExtensionRemoteConfig } from "@anansi/sources";
+import { createPersistedConfigCache } from "../../lib/config-cache.ts";
 import { SourceMark } from "@anansi/ui/components/source-mark";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { requireOriginPermission } from "../../lib/connection-lifecycle.ts";
@@ -18,6 +19,7 @@ import {
   connectionFromStatus,
   LOADING_CONNECTION,
   type PopupConnectionState,
+  type PopupSourceConfig,
   type PopupSourceRow,
   popupSourceRows,
   UNCONFIGURED_CONNECTION,
@@ -50,9 +52,10 @@ import "./App.css";
  * it. A source can no longer claim to be up to date while anything is still
  * queued, retrying or failed for it.
  *
- * The source list comes from the server's config. A source switched off there
- * keeps its row and says so, because a row that silently vanishes reads as a
- * bug rather than as a setting.
+ * The source list comes from the server's config. A source switched off keeps
+ * its row with its switch off, because a row that silently vanishes reads as a
+ * bug rather than as a setting. The switch flips at once and is put back, with
+ * a word on the row, if the library refuses.
  */
 
 interface Stats {
@@ -133,6 +136,32 @@ const mirror = (action: "mirror-status" | "mirror-on" | "mirror-off") =>
 
 const retry = (source?: string) => command(source ? { action: "retry-queue", source } : { action: "retry-queue" });
 
+/** The worker sends this with the stored key and re-reads its config before answering. */
+const setSourceEnabled = (source: string, enabled: boolean) =>
+  command({ action: "set-source", source, enabled }) as Promise<{ ok?: boolean; enabled?: boolean } | undefined>;
+
+/** The worker's last accepted config, read only to show where switches were left while offline. */
+const lastAcceptedConfig = createPersistedConfigCache<ExtensionRemoteConfig>({
+  storage: {
+    get: (key) => browser.storage.local.get(key),
+    set: (values) => browser.storage.local.set(values),
+    remove: (key) => browser.storage.local.remove(key),
+  },
+  validate: (value) => {
+    const parsed = parseExtensionConfig(value);
+    return parsed.ok ? parsed.config : null;
+  },
+});
+
+/** A flip the popup shows before the polled config agrees with it. */
+interface SwitchOverride {
+  enabled: boolean;
+  /** The request is still out. */
+  pending: boolean;
+  /** When the flip was made or confirmed; a config read begun later supersedes it. */
+  since: number;
+}
+
 function describePage(tab: { title?: string; url?: string } | undefined): ActivePage | null {
   if (!tab?.url) return null;
   try {
@@ -166,7 +195,17 @@ export default function App() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [saveConfirmations, setSaveConfirmations] = useState(false);
   const [syncTiktok, setSyncTiktok] = useState(false);
+  const [lastKnown, setLastKnown] = useState<readonly PopupSourceConfig[] | null>(null);
+  const [switches, setSwitches] = useState<Record<string, SwitchOverride>>({});
+  const [switchErrors, setSwitchErrors] = useState<Set<string>>(() => new Set());
+  const [reloadNonce, setReloadNonce] = useState(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const errorTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const timers = errorTimers.current;
+    return () => timers.forEach((timer) => clearTimeout(timer));
+  }, []);
 
   useEffect(() => {
     void mirror("mirror-status").then((r) => setMirroring(r?.mirroring ?? false));
@@ -274,7 +313,15 @@ export default function App() {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let requestController: AbortController | undefined;
+    // Where the switches were left, until the first live read answers.
+    void lastAcceptedConfig
+      .load(base, token, Date.now())
+      .then((stored) => {
+        if (current && stored) setLastKnown((previous) => previous ?? stored.value.sources);
+      })
+      .catch(() => {});
     const load = async () => {
+      const startedAt = Date.now();
       requestController = new AbortController();
       const requestTimeout = setTimeout(() => requestController?.abort(), 10_000);
       try {
@@ -308,6 +355,12 @@ export default function App() {
         }
         if (current) {
           setConfig(nextConfig);
+          setLastKnown(nextConfig.sources);
+          // A read begun after a confirmed flip already reflects it.
+          setSwitches((previous) => {
+            const kept = Object.entries(previous).filter(([, flip]) => flip.pending || flip.since > startedAt);
+            return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept);
+          });
           setConnectionState(CONNECTED_CONNECTION);
         }
 
@@ -336,7 +389,7 @@ export default function App() {
       if (timer !== undefined) clearTimeout(timer);
       requestController?.abort();
     };
-  }, [connection, connectionLoaded, refresh]);
+  }, [connection, connectionLoaded, refresh, reloadNonce]);
 
   const handleConnect = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -424,6 +477,8 @@ export default function App() {
       }
       setConnection(validated);
       setConfig(data);
+      setLastKnown(data.sources);
+      setSwitches({});
       setConnectionState(CONNECTED_CONNECTION);
       setLegacyQueueNeedsDecision(false);
       setShowSettings(false);
@@ -468,6 +523,8 @@ export default function App() {
     await command({ action: "connection-updated" });
     setConnection(null);
     setConfig(null);
+    setLastKnown(null);
+    setSwitches({});
     setStats(null);
     setConnectionState(UNCONFIGURED_CONNECTION);
     setShowSettings(false);
@@ -513,8 +570,38 @@ export default function App() {
    * vanishes reads as a bug rather than a setting. So the known sources are
    * appended back, marked off, and say so.
    */
-  const rows = popupSourceRows(config?.sources ?? null);
+  const rows = popupSourceRows(config?.sources ?? null, lastKnown);
   const initialImport = initialImportSummary(rows, snapshot?.runs ?? null);
+
+  /**
+   * Flip a source's capture switch.
+   *
+   * Shown at once; the worker sends it and re-reads its own config so capture
+   * starts or stops right away. A refusal puts the switch back and says so on
+   * the row for a few seconds.
+   */
+  const toggleSource = (source: string, enabled: boolean) => {
+    clearTimeout(errorTimers.current.get(source));
+    setSwitchErrors((previous) => withoutStartingSource(previous, source));
+    setSwitches((previous) => ({ ...previous, [source]: { enabled, pending: true, since: Date.now() } }));
+    void setSourceEnabled(source, enabled).then((result) => {
+      if (result?.ok && result.enabled === enabled) {
+        setSwitches((previous) => ({ ...previous, [source]: { enabled, pending: false, since: Date.now() } }));
+        // Read the config now so the row's action follows the switch.
+        setReloadNonce((n) => n + 1);
+        return;
+      }
+      setSwitches((previous) => {
+        const { [source]: _dropped, ...rest } = previous;
+        return rest;
+      });
+      setSwitchErrors((previous) => new Set(previous).add(source));
+      errorTimers.current.set(
+        source,
+        setTimeout(() => setSwitchErrors((previous) => withoutStartingSource(previous, source)), 4000),
+      );
+    });
+  };
 
   /** Everything one row shows, entirely from persisted state. */
   const rowOf = (s: PopupSourceRow): SourceRowView => {
@@ -522,6 +609,7 @@ export default function App() {
     const run = snapshot?.runs[s.source];
     const sourceQueue = snapshot?.bySource?.[s.source] ?? EMPTY_QUEUE;
     const offline = !s.configured && config === null;
+    const flip = switches[s.source];
     const input: SourceSnapshot = {
       source: s.source,
       enabled: s.enabled,
@@ -546,6 +634,10 @@ export default function App() {
         items: status[s.source]?.items ?? 0,
       },
       offline,
+      toggleable: s.toggleable,
+      enabled: flip?.enabled ?? s.enabled,
+      switching: flip?.pending,
+      switchFailed: switchErrors.has(s.source),
     });
   };
 
@@ -600,17 +692,13 @@ export default function App() {
     refresh();
   };
 
-  // Whatever last went wrong, with anything credential-shaped removed.
-  const diagnostics = [
-    ...(connectionState.kind === "connected" || connectionState.kind === "loading"
-      ? []
-      : [`Connection: ${connectionState.message}`]),
-    ...Object.entries(status).flatMap(([source, st]) =>
-      st.message && !(source === "_" && connectionState.kind === "connected")
-        ? [`${source === "_" ? "Server" : SOURCE_NAMES[source] ?? source}: ${redactError(st.message)}`]
-        : [],
-    ),
-  ];
+  // Per-source failures, with anything credential-shaped removed. Server and
+  // connection failures already show in the banner above, so they stay out.
+  const diagnostics = Object.entries(status).flatMap(([source, st]) =>
+    st.message && source !== "_"
+      ? [`${SOURCE_NAMES[source] ?? source}: ${redactError(st.message)}`]
+      : [],
+  );
 
   const connectionProblem =
     connection && connectionState.kind !== "connected" && connectionState.kind !== "loading"
@@ -640,9 +728,6 @@ export default function App() {
       <span className="name">Anansi</span>
       {connection && (
         <>
-          <span className="host meta" title={connection.origin}>
-            {connection.origin.replace(/^https?:\/\//, "")}
-          </span>
           <button
             type="button"
             className="btn ghost icon-only end"
@@ -786,7 +871,7 @@ export default function App() {
           <Icon name="globe" />
           <div className="page-text">
             <div className="page-title" title={page?.title}>{page?.title ?? "This page"}</div>
-            {page?.host && <div className="page-host meta">{page.host}</div>}
+            {page?.host && page.host !== page.title && <div className="page-host meta">{page.host}</div>}
           </div>
         </div>
         <button
@@ -884,14 +969,14 @@ export default function App() {
                   ? startingSources.has(s.source)
                   : row.action === "pause" && pausingSources.has(s.source);
               return (
-                <div key={s.source} className="srow" data-tone={row.tone}>
+                <div key={s.source} className="srow" data-tone={row.tone} data-off={row.switch?.checked === false || undefined}>
                   <span className="mark">
                     <SourceMark source={s.source} size={20} decorative />
                   </span>
                   <div className="text">
                     <div className="title">{name}</div>
                     {row.status && (
-                      <div className="status" data-tone={row.tone}>
+                      <div className="status" data-tone={row.tone} role={row.switch && switchErrors.has(s.source) ? "alert" : undefined}>
                         {row.status}
                       </div>
                     )}
@@ -909,6 +994,18 @@ export default function App() {
                       {row.label === "Resume" && !busy && <Icon name="play" />}
                       {busy ? row.busyLabel : row.label}
                     </button>
+                  )}
+                  {row.switch && (
+                    <button
+                      type="button"
+                      role="switch"
+                      className="switch"
+                      aria-checked={row.switch.checked}
+                      aria-label={row.switch.label}
+                      disabled={row.switch.disabled}
+                      aria-busy={switches[s.source]?.pending || undefined}
+                      onClick={() => toggleSource(s.source, !row.switch!.checked)}
+                    />
                   )}
                 </div>
               );

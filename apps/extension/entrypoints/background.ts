@@ -2,6 +2,7 @@ import { retirePreviousConnection, connectLibrary } from "../lib/library-connect
 import { isLibrarySyncCommand } from "../lib/messages.ts";
 import { startLibraryImport } from "../lib/library-import.ts";
 import { libraryBridgeScript } from "../lib/library-bridge-script.ts";
+import { requestSourceToggle } from "../lib/source-toggle.ts";
 /**
  * The background worker: the only part of the extension that knows a server
  * exists, and the only part that holds the token.
@@ -1769,6 +1770,8 @@ type BackgroundResult =
 			mirroring?: boolean;
 			/** Whether the page should confirm this save to the person. */
 			confirm?: boolean;
+			/** A source's capture switch, as the library recorded it. */
+			enabled?: boolean;
 	  }
 	| { ok: false; error: string };
 
@@ -1921,21 +1924,43 @@ async function handlePopupCommand(
 			return { ok: true };
 		}
 		case "stop": {
-			if (isSessionCaptureSource(msg.source)) {
-				const importing = sessionImports.get(msg.source);
-				importing?.controller.abort();
-				await importing?.task;
-			}
-			const current = await persistentState().runs.current(msg.source);
-			if (current.runId) {
-				const stopped = await sourceImportLifecycle().stop(
-					msg.source,
-					current.runId,
-				);
-				await applyImportEffects(stopped.effects);
-			}
+			await stopSourceRun(msg.source);
 			return { ok: true };
 		}
+		case "set-source": {
+			const current = await settings();
+			if (!current) return { ok: false, error: "Not connected" };
+			const changed = await requestSourceToggle(current, msg.source, msg.enabled);
+			if (!changed.ok) return changed;
+			// Re-read now rather than at the hourly revalidation: every capture path
+			// (imports, live saves, library sync) asks this cache whether a source is on.
+			const config = await loadConfig(true);
+			if (!msg.enabled && cached && config?.sources.some((entry) => entry.source === msg.source)) {
+				// The library recorded "off" but the re-read fell back to an older copy.
+				// Drop the source from that copy rather than capture on it for an hour.
+				const value = { ...cached.value, sources: cached.value.sources.filter((entry) => entry.source !== msg.source) };
+				cached = { ...cached, value };
+				await persistedConfig.save(current.server, current.token, value, cached.at).catch(() => {});
+			}
+			// Off means off now, not after the run in flight finishes.
+			if (!msg.enabled) await stopSourceRun(msg.source);
+			requestHeartbeat();
+			return { ok: true, enabled: changed.enabled };
+		}
+	}
+}
+
+/** Ends the run in flight for a source. Progress and queued captures survive. */
+async function stopSourceRun(source: PlatformSource): Promise<void> {
+	if (isSessionCaptureSource(source)) {
+		const importing = sessionImports.get(source);
+		importing?.controller.abort();
+		await importing?.task;
+	}
+	const current = await persistentState().runs.current(source);
+	if (current.runId) {
+		const stopped = await sourceImportLifecycle().stop(source, current.runId);
+		await applyImportEffects(stopped.effects);
 	}
 }
 

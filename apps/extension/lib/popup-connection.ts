@@ -1,5 +1,6 @@
 import {
 	EXTENSION_PLATFORM_SOURCES,
+	isToggleableSource,
 	parseExtensionConfig,
 	type ExtensionRemoteConfig,
 	type ExtensionSourceConfig,
@@ -13,6 +14,8 @@ export type PopupSourceConfig = ExtensionSourceConfig;
 export type PopupSourceRow = PopupSourceConfig & {
 	enabled: boolean;
 	configured: boolean;
+	/** Has a capture switch. Web, saved by hand, is always on. */
+	toggleable: boolean;
 };
 
 const FALLBACKS: Record<(typeof POPUP_SOURCES)[number], PopupSourceConfig> = {
@@ -34,19 +37,28 @@ export function validatePopupRemoteConfig(
 	return parseExtensionConfig(value).ok;
 }
 
-/** Keep the product catalogue visible even when remote instructions fail. */
+/**
+ * Keep the product catalogue visible even when remote instructions fail.
+ *
+ * Without a live config, `lastKnown` (the sources of the last config this
+ * install accepted) says which were on, so a switch can show where it was
+ * left. With neither, every source reads as on: that is the server default.
+ */
 export function popupSourceRows(
 	remote: readonly PopupSourceConfig[] | null,
+	lastKnown: readonly PopupSourceConfig[] | null = null,
 ): PopupSourceRow[] {
 	const bySource = new Map(remote?.map((row) => [row.source, row]));
+	const known = lastKnown ? new Set(lastKnown.map((row) => row.source)) : null;
 	return POPUP_SOURCES.map((source) => {
 		const configured = bySource.get(source);
 		return configured
-			? { ...configured, enabled: true, configured: true }
+			? { ...configured, enabled: true, configured: true, toggleable: isToggleableSource(source) }
 			: {
 					...FALLBACKS[source],
-					enabled: remote === null,
+					enabled: remote === null && (known === null || known.has(source)),
 					configured: false,
+					toggleable: isToggleableSource(source),
 				};
 	});
 }

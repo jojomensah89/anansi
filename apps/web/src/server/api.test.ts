@@ -561,6 +561,43 @@ describe("handleApi", () => {
 		expect(unknown.status).toBe(400);
 	});
 
+	test("the extension can switch a source off and on, and the config it reads follows", async () => {
+		const toggle = (source: string, enabled: boolean, authorization = "Bearer test-token") =>
+			dispatchApi(env, new Request(`https://anansi.test/api/extension/sources/${source}`, {
+				method: "POST",
+				headers: { "content-type": "application/json", authorization },
+				body: JSON.stringify({ enabled }),
+			}));
+		// Read the config the way the extension does, so a reply it can't parse fails here.
+		const configSources = async () => {
+			const parsed = parseExtensionConfig(await readJson(get("/api/extension/config")));
+			if (!parsed.ok) throw new Error(parsed.error.message);
+			return parsed.config.sources.map((source) => source.source);
+		};
+
+		const off = await toggle("reddit", false);
+		expect(off.status).toBe(200);
+		expect(await readJson(off)).toEqual({ source: "reddit", enabled: false });
+		expect(await configSources()).not.toContain("reddit");
+		const library = await readJson(get("/api/sources"));
+		expect(library.sources.find((s: { source: string }) => s.source === "reddit").enabled).toBe(false);
+
+		const on = await toggle("reddit", true);
+		expect(await readJson(on)).toEqual({ source: "reddit", enabled: true });
+		expect(await configSources()).toContain("reddit");
+
+		// Web is always on: there is nothing to switch.
+		expect((await toggle("web", false)).status).toBe(400);
+		expect((await toggle("unknown", false)).status).toBe(400);
+		// The owner's library token is not a capture credential, and no token is no access.
+		expect((await toggle("reddit", false, "Bearer library-test-token")).status).toBe(401);
+		const anonymous = await dispatchApi(env, new Request("https://anansi.test/api/extension/sources/reddit", {
+			method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }),
+		}));
+		expect(anonymous.status).toBe(401);
+		expect(await configSources()).toContain("reddit");
+	});
+
 	test("ingest parses a raw payload server-side", async () => {
 		const raw = {
 			data: {

@@ -159,6 +159,13 @@ export type PopupCommandMessage = MessageBase &
 				action: "start" | "stop";
 				source: PlatformSource;
 		  }
+		| {
+				anansi: "popup-command";
+				/** The row's capture switch. The worker sends it with the stored key. */
+				action: "set-source";
+				source: PlatformSource;
+				enabled: boolean;
+		  }
 	);
 
 export type PageCommandMessage = PageTrafficBase & {
@@ -551,7 +558,8 @@ function validatePopupCommandShape(
 		value.action === "mirror-status" ||
 		value.action === "mirror-on" ||
 		value.action === "mirror-off" ||
-		value.action === "connection-updated"
+		value.action === "connection-updated" ||
+		value.action === "adopt-legacy-queue"
 	) {
 		return hasOnlyKeys(value, ["anansi", "messageVersion", "action"]);
 	}
@@ -565,6 +573,13 @@ function validatePopupCommandShape(
 		return (
 			hasOnlyKeys(value, ["anansi", "messageVersion", "action", "source"]) &&
 			isSource(value.source)
+		);
+	}
+	if (value.action === "set-source") {
+		return (
+			hasOnlyKeys(value, ["anansi", "messageVersion", "action", "source", "enabled"]) &&
+			isSource(value.source) &&
+			typeof value.enabled === "boolean"
 		);
 	}
 	return false;

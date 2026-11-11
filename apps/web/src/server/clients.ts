@@ -4,6 +4,9 @@ import { connectedClients as clients, clientSecurity, oauthTokens } from "../../
 import type { AnansiDb } from "@anansi/db";
 import { sameSecret } from "./library-auth.ts";
 export const CAPTURE_ROUTES = ["POST /api/extension/retire-self", "POST /api/ingest", "POST /api/extension/heartbeat", "GET /api/extension/config", "GET /api/extension/known-ids", "GET /api/extension/stats"] as const;
+/** Capture routes with a path parameter. The popup's source switch is the only one. */
+const CAPTURE_PATTERNS = [/^POST \/api\/extension\/sources\/[\w-]+$/] as const;
+const isCaptureRoute = (route: string) => (CAPTURE_ROUTES as readonly string[]).includes(route) || CAPTURE_PATTERNS.some(pattern => pattern.test(route));
 const hash = (key: string) => createHash("sha256").update(key).digest("hex");
 const now = () => Math.floor(Date.now()/1000);
 export async function createClient(db: AnansiDb, name: string, kind: "extension" | "api" | "pairing" | "app") {
@@ -30,7 +33,7 @@ export async function redeemPairing(db: AnansiDb, code: string) {
 }
 export async function authorizeClient(env: {db: AnansiDb; ingestToken?: string; token?: string}, request: Request): Promise<Response | null> {
  const route = `${request.method} ${new URL(request.url).pathname.replace(/\/+$/, "")}`;
- const capture = (CAPTURE_ROUTES as readonly string[]).includes(route);
+ const capture = isCaptureRoute(route);
  const mcp = new URL(request.url).pathname.replace(/[/]+$/, "") === "/mcp";
  const key = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
  const denied = () => Response.json({error:"unauthorized"},{status:401});

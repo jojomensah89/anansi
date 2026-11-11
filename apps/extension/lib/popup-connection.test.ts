@@ -38,6 +38,25 @@ describe("popup connection truth", () => {
 		);
 	});
 
+	test("offline rows remember which sources were on, and every platform row has a switch", () => {
+		const lastKnown = [
+			{ source: "x", host: "x.com", mode: "page" },
+			{ source: "github", host: "github.com", mode: "page" },
+		] as const;
+		const rows = popupSourceRows(null, lastKnown);
+		expect(rows.map((row) => [row.source, row.enabled])).toEqual([
+			["x", true],
+			["reddit", false],
+			["github", true],
+			["tiktok", false],
+		]);
+		expect(rows.every((row) => row.toggleable && !row.configured)).toBe(true);
+		// Nothing known yet: the server's default, on.
+		expect(popupSourceRows(null).every((row) => row.enabled)).toBe(true);
+		// A live config always wins over the remembered one.
+		expect(popupSourceRows([], lastKnown).every((row) => !row.enabled)).toBe(true);
+	});
+
 	test("authentication and compatibility errors are distinguishable", () => {
 		expect(connectionFromStatus(401)).toMatchObject({ kind: "unauthorized" });
 		expect(connectionFromStatus(403)).toMatchObject({ kind: "unauthorized" });

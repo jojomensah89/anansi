@@ -288,19 +288,32 @@ const sourcesRoute: Route = {
 	},
 };
 
+/**
+ * One switch, two doors: the library's Sources page and the extension popup
+ * both land here, so a source turned off in either place is off everywhere.
+ */
+const toggleSource = async ({ env, request, params }: Ctx) => {
+	const body = (await request.json().catch(() => ({}))) as {
+		enabled?: boolean;
+	};
+	const source = params[0] ?? "";
+	if (!isToggleableSource(source))
+		return json({ error: "source cannot be toggled" }, 400);
+	await setSourceEnabled(env.db, source, body.enabled !== false);
+	return json({ source, enabled: body.enabled !== false });
+};
+
 const toggleSourceRoute: Route = {
 	method: "POST",
 	path: /^\/api\/sources\/([\w-]+)$/,
-	handle: async ({ env, request, params }) => {
-		const body = (await request.json().catch(() => ({}))) as {
-			enabled?: boolean;
-		};
-		const source = params[0] ?? "";
-		if (!isToggleableSource(source))
-			return json({ error: "source cannot be toggled" }, 400);
-		await setSourceEnabled(env.db, source, body.enabled !== false);
-		return json({ source, enabled: body.enabled !== false });
-	},
+	handle: toggleSource,
+};
+
+/** The popup's switch. Extension-authenticated like every /api/extension/ path. */
+const extensionToggleSourceRoute: Route = {
+	method: "POST",
+	path: /^\/api\/extension\/sources\/([\w-]+)$/,
+	handle: toggleSource,
 };
 
 const extensionHeartbeatRoute: Route = {
@@ -691,6 +704,7 @@ export const ROUTES: Route[] = [
 	tagRoute,
 	sourcesRoute,
 	toggleSourceRoute,
+	extensionToggleSourceRoute,
 	creatorsRoute,
 	statsRoute, extensionStatsRoute,
 	aiSettingsRoute, semanticPreviewRoute, aiSettingsUpdateRoute, aiReclassifyRoute,

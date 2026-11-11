@@ -279,6 +279,11 @@ describe("parseExtensionMessage", () => {
 		});
 	});
 
+	test("accepts the popup's assign-pending-captures command", () => {
+		const adopt = { anansi: "popup-command", messageVersion: MESSAGE_PROTOCOL_VERSION, action: "adopt-legacy-queue" };
+		expect(parseExtensionMessage(adopt, extensionRuntimeContext)).toMatchObject({ ok: true });
+	});
+
 	test("accepts extension popup commands and rejects them from tabs", () => {
 		const popup = {
 			anansi: "popup-command",
@@ -311,6 +316,23 @@ describe("parseExtensionMessage", () => {
 				extensionRuntimeContext,
 			),
 		).toMatchObject({ ok: true, source: null });
+	});
+
+	test("the popup's capture switch names one platform source and a boolean", () => {
+		const toggle = { anansi: "popup-command", messageVersion: MESSAGE_PROTOCOL_VERSION, action: "set-source", source: "tiktok", enabled: false };
+		expect(parseExtensionMessage(toggle, extensionRuntimeContext)).toMatchObject({ ok: true, source: "tiktok" });
+		for (const bad of [
+			{ ...toggle, enabled: "false" },
+			{ ...toggle, enabled: undefined },
+			{ ...toggle, source: "web" },
+			{ ...toggle, source: "instagram" },
+			{ ...toggle, token: "never-forward" },
+		]) {
+			expect(parseExtensionMessage(bad, extensionRuntimeContext)).toMatchObject({ ok: false });
+		}
+		expect(
+			parseExtensionMessage(toggle, tabRuntimeContext("https://www.tiktok.com/@example")),
+		).toMatchObject({ ok: false, error: { code: "direction_mismatch" } });
 	});
 
 	test("rejects page events presented as extension popup messages", () => {

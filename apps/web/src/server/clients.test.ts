@@ -10,7 +10,10 @@ function setup() {const local=openLocalDb(":memory:");migrateLocalDb(local);retu
 const req=(path:string,key:string,method="GET",body?:unknown,origin?:string)=>new Request(`https://library.test${path}`,{method,headers:{authorization:`Bearer ${key}`,"content-type":"application/json",...(origin ? {origin}: {})},body:body === undefined ? undefined : JSON.stringify(body)});
 test("capture authorization enumerates the complete route table and defaults deny",async()=>{
  const env=setup(), client=await createClient(env.db,"Browser","extension");
- for(const route of ROUTES){const path=typeof route.path === "string" ? route.path : "/api/items/example";const allowed=(CAPTURE_ROUTES as readonly string[]).includes(`${route.method} ${path}`);expect(await authorizeClient(env,req(path,client.key,route.method))).toEqual(allowed ? null : expect.any(Response));}
+ for(const route of ROUTES){const path=typeof route.path === "string" ? route.path : route.path.source.includes("extension") ? "/api/extension/sources/x" : "/api/items/example";const allowed=(CAPTURE_ROUTES as readonly string[]).includes(`${route.method} ${path}`) || `${route.method} ${path}` === "POST /api/extension/sources/x";expect(await authorizeClient(env,req(path,client.key,route.method))).toEqual(allowed ? null : expect.any(Response));}
+ // The popup's switch is the one parameterised capture route; its library twin stays owner-only.
+ expect(await authorizeClient(env,req("/api/extension/sources/x",client.key,"GET"))).toEqual(expect.any(Response));
+ expect(await authorizeClient(env,req("/api/sources/x",client.key,"POST"))).toEqual(expect.any(Response));
  expect((await handleApi(env,req("/api/items",client.key))).status).toBe(401);
  expect((await handleMcp(env,req("/mcp",client.key,"POST",{}))).status).toBe(401);
  expect((await authorizeClient(env,req("/api/extension/new-route",client.key)))?.status).toBe(401);

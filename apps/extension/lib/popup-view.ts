@@ -14,11 +14,22 @@
  * - "Import" otherwise
  *
  * Status text never carries instructions the button already gives.
+ *
+ * A toggleable source also has a capture switch at the row's end. A source
+ * switched off shows no action and no status: the switch already says it.
  */
 import type { SourceView } from "./popup-state.ts";
 
 export type RowTone = "default" | "active" | "warn" | "muted";
 export type RowActionKind = "pause" | "import" | "none";
+
+/** The capture switch at the end of a row. */
+export interface SourceSwitchView {
+	checked: boolean;
+	disabled: boolean;
+	/** Accessible name, e.g. "Capture TikTok". */
+	label: string;
+}
 
 export interface SourceRowView {
 	status: string;
@@ -27,6 +38,8 @@ export interface SourceRowView {
 	label: string;
 	/** Shown on the button while the start is being confirmed. */
 	busyLabel: string;
+	/** Null for a source that is always on. */
+	switch: SourceSwitchView | null;
 }
 
 export interface SourceRowInput {
@@ -41,6 +54,17 @@ export interface SourceRowInput {
 	progress?: { pages: number; items: number };
 	/** The server config could not be read, so nothing can be started. */
 	offline?: boolean;
+	/** Whether the source can be switched off at all. */
+	toggleable?: boolean;
+	/**
+	 * What the switch shows: the server's answer, the optimistic flip while a
+	 * request is out, or the last known state when the server can't be reached.
+	 */
+	enabled?: boolean;
+	/** A switch request is in flight. */
+	switching?: boolean;
+	/** The last switch request failed and the switch was put back. */
+	switchFailed?: boolean;
 }
 
 export const IMPORT_EVERYTHING = "Import everything";
@@ -65,9 +89,28 @@ function failureText(code: string | undefined, name: string, fallback: string): 
 }
 
 export function sourceRowView(input: SourceRowInput): SourceRowView {
+	const row = rowBody(input);
+	const enabled = input.enabled ?? input.view.state !== "disabled";
+	const toggle: SourceSwitchView | null = input.toggleable
+		? { checked: enabled, disabled: Boolean(input.offline || input.switching), label: `Capture ${input.name}` }
+		: null;
+	if (input.switchFailed && !input.offline) {
+		// The switch is already back where it was; say only that the change didn't take.
+		return { ...row, status: enabled ? "Couldn't turn off" : "Couldn't turn on", tone: "warn", switch: toggle };
+	}
+	return { ...row, switch: toggle };
+}
+
+const NO_ACTION: Omit<SourceRowView, "status" | "tone" | "switch"> = { action: "none", label: "", busyLabel: "" };
+
+function rowBody(input: SourceRowInput): Omit<SourceRowView, "switch"> {
 	const { view, name, initialImportDue, offline } = input;
 	// Without the server config nothing can start; the connection notice says why.
-	if (offline) return { status: "", tone: "muted", action: "none", label: "", busyLabel: "" };
+	if (offline) return { status: "", tone: "muted", ...NO_ACTION };
+	// A switched-off row is just its name and its switch. A row being switched
+	// on waits for the server's config before offering an import it might refuse.
+	if (input.enabled === false || view.state === "disabled")
+		return { status: "", tone: "muted", ...NO_ACTION };
 	const importLabel = initialImportDue ? IMPORT_EVERYTHING : "Import";
 	const importing: Pick<SourceRowView, "action" | "label" | "busyLabel"> = {
 		action: "import",
@@ -81,8 +124,6 @@ export function sourceRowView(input: SourceRowInput): SourceRowView {
 	};
 
 	switch (view.state) {
-		case "disabled":
-			return { status: "Off in Sources", tone: "muted", action: "none", label: "", busyLabel: "" };
 		case "running": {
 			const pages = input.progress?.pages ?? 0;
 			const items = input.progress?.items ?? 0;
