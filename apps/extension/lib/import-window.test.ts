@@ -39,4 +39,6 @@ describe("import tab decisions", () => {
 	});
 });
 
-test("history windows never request focus", () => { expect(IMPORT_WINDOW_FOCUSED).toBe(false); });
+// An unfocused window lands behind the browser, Chrome treats it as hidden and
+// TikTok stops loading favourites after the first page (only 15 imported).
+test("history windows open in front so TikTok keeps loading", () => { expect(IMPORT_WINDOW_FOCUSED).toBe(true); });

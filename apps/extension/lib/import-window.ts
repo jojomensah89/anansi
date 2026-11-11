@@ -5,7 +5,7 @@
  * and a window fully covered by another counts as hidden too. So this is a small
  * window in front, in the corner of the window the person was using.
  */
-export const IMPORT_WINDOW_FOCUSED = false;
+export const IMPORT_WINDOW_FOCUSED = true;
 export const IMPORT_WINDOW_WIDTH = 720;
 export const IMPORT_WINDOW_HEIGHT = 640;
 const MARGIN = 16;
