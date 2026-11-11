@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { IMPORT_WINDOW_HEIGHT, IMPORT_WINDOW_WIDTH, importWindowBounds, importTabPresentation, needsFullWindowImport } from "./import-window.ts";
+import { IMPORT_WINDOW_FOCUSED, IMPORT_WINDOW_HEIGHT, IMPORT_WINDOW_WIDTH, importWindowBounds, importTabPresentation, needsFullWindowImport } from "./import-window.ts";
 
 const size = { width: IMPORT_WINDOW_WIDTH, height: IMPORT_WINDOW_HEIGHT };
 
@@ -38,3 +38,5 @@ describe("import tab decisions", () => {
 		expect(needsFullWindowImport(false, { stopReason: "page_limit", hasMore: true })).toBe(false);
 	});
 });
+
+test("history windows never request focus", () => { expect(IMPORT_WINDOW_FOCUSED).toBe(false); });

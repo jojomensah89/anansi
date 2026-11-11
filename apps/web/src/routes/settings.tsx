@@ -21,7 +21,7 @@ function Settings() {
 	const aiLead = ai.data?.runtime === "ollama" ? "Runs through Ollama on this machine" : ai.data?.runtime === "cloudflare" ? "Runs in your Cloudflare account. Manual tags are never replaced" : ai.data ? "Manual tags are never replaced" : undefined;
 
 	return (
-		<div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+		<div className="anansi-shell">
 			<Rail total={counts?.items ?? 0} authors={counts?.authors ?? 0} archived={counts?.archived ?? 0} bySource={counts?.bySource ?? {}} ready={counts !== null} />
 			<main className="workspace-page">
 				<header className="workspace-page-head">

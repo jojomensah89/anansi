@@ -88,7 +88,7 @@ export type CaptureParseResult =
 
 const DEFAULT_LIMITS = {
 	maxPayloadBytes: 2_000_000,
-	maxStringLength: 20_000,
+	maxStringLength: 100_000,
 	maxObjectNodes: 50_000,
 };
 

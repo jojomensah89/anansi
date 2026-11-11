@@ -77,7 +77,7 @@ export function McpServerPage() {
 	const toolCount = MCP_TOOL_CATALOG.length + MCP_WRITE_TOOL_CATALOG.length;
 
 	return (
-		<div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+		<div className="anansi-shell">
 			<Rail ready={ready} total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} />
 
 			<main className="workspace-page mcp-page">
@@ -86,7 +86,7 @@ export function McpServerPage() {
 					<div className="workspace-page-tools mcp-endpoint">
 						<span className="mcp-endpoint-label">Streamable HTTP</span>
 						<div className="settings-joined mcp-endpoint-field">
-							<code className="connect-value" aria-label="MCP endpoint">{endpoint}</code>
+							<code className="connect-value" aria-label="MCP endpoint" title={endpoint}>{endpoint}</code>
 							<Button variant="outline" onClick={() => void copy("endpoint", endpoint)} aria-label={copied === "endpoint" ? "Copied" : "Copy MCP endpoint"}>
 								{copied === "endpoint" ? <Check {...ICON} /> : <Copy {...ICON} />}
 								<span className="mcp-copy-label">{copied === "endpoint" ? "Copied" : "Copy"}</span>

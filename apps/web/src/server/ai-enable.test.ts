@@ -29,3 +29,18 @@ test("confirmed semantic enable queues existing saves without invoking providers
   expect(response.status).toBe(200);
   expect(await db.select().from(aiEnrichmentJobs)).toMatchObject([{ kind: "embedding", status: "pending" }]);
 });
+
+
+test("already enabled upgraded libraries count unqueued saves and cron backfills in bounded passes", async () => {
+ const { setAiSettings, semanticIndexStats, aiProgress } = await import("@anansi/db");
+ const db = openTestDb();
+ await upsertItems(db, Array.from({ length: 44 }, (_, i) => ({ source: "web", externalId: `upgrade-${i}`, url: `https://example.com/${i}`, kind: "article", body: "Software development", savedAt: i + 1, savedAtIsExact: true, metrics: {}, media: [], links: [], raw: {} })));
+ await setAiSettings(db, { autoTaggingEnabled: true, semanticSearchEnabled: true });
+ const settings = await getAiSettings(db);
+ expect(await semanticIndexStats(db, settings.embeddingModel)).toEqual({ total: 44, indexed: 0, pending: 44 });
+ expect(await aiProgress(db, "tagging")).toEqual({ complete: 0, pending: 44, failed: 0 });
+ await runAiJobs(db, { AI: { run: async () => ({ response: '["technology"]' }) } });
+ expect((await db.select().from(aiEnrichmentJobs)).length).toBe(12);
+ await runAiJobs(db, { AI: { run: async () => ({ response: '["technology"]' }) } });
+ expect((await db.select().from(aiEnrichmentJobs)).length).toBe(24);
+});

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ItemEventCapture } from "@anansi/sources";
+import { parseBookmarkCapture, type ItemEventCapture } from "@anansi/sources";
 import type { OutboxRecord } from "./capture-queue.ts";
 import { createIngestTransport } from "./ingest-transport.ts";
 
@@ -200,4 +200,17 @@ describe("ingest transport", () => {
 		expect(await offline.send(record)).toEqual({ kind: "network" });
 		expect(await malformed.send(record)).toEqual({ kind: "invalid_receipt" });
 	});
+});
+
+
+test("long X saves queued by earlier extensions pass the server parser on retry", async () => {
+ const x: ItemEventCapture = { ...capture, source: "x" as const, captureMethod: "platform_event" as const,
+ externalId: "123", canonicalUrl: "https://x.com/user/status/123",
+ normalizedItem: { ...capture.normalizedItem!, source: "x", externalId: "123", url: "https://x.com/user/status/123", kind: "post", body: "x".repeat(25_000) } };
+ const transport = createIngestTransport(async () => ({ ingest: "https://anansi.test/api/ingest", token: "test" }), async (_url, init) => {
+  const parsed = parseBookmarkCapture(JSON.parse(String(init?.body)));
+  expect(parsed.ok).toBe(true);
+  return new Response(JSON.stringify({ eventId: x.eventId, itemId: "saved", outcome: "created" }), { status: parsed.ok ? 200 : 400 });
+ });
+ expect((await transport.send({ ...record, source: "x", capture: x })).kind).toBe("success");
 });

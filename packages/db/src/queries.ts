@@ -163,7 +163,7 @@ export async function prepareUpsertItems(
       savedAt,
       savedAtExact: item.savedAtIsExact || was?.savedAtExact === 1 ? 1 : 0,
       captureOrigin: options.captureOrigin ?? "legacy_unknown",
-      saveOrder: item.saveOrder ?? null,
+      saveOrder: item.saveOrder ?? was?.saveOrder ?? null,
       metrics: JSON.stringify({ ...objectJson(was?.metrics), ...item.metrics }),
       nsfw: item.nsfw ? 1 : was?.nsfw ?? 0,
       // links ride inside raw rather than earning a column: the spec's schema

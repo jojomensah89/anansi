@@ -64,7 +64,7 @@ function Creators() {
 	}, [creatorQuery.fetchNextPage, creatorQuery.hasNextPage, creatorQuery.isFetchingNextPage]);
 
 	return (
-		<div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+		<div className="anansi-shell">
 			<Rail
 				total={stats?.items ?? 0}
 				authors={stats?.authors ?? 0}

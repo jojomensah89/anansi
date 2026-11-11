@@ -67,7 +67,7 @@ import {
 import { createLiveCapture } from "../lib/live-capture.ts";
 import { captureAdapter, isSessionCaptureSource, platformCanonicalUrl, platformEntryUrl, platformTabPatterns, shouldRefreshTopOnResume } from "../lib/platforms/registry.ts";
 import { createDocumentNonces } from "../lib/document-nonces.ts";
-import { importWindowBounds, importTabPresentation, needsFullWindowImport } from "../lib/import-window.ts";
+import { IMPORT_WINDOW_FOCUSED, importWindowBounds, importTabPresentation, needsFullWindowImport } from "../lib/import-window.ts";
 import { createRunDeadlines } from "../lib/run-deadline.ts";
 import { SAVE_CONFIRMATION_SETTING } from "../lib/save-toast.ts";
 import {
@@ -543,7 +543,7 @@ async function enqueueImportedPage(page: SourceImportPage): Promise<void> {
 		eventId: page.eventId,
 		source: page.source,
 		action: "snapshot",
-		observedAt: Math.floor(Date.now() / 1000),
+		observedAt: page.observedAt ?? Math.floor(Date.now() / 1000),
 		captureMethod: page.captureMethod,
 		runId: page.runId,
 		page: page.page,
@@ -1036,7 +1036,7 @@ async function openImportWindow(url: string) {
 			url,
 			type: "popup",
 			// Opened unfocused it lands behind the browser, where it counts as hidden.
-			focused: true,
+			focused: IMPORT_WINDOW_FOCUSED,
 			...importWindowBounds(anchor),
 		});
 		return opened?.tabs?.[0] ?? null;

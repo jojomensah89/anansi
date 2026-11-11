@@ -339,3 +339,13 @@ describe("source import lifecycle", () => {
 		expect(error.code).toBe("queue_full");
 	});
 });
+
+
+test("history pages retain newest-first stamps as the import clock advances", async () => {
+ const h = setup();
+ const runId = await begin(h.lifecycle);
+ await h.lifecycle.page(page(runId, { page: 1 }));
+ h.setNow(15_000);
+ await h.lifecycle.page(page(runId, { page: 2 }));
+ expect(h.queued).toMatchObject([{ observedAt: 9 }, { observedAt: 8 }]);
+});

@@ -226,7 +226,7 @@ function Library() {
   }), [filters, hideRemoved, ordering, search.q]);
 
   return (
-    <div className={`anansi-shell capture-workspace${search.item ? " inspector-open" : ""}`} style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+    <div className={`anansi-shell capture-workspace${search.item ? " inspector-open" : ""}`}>
       <Rail total={total} authors={authors} archived={stats.data?.archived ?? 0} bySource={counts} ready={statsReady} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>

@@ -18,6 +18,7 @@ export interface SourceImportPage {
 	raw: unknown;
 	captureMethod: "platform_import" | "platform_event";
 	eventId: string;
+	observedAt?: number;
 }
 
 export interface SourceImportLifecycleDependencies {
@@ -406,6 +407,7 @@ export function createSourceImportLifecycle(
 					await enqueuePage({
 						...input,
 						eventId: identity.eventId,
+						observedAt: Math.max(1, Math.floor((run.startedAt ?? now()) / 1000) - identity.page),
 						page: identity.page,
 					});
 				} catch (error) {

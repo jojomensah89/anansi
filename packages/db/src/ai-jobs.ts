@@ -445,7 +445,10 @@ export async function aiProgress(db: AnansiDb, kind?: AiJobKind, model?: string)
     : [`embedding:${model ?? settings.embeddingModel}:`, `tagging:${model ?? settings.tagModel}:`];
   const modelFilter = sql`(${sql.join(prefixes.map((prefix) => sql`substr(${aiEnrichmentJobs.id}, 1, ${prefix.length}) = ${prefix}`), sql` OR `)})`;
   const [row] = await db.select({ pending: sql<number>`sum(case when status in ('pending','retrying','running') then 1 else 0 end)`, failed: sql<number>`sum(case when status='failed' then 1 else 0 end)`, complete: sql<number>`sum(case when status='complete' then 1 else 0 end)` }).from(aiEnrichmentJobs).where(and(kind ? eq(aiEnrichmentJobs.kind, kind) : undefined, modelFilter));
-  return { pending: Number(row?.pending ?? 0), failed: Number(row?.failed ?? 0), complete: Number(row?.complete ?? 0) };
+  const [library] = await db.select({ total: sql<number>`count(*)` }).from(items);
+  const complete = Math.min(Number(library?.total ?? 0), Number(row?.complete ?? 0));
+  const failed = Number(row?.failed ?? 0);
+  return { pending: Math.max(0, Number(library?.total ?? 0) - complete - failed), failed, complete };
 }
 
 /** Clears AI topic assignments and reopens tagging jobs for a fresh taxonomy pass. */

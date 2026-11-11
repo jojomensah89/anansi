@@ -91,7 +91,7 @@ function Sources() {
 	const slow = useSlowLoad(data === null && !loadFailed);
 
 	return (
-		<div className="anansi-shell" style={{ display: "flex", height: "100svh", overflow: "hidden" }}>
+		<div className="anansi-shell">
 			<Rail total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} ready={data !== null} />
 			<main className="workspace-page">
 				<header className="workspace-page-head">
