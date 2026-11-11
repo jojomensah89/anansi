@@ -1,5 +1,8 @@
 # Cloudflare AI Enrichment and TikTok Retirement Design
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 **Date:** 2026-09-06  
 **Status:** Approved for planning  
 **Scope:** Self-hosted Cloudflare deployment, optional semantic search and automatic AI tags, and temporary removal of TikTok from all shipped/user-visible surfaces.
@@ -167,4 +170,3 @@ This minimizes empty resources but requires a second deployment or manual Cloudf
 ### D1-only vector search
 
 This avoids Vectorize but requires loading and comparing many vectors in Worker code, making latency, CPU, and memory scale poorly under Workers Free limits. It is not the chosen path.
-

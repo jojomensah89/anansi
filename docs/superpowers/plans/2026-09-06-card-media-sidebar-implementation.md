@@ -1,5 +1,8 @@
 # Card Media, Tag Overflow, and Collapsible Sidebar Implementation Plan
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 **Design:** `docs/superpowers/specs/2026-09-06-card-media-sidebar-design.md`
 **Date:** 2026-09-06
 

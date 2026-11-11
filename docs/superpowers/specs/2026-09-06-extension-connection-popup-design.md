@@ -1,5 +1,8 @@
 # Extension connection and popup UX
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 ## Problem
 
 Anansi currently asks the owner to paste an API origin and `INGEST_TOKEN` into the extension popup after building and loading the extension. This exposes deployment plumbing in a daily-use interface and makes a private, self-hosted installation feel unfinished.

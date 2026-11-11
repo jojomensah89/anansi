@@ -1,5 +1,8 @@
 # Local semantic search and Cloudflare development verification plan
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 **Date:** 2026-09-07
 **Design:** `docs/superpowers/specs/2026-09-07-local-embedding-provider-design.md`
 **Goal:** Prove and repair semantic retrieval locally, then verify the same code against real Workers AI and Vectorize through `alchemy dev`, without adding any model setup to the hosted user path.

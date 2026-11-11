@@ -1,5 +1,8 @@
 # Architecture index
 
+> Historical plan/evidence: current product guidance is in [README](../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 This index is the entry point for implementation-oriented architecture notes.
 It records the current durable decisions and the packet evidence that changed
 the baseline. The source of truth for behavior is still the code and tests; the

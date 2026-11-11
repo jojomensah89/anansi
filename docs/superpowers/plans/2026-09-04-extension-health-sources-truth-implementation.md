@@ -1,5 +1,8 @@
 # Extension health and Sources truth implementation plan
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 **Date:** 2026-09-04  
 **Design:** `docs/superpowers/specs/2026-09-04-extension-health-sources-truth-design.md`  
 **Goal:** Replace age-derived source health with a durable extension heartbeat, explicit first-arrival provenance, a server-owned source catalogue, and honest zero-item source cards.

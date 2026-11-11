@@ -10,7 +10,7 @@ Do **not** open a public issue for suspected vulnerabilities.
 
 Report privately via [GitHub Security Advisories](https://github.com/jojomensah89/anansi/security/advisories/new) (preferred). Include:
 
-- affected component (extension / web server / MCP / CLI / db)
+- affected component (extension / web server / MCP / db)
 - steps to reproduce or proof-of-concept
 - impact (what an attacker can read / write)
 - your environment (Bun version, browser, commit SHA)
@@ -26,7 +26,7 @@ Anansi is intentionally conservative about browser access:
 - Library, extension and MCP access fail closed without credentials. Explicit
   `LIBRARY_TOKEN`, `INGEST_TOKEN` and `MCP_TOKEN` override `ANANSI_SECRET` for
   their respective roles during migration; otherwise the master secret is the fallback. Retiring legacy access disables these shared extension/MCP credentials.
-- The local database and media live under `data/` and must never be committed.
+- Hosted records and media live in the owner's Cloudflare D1 and R2. Local SQLite is for development/testing; never commit runtime data.
 
 Please do not submit reports asking for session-cookie exfiltration, token harvesting, or bypassing platform login — those are out of scope by design.
 
@@ -56,7 +56,7 @@ provider. Source identity, bounded payloads and queue limits remain required.
 See PRIVACY.md for capture destinations and optional AI processing.
 
 ## Connected clients
-Stored keys use 256 random bits and SHA-256 hashes. Revocation is checked each request; last use updates at most every five minutes. API keys permit read-only MCP. Legacy shared credentials work only for capture or MCP until explicitly retired in Connected clients; owner login remains available.
+Stored keys use 256 random bits and SHA-256 hashes. Revocation is checked each request; last use updates at most every five minutes. API keys and OAuth apps default to read-only MCP. The owner can grant tags, notes and link-saving writes in Connected clients; no delete tool exists. Legacy shared credentials work only for capture or MCP until explicitly retired in Connected clients; owner login remains available.
 First connection uses a five-minute single-use code pasted from the library into the popup. The popup requests optional origin permission and redeems directly. Keys never pass through MAIN-world scripts or the page bridge. Keep codes private. Existing queue destination guards preserve captures during reconnect.
 
 OAuth apps use authorization codes with S256 PKCE and rotating refresh tokens.

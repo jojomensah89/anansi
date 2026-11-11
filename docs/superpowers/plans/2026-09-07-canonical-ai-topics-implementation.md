@@ -1,5 +1,8 @@
 # Canonical AI topics implementation plan
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 1. Add `packages/db/src/topics.ts` with the v1 IDs, labels, colors, stable IDs, aliases, and exact canonicalization helpers. Export it from `@anansi/db`.
 2. Add `kind` to `tags`, generate migration `0014_canonical_topics.sql`, seed canonical rows, clear only AI-provenance assignments to legacy labels, and reset tagging jobs for resumable reclassification.
 3. Update manual tagging and AI application paths so custom tags remain lowercase/free-form, canonical topic aliases resolve to topic rows, and AI writes only `kind = topic` assignments.

@@ -1,5 +1,8 @@
 # Ollama Local AI Tagging Design
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 **Date:** 2026-09-07
 **Status:** Approved for implementation by the user's continuation request
 **Scope:** Add local Ollama text-generation for automatic topic tags while preserving the existing local embedding path and hosted Cloudflare behavior.

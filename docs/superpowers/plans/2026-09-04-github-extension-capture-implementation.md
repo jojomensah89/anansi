@@ -1,5 +1,8 @@
 # GitHub extension capture implementation plan
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 **Date:** 2026-09-04
 **Design:** `docs/superpowers/specs/2026-09-04-github-extension-capture-design.md`
 **Prerequisite design:** `docs/superpowers/specs/2026-09-04-github-repo-card-design.md`

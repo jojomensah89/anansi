@@ -1,5 +1,8 @@
 # Cloudflare AI Enrichment and TikTok Retirement Implementation Plan
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 > Based on the approved design in `docs/superpowers/specs/2026-09-06-cloudflare-ai-enrichment-tiktok-retirement-design.md`.
 
 ## Execution order
@@ -58,4 +61,3 @@ Acceptance: fresh install performs no AI/vector calls; toggles persist; disablin
 - Full `bun test`, `git diff --check`, and React Doctor for changed React files.
 - Local browser checks for TikTok absence, AI settings, disabled fallback, and fake-provider progress/error states.
 - Clearly separate local evidence from clean-account Cloudflare deployment and authenticated provider acceptance.
-

@@ -1,5 +1,8 @@
 # Anansi self-hosted Chrome launch
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 Date: 2026-10-14
 Status: Proposed design; user approved workstream scope, implementation review pending.
 

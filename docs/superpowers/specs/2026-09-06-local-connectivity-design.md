@@ -1,5 +1,8 @@
 # Local development connectivity
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 ## Problem
 
 `bun run dev:local` prints the library URL as `http://127.0.0.1:3001` and permits that exact origin to call the API at `http://127.0.0.1:8788`. Vite currently starts without an explicit host and binds to `localhost`/IPv6 instead. Opening the URL Vite advertises gives the page an origin of `http://localhost:3001`, which the local API does not authorize, so the browser reports `Failed to fetch` even though both processes are healthy.

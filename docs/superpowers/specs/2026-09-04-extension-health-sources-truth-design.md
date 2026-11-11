@@ -1,5 +1,8 @@
 # Extension health and Sources truth design
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 **Date:** 2026-09-04  
 **Status:** Approved design  
 **Scope:** Extension heartbeat, source catalogue, capture provenance, and truthful Sources-page status. GitHub capture is a separate follow-up.

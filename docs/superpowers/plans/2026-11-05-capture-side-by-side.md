@@ -1,5 +1,8 @@
 # Capture side-by-side checklist
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 Use this to prove stage 1 of the overhaul with real accounts, with Anansi and Stashr both installed in the same browser profile. Repeat it after any capture change.
 
 ## Setup

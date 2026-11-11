@@ -1,5 +1,8 @@
 # Reddit avatar fallback and coloured source marks
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 ## Request and observed state
 
 The Reddit cards and item detail view show a blank grey author circle when no

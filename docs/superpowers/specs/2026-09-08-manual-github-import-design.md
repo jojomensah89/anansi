@@ -1,5 +1,8 @@
 # Manual GitHub Import Design
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 ## Goal
 
 GitHub imports must begin only after the user clicks the GitHub row's Import button in the extension popup. Loading, installing, or restarting the extension must not fetch or enqueue GitHub stars automatically.

@@ -1,6 +1,8 @@
 # Contributing to Anansi
 
-Anansi is a self-hosted library for supported browser saves, web pages and GitHub stars, searchable through the web app and eight read-only MCP tools.
+Anansi is a self-hosted library on the owner's Cloudflare account for X bookmarks, Reddit saves, GitHub stars, TikTok favorites and web pages, searchable through the web app and eight read MCP tools and four optional write tools.
+
+Local operation is for development and testing. AI is off by default. Agents use OAuth or named API keys; owner-granted writes cannot delete.
 
 ## Setup
 
@@ -30,7 +32,7 @@ Synthetic smoke uses isolated memory data. Automated checks do not prove signed-
 - apps/extension: capture, queue, imports and popup.
 - apps/web: TanStack Start UI, JSON API and HTTP MCP.
 - packages/db: SQLite/D1 schema, migrations and library operations.
-- packages/mcp: eight read-only tools and shared server.
+- packages/mcp: eight read tools, four optional writes and shared server.
 - packages/sources: capture contracts, capabilities and parsers.
 - packages/ui and packages/env: shared UI and runtime binding types.
 - wrangler.jsonc: resources, scheduling and request protection.

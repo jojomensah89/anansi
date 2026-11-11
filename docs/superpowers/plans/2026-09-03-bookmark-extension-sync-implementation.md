@@ -1,5 +1,8 @@
 # Anansi Reliable Bookmark Capture and Sync Implementation Plan
 
+> Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 **Date:** 2026-09-03
 **Design:** `docs/superpowers/specs/2026-09-03-bookmark-extension-sync-design.md`
 **Goal:** Reliably capture X, Reddit, TikTok, explicit webpage saves, and optional Chrome bookmarks into Anansi's canonical SQLite library without copying platform cookies or losing events when the Manifest V3 worker stops.
