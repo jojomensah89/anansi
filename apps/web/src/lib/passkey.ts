@@ -30,6 +30,9 @@ export function passkeyError(error: unknown): string | null {
 	if (!(error instanceof Error)) return "Something went wrong. Try again";
 	if (error.name === "NotAllowedError" || error.name === "AbortError") return null;
 	if (error.name === "InvalidStateError") return "This device already has a passkey here";
+	// Passkeys belong to a domain name; browsers refuse a bare IP such as 127.0.0.1.
+	if (error.name === "SecurityError" && typeof location !== "undefined" && /^[\d.]+$|^\[/.test(location.hostname))
+		return `Passkeys need a name, not an IP. Open ${location.protocol}//localhost${location.port ? `:${location.port}` : ""}`;
 	if (error.name === "NotSupportedError" || error.name === "SecurityError") return "This browser can’t use passkeys here";
 	const text = error.message;
 	if (text === "unauthorized") return "That secret didn’t work";
