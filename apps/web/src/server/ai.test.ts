@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { AiProviderError, createEmbeddingProvider, embed, generateTags, reciprocalRankFusion } from "./ai.ts";
+import { TOPIC_DEFINITIONS } from "@anansi/db";
+import { AiProviderError, createEmbeddingProvider, embed, generateTags, reciprocalRankFusion, topicsFromAnswers } from "./ai.ts";
 
 describe("Workers AI adapters", () => {
   test("normalizes strict tag JSON and rejects malformed output", async () => {
@@ -26,8 +27,8 @@ describe("Workers AI adapters", () => {
     expect(calls[0]!.model).toBe("@cf/cloudflare/clef-flash");
     expect(calls[0]!.input.model).toBe("clef-flash");
     expect(calls[0]!.input.state).toBe("a save");
-    expect(Object.keys(calls[0]!.input.questions)).toHaveLength(11);
-    expect(calls[0]!.input.questions.design).toEqual({ type: "noul", instructions: "Is this save mainly about Design?" });
+    expect(Object.keys(calls[0]!.input.questions)).toHaveLength(TOPIC_DEFINITIONS.length);
+    expect(calls[0]!.input.questions.design).toEqual({ type: "noul", instructions: "Is this save mainly about Design? UI, UX, graphic design, typography and visual work." });
 
     const none = { run: async () => ({ answers: { design: { noul: 0.2 } } }) };
     await expect(generateTags(none, "@cf/cloudflare/clef", "text")).resolves.toEqual([]);
@@ -49,5 +50,25 @@ describe("Workers AI adapters", () => {
       { id: "a", score: 0.03252247488101534 },
       { id: "b", score: 0.03252247488101534 },
     ]);
+  });
+});
+
+describe("choosing topics from Clef's answers", () => {
+  const pick = (answers: Record<string, number>) => topicsFromAnswers((id) => answers[id] ?? 0, 3);
+
+  test("keeps a hedged best topic so obvious saves are not left untagged", () => {
+    expect(pick({ "ai-ml": 0.42, learning: 0.35 })).toEqual(["ai-ml"]);
+  });
+
+  test("needs a clear yes for every topic after the best", () => {
+    expect(pick({ entertainment: 0.9, gaming: 0.62, music: 0.49 })).toEqual(["entertainment", "gaming"]);
+  });
+
+  test("leaves a save untagged when nothing fits", () => {
+    expect(pick({ finance: 0.29, health: 0.1 })).toEqual([]);
+  });
+
+  test("never keeps more than three", () => {
+    expect(pick({ "web-dev": 0.9, "ai-ml": 0.8, devops: 0.7, security: 0.6 })).toHaveLength(3);
   });
 });

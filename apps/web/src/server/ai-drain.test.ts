@@ -1,3 +1,4 @@
+import { TOPIC_DEFINITIONS } from "@anansi/db";
 import { expect, test } from "bun:test";
 import { type AnansiDb, aiEnrichmentJobs, aiProgress, claimDueAiJobs, insertClaimedAiJobs, itemTags, reconcileAiJobs, semanticChunks, semanticIndexStats, setAiSettings, upsertItems } from "@anansi/db";
 import { openTestDb } from "../../../../packages/db/src/test-db.ts";
@@ -34,8 +35,8 @@ function countQueries(db: AnansiDb) {
 	return counter;
 }
 
-test("packs five saves into one Clef request and reads each save's answers", async () => {
-	expect(CLEF_SAVES_PER_CALL).toBe(5);
+test("packs as many saves as fit in 64 questions into one Clef request and reads each save's answers", async () => {
+	expect(CLEF_SAVES_PER_CALL).toBe(Math.floor(64 / TOPIC_DEFINITIONS.length));
 	const calls: ClefInput[] = [];
 	const ai = {
 		run: async (_model: string, input: unknown) => {
@@ -48,10 +49,11 @@ test("packs five saves into one Clef request and reads each save's answers", asy
 		},
 	};
 	const tags = await generateTagsBatch(ai, CLEF, ["a", "b", "c", "d", "e", "f", "g"]);
-	expect(calls.map((call) => Object.keys(call.questions).length)).toEqual([55, 22]);
-	expect(calls[0]!.state).toEqual(["a", "b", "c", "d", "e"].map((text, index) => ({ id: `s${index}`, text })));
-	expect(calls[0]!.questions["s1.design"]).toEqual({ type: "noul", instructions: "Is save s1 mainly about Design?" });
-	// Three likeliest at one half or above; a save with none has no tags.
+	const n = TOPIC_DEFINITIONS.length;
+	expect(calls.map((call) => Object.keys(call.questions).length)).toEqual([3 * n, 3 * n, n]);
+	expect(calls[0]!.state).toEqual(["a", "b", "c"].map((text, index) => ({ id: `s${index}`, text })));
+	expect(calls[0]!.questions["s1.design"]).toEqual({ type: "noul", instructions: "Is save s1 mainly about Design? UI, UX, graphic design, typography and visual work." });
+	// The best topic from 0.3, others from one half; a save with none has no tags.
 	expect(tags.slice(0, 3)).toEqual([["ai-ml", "design", "security"], [], ["health"]]);
 });
 
@@ -94,7 +96,7 @@ test("a tagging pass handles forty saves inside the free-plan query budget", asy
 	const queries = countQueries(db);
 	const pass = await drainAi(db, { ai });
 	expect(pass).toMatchObject({ kind: "tagging", processed: TAG_DRAIN_LIMIT, claimed: TAG_DRAIN_LIMIT });
-	expect(ai.calls).toHaveLength(TAG_DRAIN_LIMIT / CLEF_SAVES_PER_CALL);
+	expect(ai.calls).toHaveLength(Math.ceil(TAG_DRAIN_LIMIT / CLEF_SAVES_PER_CALL));
 	// Settings, claim, unqueued, insert, tags, delete, item tags, complete.
 	expect(queries.count).toBeLessThanOrEqual(10);
 	expect(await aiProgress(db, "tagging")).toEqual({ complete: 40, pending: 60, failed: 0 });

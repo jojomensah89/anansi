@@ -225,6 +225,13 @@
       "when": 1794700800000,
       "tag": "0031_clef_tagging",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794787200000,
+      "tag": "0032_topics_v2",
+      "breakpoints": true
     }
   ]
 }

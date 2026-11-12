@@ -135,19 +135,24 @@ const clefAnswers = (output: unknown): Record<string, unknown> | null => {
   return isRecord(output.result) && isRecord(output.result.answers) ? output.result.answers : null;
 };
 
-/** The likeliest topics at one half or above; null when no answer was readable. */
-function topicsFromAnswers(answer: (topicId: string) => unknown, max: number): string[] | null {
+/** The single best topic is kept from this probability; it is usually right even when Clef hedges. */
+export const BEST_TOPIC_MIN = 0.3;
+/** Further topics need a clear yes. */
+export const EXTRA_TOPIC_MIN = 0.5;
+
+/** The best topic at 0.3 or above plus others at 0.5 or above; null when no answer was readable. */
+export function topicsFromAnswers(answer: (topicId: string) => unknown, max: number): string[] | null {
   const read = TOPIC_DEFINITIONS.map((topic) => ({ id: topic.id as string, probability: yesProbability(answer(topic.id)) }));
   if (read.every(({ probability }) => probability === null)) return null;
-  const likely = read.flatMap(({ id, probability }) => probability !== null && probability >= 0.5 ? [{ id, probability }] : []);
-  likely.sort((a, b) => b.probability - a.probability);
-  return canonicalizeTopicIds(likely.slice(0, max).map(({ id }) => id), max);
+  const ranked = read.flatMap(({ id, probability }) => probability !== null ? [{ id, probability }] : []).sort((a, b) => b.probability - a.probability);
+  const kept = ranked.filter(({ probability }, index) => probability >= (index === 0 ? BEST_TOPIC_MIN : EXTRA_TOPIC_MIN));
+  return canonicalizeTopicIds(kept.slice(0, max).map(({ id }) => id), max);
 }
 
 /**
  * Clef is a decision model, not chat: it reads the save once and answers one
- * yes/no question per topic with a probability. No answer above one half
- * means the save has no topic, which is a valid result.
+ * yes/no question per topic with a probability. A save whose best answer is
+ * under 0.3 has no topic, which is a valid result.
  */
 async function generateClefTags(ai: AiBinding, model: string, clef: "clef" | "clef-flash", text: string, max: number): Promise<string[]> {
   const questions = Object.fromEntries(TOPIC_DEFINITIONS.map((topic) => [topic.id, topicQuestion(topic, "this save")]));

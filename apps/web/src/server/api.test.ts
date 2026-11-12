@@ -1,3 +1,4 @@
+import { TOPIC_TAXONOMY_VERSION } from "@anansi/db";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { parseExtensionConfig } from "@anansi/sources";
 import { extensionClients } from "@anansi/db";
@@ -178,7 +179,7 @@ describe("handleApi", () => {
 		const first = await readJson(response);
 		expect(response.status).toBe(200);
 		expect((await db.select().from(itemTags)).some((assignment) => assignment.itemId === item.id && assignment.provenance === "ai")).toBe(false);
-		expect(first.taxonomyVersion).toBe("v1");
+		expect(first.taxonomyVersion).toBe(TOPIC_TAXONOMY_VERSION);
 		expect(first.taggingProgress.pending).toBeGreaterThan(0);
 		const jobsAfterFirst = await db.select().from(aiEnrichmentJobs);
 		await applyAiTags(db, item.id, ["web-dev"], "test-model");
