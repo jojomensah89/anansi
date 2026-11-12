@@ -105,12 +105,118 @@ export function normalizeTags(value: unknown, max = 5): string[] {
   return unique;
 }
 
+/** Clef's request body names the model without the catalogue prefix. */
+function clefModelName(model: string): "clef" | "clef-flash" | null {
+  const name = model.split("/").pop() ?? "";
+  if (name === "clef") return "clef";
+  return name.startsWith("clef-flash") ? "clef-flash" : null;
+}
+
+/** A yes/no answer arrives as a bare probability or wrapped in an object. */
+function yesProbability(answer: unknown): number | null {
+  if (typeof answer === "number") return Number.isFinite(answer) ? answer : null;
+  if (typeof answer === "boolean") return answer ? 1 : 0;
+  if (!isRecord(answer)) return null;
+  for (const key of ["noul", "probability", "yes", "score", "value"]) {
+    const nested = yesProbability(answer[key]);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
+const topicQuestion = (topic: (typeof TOPIC_DEFINITIONS)[number], subject: string) => {
+  const description = (topic as { description?: string }).description;
+  return { type: "noul", instructions: `Is ${subject} mainly about ${topic.label}?${description ? ` ${description}` : ""}` };
+};
+
+const clefAnswers = (output: unknown): Record<string, unknown> | null => {
+  if (!isRecord(output)) return null;
+  if (isRecord(output.answers)) return output.answers;
+  return isRecord(output.result) && isRecord(output.result.answers) ? output.result.answers : null;
+};
+
+/** The likeliest topics at one half or above; null when no answer was readable. */
+function topicsFromAnswers(answer: (topicId: string) => unknown, max: number): string[] | null {
+  const read = TOPIC_DEFINITIONS.map((topic) => ({ id: topic.id as string, probability: yesProbability(answer(topic.id)) }));
+  if (read.every(({ probability }) => probability === null)) return null;
+  const likely = read.flatMap(({ id, probability }) => probability !== null && probability >= 0.5 ? [{ id, probability }] : []);
+  likely.sort((a, b) => b.probability - a.probability);
+  return canonicalizeTopicIds(likely.slice(0, max).map(({ id }) => id), max);
+}
+
+/**
+ * Clef is a decision model, not chat: it reads the save once and answers one
+ * yes/no question per topic with a probability. No answer above one half
+ * means the save has no topic, which is a valid result.
+ */
+async function generateClefTags(ai: AiBinding, model: string, clef: "clef" | "clef-flash", text: string, max: number): Promise<string[]> {
+  const questions = Object.fromEntries(TOPIC_DEFINITIONS.map((topic) => [topic.id, topicQuestion(topic, "this save")]));
+  const output = await ai.run(model, { model: clef, state: text.slice(0, MAX_TEXT), questions }).catch((error) => { throw classifyAiError(error); });
+  const answers = clefAnswers(output);
+  if (!answers) throw new AiProviderError("malformed", "Workers AI returned no Clef answers");
+  const topics = topicsFromAnswers((id) => answers[id], max);
+  if (!topics) throw new AiProviderError("malformed", "Workers AI returned unreadable Clef answers");
+  return topics;
+}
+
+/** Clef takes 64 questions a request; five saves ask 55 of them. */
+export const CLEF_SAVES_PER_CALL = Math.max(1, Math.floor(64 / TOPIC_DEFINITIONS.length));
+/** Enough of a save to tell its topic, and small enough to pack five together. */
+const PACKED_TEXT = 2_000;
+
+/**
+ * Several saves in one Clef request. Question ids are `s<index>.<topic>`.
+ * A save whose answers cannot be read is asked again on its own, so one odd
+ * reply never costs the rest of the group.
+ */
+async function generateClefTagsPacked(ai: AiBinding, model: string, clef: "clef" | "clef-flash", texts: readonly string[], max: number): Promise<Array<string[] | AiProviderError>> {
+  const single = (text: string) => generateClefTags(ai, model, clef, text, max).catch((error) => error instanceof AiProviderError ? error : classifyAiError(error));
+  if (texts.length === 1) return [await single(texts[0]!)];
+  const state = texts.map((text, index) => ({ id: `s${index}`, text: text.slice(0, PACKED_TEXT) }));
+  const questions = Object.fromEntries(texts.flatMap((_, index) => TOPIC_DEFINITIONS.map((topic) => [`s${index}.${topic.id}`, topicQuestion(topic, `save s${index}`)])));
+  let answers: Record<string, unknown> | null = null;
+  try {
+    answers = clefAnswers(await ai.run(model, { model: clef, state, questions }));
+  } catch (error) {
+    const failure = classifyAiError(error);
+    // Out of quota: asking again one by one would only spend more of it.
+    if (failure.code === "quota") return texts.map(() => failure);
+  }
+  return Promise.all(texts.map(async (text, index) => {
+    const nested = answers?.[`s${index}`];
+    const topics = answers ? topicsFromAnswers((id) => answers[`s${index}.${id}`] ?? (isRecord(nested) ? nested[id] : undefined), max) : null;
+    return topics ?? single(text);
+  }));
+}
+
+/**
+ * Topics for many saves at once. Each entry is that save's topics or the
+ * error that stopped it, so one failure does not sink the batch.
+ */
+export async function generateTagsBatch(ai: AiBinding, model: string, texts: readonly string[], max = 3): Promise<Array<string[] | AiProviderError>> {
+  const clef = clefModelName(model);
+  if (!clef) {
+    return Promise.all(texts.map((text) => generateTags(ai, model, text, max).catch((error) => error instanceof AiProviderError ? error : classifyAiError(error))));
+  }
+  const groups: string[][] = [];
+  for (let offset = 0; offset < texts.length; offset += CLEF_SAVES_PER_CALL) groups.push(texts.slice(offset, offset + CLEF_SAVES_PER_CALL));
+  return (await Promise.all(groups.map((group) => generateClefTagsPacked(ai, model, clef, group, max)))).flat();
+}
+
+/** Workers AI embedding models take an array of texts in one request. */
+export async function embedBatch(ai: AiBinding, model: string, texts: readonly string[], dimensions: number): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const output = await ai.run(model, { text: texts.map((text) => text.slice(0, MAX_TEXT)) }).catch((error) => { throw classifyAiError(error); });
+  const data = Array.isArray(output) ? output : (output as { data?: unknown })?.data;
+  if (!Array.isArray(data) || data.length !== texts.length) throw new AiProviderError("malformed", "Workers AI returned an incomplete embedding batch");
+  return data.map((vector) => validateVector(vector, dimensions));
+}
+
 export async function generateTags(ai: AiBinding, model: string, text: string, max = 3): Promise<string[]> {
+  const clef = clefModelName(model);
+  if (clef) return generateClefTags(ai, model, clef, text, max);
   const allowed = TOPIC_DEFINITIONS.map(({ id, label }) => `${id} (${label})`).join(", ");
-  const isClef = model.includes("clef");
-  const prompt = isClef
-    ? `Classify this content into up to ${max} topic IDs strictly from this allowlist: ${allowed}. Return only a JSON array of matching IDs with no explanation.\n\n${text.slice(0, MAX_TEXT)}`
-    : `Return only a JSON array of up to ${max} topic IDs from this allowlist: ${allowed}. Do not invent labels or translate them.\n\n${text.slice(0, MAX_TEXT)}`;
+  const prompt = `Return only a JSON array of up to ${max} topic IDs from this allowlist: ${allowed}. Do not invent labels or translate them.\n\n${text.slice(0, MAX_TEXT)}`;
   const output = await ai.run(model, { prompt }).catch((error) => { throw classifyAiError(error); });
   const raw = typeof output === "string"
     ? output
@@ -121,6 +227,9 @@ export async function generateTags(ai: AiBinding, model: string, text: string, m
   } else if (typeof raw === "string") {
     const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     try { parsed = JSON.parse(cleaned); } catch { throw new AiProviderError("malformed", "Workers AI returned malformed tag JSON"); }
+  } else if (Array.isArray(raw) || isRecord(raw)) {
+    // Workers AI hands back already-parsed JSON when the model emits JSON.
+    parsed = raw;
   } else {
     throw new AiProviderError("malformed", "Workers AI returned no tag text");
   }

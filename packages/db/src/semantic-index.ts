@@ -14,14 +14,16 @@ import type { AnansiDb } from "./types.ts";
 export type SemanticChunkRow = typeof semanticChunks.$inferSelect;
 export type SemanticChunkVector = { id: string; contentHash: string; values: number[] };
 
-function boundedGroups<T>(values: readonly T[], size = 7): T[][] {
+// Six is the default because a semantic chunk row binds fifteen parameters and
+// D1 rejects statements with more than 100.
+function boundedGroups<T>(values: readonly T[], size = 6): T[][] {
 	const groups: T[][] = [];
 	for (let offset = 0; offset < values.length; offset += size) groups.push(values.slice(offset, offset + size));
 	return groups;
 }
 
 /** Prepare D1's authoritative chunk manifests before any vector is published. */
-async function planSemanticChunks(item: typeof items.$inferSelect, model: string, generation = 1) {
+export async function planSemanticChunks(item: Pick<typeof items.$inferSelect, "id" | "title" | "body" | "articleText">, model: string, generation = 1) {
 	const projection = semanticText(item);
 	const parentHash = await contentHash(projection);
 	const texts = chunkSemanticText(projection);

@@ -9,10 +9,30 @@ describe("Workers AI adapters", () => {
     await expect(generateTags(good, "model", "text")).resolves.toEqual(["design", "ai-ml"]);
 
     const fenced = { run: async () => ({ response: '```json\n["Design", "AI / ML"]\n```' }) };
-    await expect(generateTags(fenced, "@cf/clef-flash-9b", "text")).resolves.toEqual(["design", "ai-ml"]);
+    await expect(generateTags(fenced, "@cf/custom/chat", "text")).resolves.toEqual(["design", "ai-ml"]);
 
     const directArray = { run: async () => ["Design", "AI / ML"] };
-    await expect(generateTags(directArray, "@cf/clef-flash-9b", "text")).resolves.toEqual(["design", "ai-ml"]);
+    await expect(generateTags(directArray, "@cf/custom/chat", "text")).resolves.toEqual(["design", "ai-ml"]);
+
+    const parsedResponse = { run: async () => ({ response: ["design"] }) };
+    await expect(generateTags(parsedResponse, "@cf/custom/chat", "text")).resolves.toEqual(["design"]);
+  });
+
+  test("asks Clef one yes/no question per topic and keeps the likeliest", async () => {
+    const calls: Array<{ model: string; input: any }> = [];
+    const answers: Record<string, unknown> = { design: { noul: 0.7 }, "ai-ml": { noul: 0.9 }, security: 0.6, finance: { noul: 0.55 }, health: { noul: 0.1 } };
+    const ai = { run: async (model: string, input: unknown) => { calls.push({ model, input }); return { model: "clef-flash", answers, usage: {} }; } };
+    await expect(generateTags(ai, "@cf/cloudflare/clef-flash", "a save")).resolves.toEqual(["ai-ml", "design", "security"]);
+    expect(calls[0]!.model).toBe("@cf/cloudflare/clef-flash");
+    expect(calls[0]!.input.model).toBe("clef-flash");
+    expect(calls[0]!.input.state).toBe("a save");
+    expect(Object.keys(calls[0]!.input.questions)).toHaveLength(11);
+    expect(calls[0]!.input.questions.design).toEqual({ type: "noul", instructions: "Is this save mainly about Design?" });
+
+    const none = { run: async () => ({ answers: { design: { noul: 0.2 } } }) };
+    await expect(generateTags(none, "@cf/cloudflare/clef", "text")).resolves.toEqual([]);
+    const broken = { run: async () => ({ response: "[]" }) };
+    await expect(generateTags(broken, "@cf/cloudflare/clef-flash", "text")).rejects.toMatchObject({ code: "malformed" });
   });
 
   test("accepts Workers AI embedding response shapes", async () => {

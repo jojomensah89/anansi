@@ -93,7 +93,7 @@ Library data backup: use **Saved views → Download library data (no media files
 
 Anansi leverages Cloudflare Workers AI and Vectorize:
 
-- **Automatic Tagging**: Powered by `@cf/clef-flash-9b` to assign concise, consistent topic tags to saves as they are captured.
+- **Automatic Tagging**: Powered by `@cf/cloudflare/clef-flash` to assign concise, consistent topic tags to saves as they are captured.
 - **Semantic Search**: Powered by `@cf/baai/bge-small-en-v1.5` and Cloudflare Vectorize to find items by concept and meaning alongside BM25 keyword search.
 - Both features are off by default and can be toggled on/off in **Settings** (`/settings`).
 

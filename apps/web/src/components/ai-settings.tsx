@@ -14,7 +14,7 @@ import { Input } from "@anansi/ui/components/input";
 import { Progress } from "@anansi/ui/components/progress";
 import { Switch } from "@anansi/ui/components/switch";
 import { Info, Pause, Play, RefreshCw, RotateCcw } from "lucide-react";
-import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import { api, type AiSettingsResponse } from "../lib/api.ts";
 import { SettingsNotice, SettingsRow } from "./settings-panel.tsx";
 
@@ -51,8 +51,15 @@ export function useAiSettings() {
 export function AiSettings({ data, setData }: { data: AiSettingsResponse; setData: Dispatch<SetStateAction<AiSettingsResponse | null>> }) {
 	const [error, setError] = useState<string | null>(null);
 	const [reclassifying, setReclassifying] = useState(false);
-	const [watchingTagging, setWatchingTagging] = useState(data.settings.autoTaggingEnabled === 1 && data.taggingProgress.pending > 0);
-	const [watchingSemantic, setWatchingSemantic] = useState(data.settings.semanticSearchEnabled === 1 && data.settings.semanticIndexPaused !== 1 && (data.semanticIndex.pending > 0 || data.embeddingProgress.pending > 0));
+	/** Saves still waiting to be tagged or indexed, when this server can do the work. */
+	const backlog = data.available && (
+		(data.settings.autoTaggingEnabled === 1 && data.taggingProgress.pending > 0)
+		|| (data.capabilities?.semanticSearch !== false && data.settings.semanticSearchEnabled === 1 && data.settings.semanticIndexPaused !== 1 && data.semanticIndex.pending > 0)
+	);
+	const backlogRef = useRef(backlog);
+	backlogRef.current = backlog;
+	/** True while this page is working through the backlog. */
+	const [draining, setDraining] = useState(backlog);
 	/** The last estimate, kept as quiet info once indexing is on. */
 	const [estimate, setEstimate] = useState<Preview | null>(null);
 	/** Set when the estimate is larger than what the cap leaves, so a dialog can ask. */
@@ -61,59 +68,44 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 	const [capDraft, setCapDraft] = useState(data.settings.semanticBudgetLimit.toLocaleString());
 	const [saving, setSaving] = useState(false);
 
+	// The server does one bounded pass per request, so the page asks again as
+	// soon as each pass returns: one request in flight, only while visible.
 	useEffect(() => {
-		if (!watchingSemantic) return;
+		if (!draining) return;
 		let stopped = false;
-		let idlePolls = 0;
-		let pollCount = 0;
-		const timer = window.setInterval(() => {
-			void api.ai().then((next) => {
-				if (stopped) return;
-				pollCount += 1;
-				setData(next);
-				if (next.semanticIndex.pending > 0 || next.embeddingProgress.pending > 0) idlePolls = 0;
-				else idlePolls += 1;
-				if ((pollCount >= 5 && idlePolls >= 3) || pollCount >= 60) setWatchingSemantic(false);
-			}).catch((e) => {
-				if (stopped) return;
-				setError(message(e, "Could not refresh indexing progress"));
-				setWatchingSemantic(false);
-			});
-		}, 2000);
-		return () => { stopped = true; window.clearInterval(timer); };
-	}, [watchingSemantic, setData]);
+		void (async () => {
+			while (!stopped && document.visibilityState === "visible") {
+				try {
+					const next = await api.drainAi();
+					if (stopped) return;
+					setData(next);
+					if (next.error) setError(next.error);
+					// Stop unless the pass made progress, so nothing can spin the loop.
+					if (next.done || !(next.processed > 0)) break;
+				} catch (e) {
+					if (!stopped) setError(message(e, "Could not continue tagging and indexing"));
+					break;
+				}
+			}
+			if (stopped) return;
+			setDraining(false);
+			setReclassifying(false);
+		})();
+		return () => { stopped = true; };
+	}, [draining, setData]);
 
 	useEffect(() => {
-		if (!watchingTagging) return;
-		let stopped = false;
-		const timer = window.setInterval(() => {
-			void api.ai().then((next) => {
-				if (stopped) return;
-				setData(next);
-				if (next.taggingProgress.pending === 0) {
-					setWatchingTagging(false);
-					setReclassifying(false);
-				}
-			}).catch((e) => {
-				if (stopped) return;
-				setError(message(e, "Could not refresh tagging progress"));
-				setWatchingTagging(false);
-				setReclassifying(false);
-			});
-		}, 2000);
-		return () => { stopped = true; window.clearInterval(timer); };
-	}, [watchingTagging, setData]);
+		const resume = () => { if (document.visibilityState === "visible" && backlogRef.current) setDraining(true); };
+		document.addEventListener("visibilitychange", resume);
+		return () => document.removeEventListener("visibilitychange", resume);
+	}, []);
 
 	const update = (key: "semanticSearchEnabled" | "autoTaggingEnabled", value: boolean) => {
 		setData({ ...data, settings: { ...data.settings, [key]: value ? 1 : 0 } });
-		if (key === "autoTaggingEnabled" && !value) {
-			setWatchingTagging(false);
-			setReclassifying(false);
-		}
+		if (key === "autoTaggingEnabled" && !value) setReclassifying(false);
 		api.updateAi({ [key]: value }).then((next) => {
 			setData(next);
-			setWatchingTagging(next.settings.autoTaggingEnabled === 1 && next.taggingProgress.pending > 0);
-			if (key === "semanticSearchEnabled") setWatchingSemantic(value && next.settings.semanticIndexPaused !== 1);
+			if (value) setDraining(true);
 		}).catch((e) => {
 			setError(message(e, "Could not save settings"));
 			void api.ai().then(setData).catch(() => undefined);
@@ -137,7 +129,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 				setData(saved);
 				setCapDraft(saved.settings.semanticBudgetLimit.toLocaleString());
 				setEstimate(next);
-				setWatchingSemantic(true);
+				setDraining(true);
 			} catch (e) {
 				setError(message(e, "Could not turn on search by meaning"));
 			} finally { setSaving(false); }
@@ -168,7 +160,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 		try {
 			const next = await api.updateAi({ semanticIndexPaused: paused });
 			setData(next);
-			setWatchingSemantic(!paused && next.settings.semanticSearchEnabled === 1);
+			if (!paused && next.settings.semanticSearchEnabled === 1) setDraining(true);
 		} catch (e) { setError(message(e, "Could not update indexing")); }
 	};
 
@@ -179,7 +171,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 			setData((previous) => previous ? { ...previous, taxonomyVersion: next.taxonomyVersion, progress: next.progress, taggingProgress: next.taggingProgress } : previous);
 			const queued = data.settings.autoTaggingEnabled === 1 && next.taggingProgress.pending > 0;
 			setReclassifying(queued);
-			setWatchingTagging(queued);
+			if (queued) setDraining(true);
 		} catch (e) {
 			setError(message(e, "Could not reclassify topics"));
 			setReclassifying(false);
@@ -224,7 +216,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 							</Button>
 							<p className="settings-figure settings-index-figure">
 								{indexed.toLocaleString()} indexed · {pending.toLocaleString()} pending · {total.toLocaleString()} total
-								{paused ? " · paused" : watchingSemantic ? " · updating" : ""}
+								{paused ? " · paused" : draining && pending > 0 ? " · updating" : ""}
 							</p>
 						</div>
 						{cloudflare && (
@@ -274,7 +266,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 								variant="outline"
 								size="sm"
 								className="settings-index-action"
-								disabled={reclassifying || watchingTagging || data.capabilities?.autoTagging === false}
+								disabled={reclassifying || (draining && tagging.pending > 0) || data.capabilities?.autoTagging === false}
 								onClick={() => void reclassify()}
 							>
 								<RefreshCw {...ICON} />

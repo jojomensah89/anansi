@@ -44,8 +44,10 @@ async function send<T>(path: string, method: "PATCH" | "DELETE", body?: unknown)
 async function responseError(res: Response, path: string): Promise<Error> {
   let detail = "";
   try {
-    const body = (await res.json()) as { error?: string; message?: string };
-    detail = body.error ?? body.message ?? "";
+    const body = (await res.json()) as { error?: string; message?: string; unhandled?: boolean };
+    // The framework answers an uncaught server error with the bare class name.
+    const hidden = body.unhandled === true || body.message === "HTTPError";
+    detail = body.error ?? (hidden ? "" : body.message) ?? "";
   } catch {
     // An empty or non-JSON error response still has useful HTTP status text.
   }
@@ -219,6 +221,8 @@ export const api = {
 	semanticPreview: (signal?: AbortSignal) => get<{ estimate: { itemCount: number; totalChunks: number; newChunks: number; estimatedCredits: number }; credits: { used: number; limit: number; remaining: number; month: string }; runtime: "local" | "cloudflare" }>("/api/ai/semantic-preview", signal),
   updateAi: (body: { semanticSearchEnabled?: boolean; semanticIndexPaused?: boolean; semanticBudgetLimit?: number; confirmSemanticBackfill?: boolean; autoTaggingEnabled?: boolean }) => send<AiSettingsResponse>("/api/ai", "PATCH", body),
   reclassifyAiTags: () => post<{ taxonomyVersion: string; progress: AiSettingsResponse["progress"]; taggingProgress: AiSettingsResponse["taggingProgress"] }>("/api/ai/reclassify", {}),
+  /** One bounded pass over the AI backlog; call again until `done`. */
+  drainAi: () => post<AiSettingsResponse & { processed: number; pending: number; done: boolean; error?: string }>("/api/ai/drain", {}),
   stats: (signal?: AbortSignal) =>
     get<{
       items: number;

@@ -29,21 +29,16 @@ describe("AI job reconciliation", () => {
 	test("chunks the default reconciliation batch without overlap or bind overflow", () => {
 		const rows = Array.from({ length: 100 }, (_, index) => index);
 		const chunks = chunkAiJobRows(rows);
-		expect(AI_JOB_RECONCILIATION_CHUNK_SIZE).toBe(16);
-		expect(chunks.map((chunk) => chunk.length)).toEqual([
-			16,
-			16,
-			16,
-			16,
-			16,
-			16,
-			4,
-		]);
+		expect(AI_JOB_RECONCILIATION_CHUNK_SIZE).toBe(8);
+		expect(chunks.map((chunk) => chunk.length)).toEqual([...Array(12).fill(8), 4]);
 		expect(chunks.flat()).toEqual(rows);
 		expect(new Set(chunks.flat()).size).toBe(rows.length);
-		// Reconciliation supplies six columns per row, so the largest chunk is
-		// 96 bound parameters, below D1's 100-parameter limit.
-		expect(Math.max(...chunks.map((chunk) => chunk.length)) * 6).toBeLessThanOrEqual(100);
+		// Count what the statement really binds: Drizzle adds a parameter for
+		// every column with a schema default, and D1 rejects more than 100.
+		const db = openTestDb();
+		const full = Array.from({ length: AI_JOB_RECONCILIATION_CHUNK_SIZE }, (_, index) => ({ id: `job-${index}`, itemId: "item", kind: "tagging", contentHash: "hash", createdAt: 1, updatedAt: 1 }));
+		const statement = db.insert(aiEnrichmentJobs).values(full).onConflictDoNothing().toSQL();
+		expect(statement.params.length).toBeLessThanOrEqual(100);
 	});
 
 	test("eventually queues items beyond the first 500 rows", async () => {

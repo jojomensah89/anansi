@@ -43,3 +43,7 @@ export { recordPublicGithubCheck } from "./sync-requests.ts";
 
 export { claimPublicGithubCheck } from "./sync-requests.ts";
 export * from "./passkeys.ts";
+
+export { aiProgressAll, claimDueAiJobs, completeClaimedAiJobs, deleteClaimedAiJobs, failClaimedAiJobs, insertClaimedAiJobs, itemsWithStaleSemanticRows, loadAiSourceItems, markSemanticChunksCompleteBulk, publishAiTags, releaseClaimedAiJobs, stageSemanticChunksBulk, unqueuedAiItems } from "./ai-bulk.ts";
+export type { AiSourceItem, AiTagResult, ClaimedAiJob, SemanticChunkDraft } from "./ai-bulk.ts";
+export { planSemanticChunks } from "./semantic-index.ts";

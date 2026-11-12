@@ -27,7 +27,7 @@ import {
 	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
 	InvalidListCursorError, InvalidSearchCursorError, InvalidCreatorCursorError,
 	getLibraryRestore,
-  getAiSettings, setAiSettings, reconcileAiJobs, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
+  getAiSettings, setAiSettings, reconcileAiJobs, aiProgress, aiProgressAll, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
   clearSemanticIndex, estimateSemanticBackfill, semanticIndexStats,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
@@ -43,6 +43,7 @@ import type { AiBinding, VectorizeBinding } from "./ai.ts";
 import { createVectorIndex } from "./ai.ts";
 import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
 import { ingestCapture } from "./ingest.ts";
+import { drainAi } from "./ai-drain.ts";
 import { handleRestoreRequest } from "./restore.ts";
 import {
 	isToggleableSource,
@@ -393,27 +394,66 @@ const statsRoute: Route = {
   },
 };
 
+type AiSettings = Awaited<ReturnType<typeof getAiSettings>>;
+
+/** What the settings page shows, in three queries. */
+async function aiOverview(env: ApiEnv, settings: AiSettings) {
+  return {
+    settings,
+    taxonomyVersion: TOPIC_TAXONOMY_VERSION,
+    ...await aiProgressAll(env.db, settings),
+    semanticIndex: await semanticIndexStats(env.db, settings.embeddingModel, settings.semanticGeneration),
+    available: Boolean(env.ai),
+    capabilities: {
+      semanticSearch: Boolean(env.ai && env.vectorize),
+      autoTagging: Boolean(env.ai),
+    },
+    runtime: env.ai ? "cloudflare" : "none",
+  };
+}
+
 const aiSettingsRoute: Route = {
   method: "GET",
   path: "/api/ai",
+  handle: async ({ env }) => json(await aiOverview(env, await getAiSettings(env.db))),
+};
+
+/**
+ * Work through the backlog one bounded pass at a time. The settings page
+ * calls this back to back while it is open; each call is its own invocation
+ * with its own query budget.
+ */
+const aiDrainRoute: Route = {
+  method: "POST",
+  path: "/api/ai/drain",
   handle: async ({ env }) => {
-    const settings = await getAiSettings(env.db);
-    return json({
-      settings,
-      taxonomyVersion: TOPIC_TAXONOMY_VERSION,
-      progress: await aiProgress(env.db),
-      embeddingProgress: await aiProgress(env.db, "embedding", settings.embeddingModel),
-      taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
-      semanticIndex: await semanticIndexStats(env.db, settings.embeddingModel, settings.semanticGeneration),
-      available: Boolean(env.ai),
-      capabilities: {
-        semanticSearch: Boolean(env.ai && env.vectorize),
-        autoTagging: Boolean(env.ai),
-      },
-      runtime: env.ai ? "cloudflare" : "none",
-    });
+    const before = await getAiSettings(env.db);
+    const pass = await drainAi(env.db, env, { settings: before });
+    // Indexing spends credits, so only that pass needs the settings re-read.
+    const overview = await aiOverview(env, pass.kind === "embedding" ? await getAiSettings(env.db) : before);
+    const tagging = before.autoTaggingEnabled === 1 && env.ai ? overview.taggingProgress.pending : 0;
+    const indexing = before.semanticSearchEnabled === 1 && before.semanticIndexPaused !== 1 && env.ai && env.vectorize ? overview.semanticIndex.pending : 0;
+    const pending = tagging + indexing;
+    // A pass that finishes nothing means the rest is waiting on a retry.
+    return json({ ...overview, processed: pass.processed, pending, done: pending === 0 || pass.processed === 0, error: pass.error });
   },
 };
+
+/** Tag (and index) what was just saved, after the reply, a few saves at a time. */
+async function enrichNewSaves(env: ApiEnv): Promise<void> {
+  try {
+    const settings = await getAiSettings(env.db);
+    if (settings.autoTaggingEnabled !== 1 && settings.semanticSearchEnabled !== 1) return;
+    const first = await drainAi(env.db, env, { settings, tagLimit: 5, embedLimit: 2 });
+    // A tagging pass leaves indexing for a second, equally small pass.
+    if (first.kind === "tagging" && settings.semanticSearchEnabled === 1) {
+      await drainAi(env.db, env, { settings: { ...settings, autoTaggingEnabled: 0 }, embedLimit: 2 });
+    }
+  } catch (error) {
+    // The save is stored; the settings page and the schedule pick this up.
+    console.error("AI enrichment after ingest failed", error);
+  }
+}
 
 const semanticPreviewRoute: Route = {
 	method: "GET",
@@ -641,6 +681,10 @@ const ingestRoute: Route = {
 			const work = runPreviewPass(env.db, env.media);
 			if (env.waitUntil) env.waitUntil(work); else await work;
 		}
+		if (env.ai && result.status < 300) {
+			const work = enrichNewSaves(env);
+			if (env.waitUntil) env.waitUntil(work); else await work;
+		}
 
 		return json(result.body, result.status);
 	},
@@ -712,7 +756,7 @@ export const ROUTES: Route[] = [
 	extensionToggleSourceRoute,
 	creatorsRoute,
 	statsRoute, extensionStatsRoute,
-	aiSettingsRoute, semanticPreviewRoute, aiSettingsUpdateRoute, aiReclassifyRoute,
+	aiSettingsRoute, semanticPreviewRoute, aiSettingsUpdateRoute, aiReclassifyRoute, aiDrainRoute,
 	extensionConfigRoute,
 	extensionHeartbeatRoute,
 	librarySyncRoute,
@@ -817,13 +861,22 @@ async function handleApiInner(
 		if (route.method !== request.method) continue;
 		const params = paramsFor(route.path, path);
 		if (!params) continue;
-		const response = await route.handle({
-			env,
-			request,
-			url,
-			q: url.searchParams,
-			params,
-		});
+		let response: Response;
+		try {
+			response = await route.handle({
+				env,
+				request,
+				url,
+				q: url.searchParams,
+				params,
+			});
+		} catch (error) {
+			// Uncaught, the framework replies with a bare "HTTPError". The caller is
+			// already authorized here, so say what actually failed.
+			console.error(`${request.method} ${path} failed`, error);
+			const detail = error instanceof Error ? error.message : String(error);
+			response = json({ error: `Server error: ${detail.slice(0, 300)}` }, 500);
+		}
 		response.headers.set("cache-control", "private, no-store");
 		response.headers.set("x-content-type-options", "nosniff");
 		return response;

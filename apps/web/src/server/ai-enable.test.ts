@@ -9,7 +9,7 @@ test("enabling queues all 44 existing saves before cron, then cron publishes tag
   await upsertItems(db, Array.from({ length: 44 }, (_, i) => ({ source: "web", externalId: `backfill-${i}`, url: `https://example.com/${i}`, kind: "article", body: "Software development", savedAt: i + 1, savedAtIsExact: true, metrics: {}, media: [], links: [], raw: {} })));
   expect((await getAiSettings(db)).autoTaggingEnabled).toBe(0);
   let calls = 0;
-  const ai = { run: async () => { calls++; return { response: '["technology"]' }; } };
+  const ai = { run: async () => { calls++; return { answers: { "web-dev": { noul: 0.9 } } }; } };
   const env = { db, libraryToken: "test", ai };
   const response = await handleApi(env, new Request("https://anansi.test/api/ai", { method: "PATCH", headers: { authorization: "Bearer test", "content-type": "application/json" }, body: JSON.stringify({ autoTaggingEnabled: true }) }));
   expect(response.status).toBe(200);
@@ -39,8 +39,9 @@ test("already enabled upgraded libraries count unqueued saves and cron backfills
  const settings = await getAiSettings(db);
  expect(await semanticIndexStats(db, settings.embeddingModel)).toEqual({ total: 44, indexed: 0, pending: 44 });
  expect(await aiProgress(db, "tagging")).toEqual({ complete: 0, pending: 44, failed: 0 });
- await runAiJobs(db, { AI: { run: async () => ({ response: '["technology"]' }) } });
- expect((await db.select().from(aiEnrichmentJobs)).length).toBe(12);
- await runAiJobs(db, { AI: { run: async () => ({ response: '["technology"]' }) } });
- expect((await db.select().from(aiEnrichmentJobs)).length).toBe(24);
+ const ai = { run: async () => ({ answers: { "web-dev": { noul: 0.9 } } }) };
+ await runAiJobs(db, { AI: ai });
+ expect(await aiProgress(db, "tagging")).toEqual({ complete: 40, pending: 4, failed: 0 });
+ await runAiJobs(db, { AI: ai });
+ expect(await aiProgress(db, "tagging")).toEqual({ complete: 44, pending: 0, failed: 0 });
 });

@@ -11,7 +11,12 @@ import {
 export type AiJobKind = "embedding" | "tagging";
 export type AiJob = typeof aiEnrichmentJobs.$inferSelect & { token: string };
 export type AiJobFailureCode = "quota" | "unavailable" | "malformed" | "dimension" | "unknown";
-export const AI_JOB_RECONCILIATION_CHUNK_SIZE = 16;
+/**
+ * D1 rejects statements with more than 100 bound parameters. Drizzle binds
+ * every column that has a schema default as well as the supplied ones, so a
+ * job row costs ten parameters, not six: eight rows stay under the ceiling.
+ */
+export const AI_JOB_RECONCILIATION_CHUNK_SIZE = 8;
 
 /**
  * Drizzle's SQLite drivers expose changed rows at the root while D1 exposes
@@ -74,7 +79,7 @@ export async function getAiSettings(db: AnansiDb) {
   const [row] = await db.select().from(aiSettings).where(eq(aiSettings.id, 1));
   const now = Math.floor(Date.now() / 1000);
   const month = currentUtcMonth(now);
-  if (!row) return { id: 1, semanticSearchEnabled: 0, semanticIndexPaused: 0, semanticBudgetLimit: 10000, semanticBudgetUsed: 0, semanticBudgetMonth: month, semanticOptedInAt: null, semanticGeneration: 1, autoTaggingEnabled: 0, embeddingModel: "@cf/baai/bge-small-en-v1.5", embeddingDimensions: 384, tagModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", updatedAt: 0, quotaPauseReason: null, lastRunAt: null };
+  if (!row) return { id: 1, semanticSearchEnabled: 0, semanticIndexPaused: 0, semanticBudgetLimit: 10000, semanticBudgetUsed: 0, semanticBudgetMonth: month, semanticOptedInAt: null, semanticGeneration: 1, autoTaggingEnabled: 0, embeddingModel: "@cf/baai/bge-small-en-v1.5", embeddingDimensions: 384, tagModel: "@cf/cloudflare/clef-flash", updatedAt: 0, quotaPauseReason: null, lastRunAt: null };
   return row.semanticBudgetMonth === month ? row : { ...row, semanticBudgetMonth: month, semanticBudgetUsed: 0 };
 }
 
@@ -251,8 +256,8 @@ export async function reconcileAiJobs(db: AnansiDb, limit = 100, model?: string,
 	let inserted = 0;
 	// Keep bind counts and statement sizes conservative for both Bun SQLite and
 	// D1 while reducing one remote write per job to a small number of writes.
-	// Six explicitly supplied columns per row keep sixteen-row statements below
-	// D1's bound-parameter ceiling.
+	// Ten bound parameters per row (schema defaults are bound too) keep
+	// eight-row statements below D1's 100-parameter ceiling.
 	for (const chunk of chunkAiJobRows(pendingRows)) {
 		const result = await db
 			.insert(aiEnrichmentJobs)
