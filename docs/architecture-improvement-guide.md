@@ -13,7 +13,7 @@ This guide explores all four candidates from the validated architecture review a
 
 Anansi captures saved items into one private library. SQLite/D1 owns canonical content, identity, visibility, filters, and durable job state. The extension supplies browser sessions and durable capture delivery. Optional AI creates derived tags and vectors. HTTP, MCP, and CLI deliberately expose different experiences over shared library operations.
 
-There is no `CONTEXT.md` or `docs/adr/` at this baseline. Relevant decisions are in the README and `docs/superpowers/specs/`, particularly the Cloudflare AI, Ollama semantic search, Ollama tagging, canonical topics, and background capture designs. Preserve those decisions when implementing this guide.
+There is no `CONTEXT.md` or `docs/adr/` at this baseline. Relevant decisions are in the README, particularly the Cloudflare AI, semantic search, tagging, canonical topics, and background capture designs. Preserve those decisions when implementing this guide.
 
 ## Priority and implementation order
 
