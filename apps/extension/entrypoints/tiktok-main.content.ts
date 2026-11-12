@@ -545,20 +545,49 @@ export default defineContentScript({
      * The list only asks while the page renders. A hidden page is waited for
      * rather than counted as stalled; the worker gives up if it stays hidden.
      */
+    /**
+     * The element that actually scrolls the list.
+     *
+     * TikTok's newer layouts scroll the profile inside a container, so the
+     * body never grows and scrolling the window does nothing. Walk up from the
+     * last video to the first ancestor that overflows.
+     */
+    const scrollerOf = (el: HTMLElement | undefined): HTMLElement | null => {
+      for (let node = el?.parentElement ?? null; node && node !== document.body; node = node.parentElement) {
+        const overflow = getComputedStyle(node).overflowY;
+        if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 4) return node;
+      }
+      return null;
+    };
+
     const scan = async () => {
       let stalled = 0;
-      for (let step = 0; step < 2_000 && stalled < 10 && moreToLoad; step++) {
+      // About 30 seconds without any sign of progress before giving up.
+      for (let step = 0; step < 2_000 && stalled < 20 && moreToLoad; step++) {
         if (document.hidden) {
           await new Promise((r) => setTimeout(r, 1_000));
           continue;
         }
-        const before = pageHeight();
-        const seen = favouritesResponses;
         const videos = document.querySelectorAll<HTMLElement>('a[href*="/video/"]');
-        videos[videos.length - 1]?.scrollIntoView({ block: "end", behavior: "auto" });
-        window.scrollTo({ top: before, behavior: "auto" });
-        await new Promise((r) => setTimeout(r, 1_200));
-        stalled = pageHeight() > before || favouritesResponses > seen ? 0 : stalled + 1;
+        const last = videos[videos.length - 1];
+        const scroller = scrollerOf(last);
+        const before = { page: pageHeight(), inner: scroller?.scrollHeight ?? 0, videos: videos.length, responses: favouritesResponses };
+        // A stalled list often needs to see its sentinel leave and re-enter view.
+        if (stalled > 0 && stalled % 4 === 0) {
+          scroller?.scrollBy({ top: -600, behavior: "auto" });
+          window.scrollBy({ top: -600, behavior: "auto" });
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        last?.scrollIntoView({ block: "end", behavior: "auto" });
+        if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: "auto" });
+        window.scrollTo({ top: pageHeight(), behavior: "auto" });
+        await new Promise((r) => setTimeout(r, 1_500));
+        const grew =
+          pageHeight() > before.page ||
+          (scroller?.scrollHeight ?? 0) > before.inner ||
+          document.querySelectorAll('a[href*="/video/"]').length > before.videos ||
+          favouritesResponses > before.responses;
+        stalled = grew ? 0 : stalled + 1;
       }
     };
 
