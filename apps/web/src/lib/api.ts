@@ -1,3 +1,6 @@
+import type { RegistrationResponseJSON, AuthenticationResponseJSON, PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
+import type { PasskeyRow } from "@anansi/db";
+export type { PasskeyRow } from "@anansi/db";
 import type { CardMedia, ItemDetail, SearchHit, RestoreCounts, RestoreState, RestoreTable } from "@anansi/db";
 import type { ImportMode } from "@anansi/sources";
 
@@ -107,6 +110,7 @@ export interface SemanticSearchStatus {
 }
 
 export interface SessionState {
+  hasPasskey: boolean;
   configured: boolean;
   authenticated: boolean;
 }
@@ -282,6 +286,13 @@ export const api = {
   toggleSource: (source: string, enabled: boolean) =>
     post<{ source: string; enabled: boolean }>(`/api/sources/${source}`, { enabled }),
 
+  passkeyRegisterOptions: (secret?: string) => post<PublicKeyCredentialCreationOptionsJSON>("/api/auth/passkey/register/options", {secret}),
+  passkeyRegisterVerify: (response: RegistrationResponseJSON, name?: string, secret?: string) => post<{passkey:PasskeyRow}>("/api/auth/passkey/register/verify", {response,name,secret}),
+  passkeyLoginOptions: () => post<PublicKeyCredentialRequestOptionsJSON>("/api/auth/passkey/login/options", {}),
+  passkeyLoginVerify: (response: AuthenticationResponseJSON) => post<SessionState>("/api/auth/passkey/login/verify", {response}),
+  listPasskeys: () => get<{passkeys:PasskeyRow[]}>("/api/auth/passkeys"),
+  renamePasskey: (id:string,name:string) => send<{passkey:PasskeyRow}>(`/api/auth/passkeys/${encodeURIComponent(id)}`, "PATCH", {name}),
+  deletePasskey: (id:string) => send<{deleted:true}>(`/api/auth/passkeys/${encodeURIComponent(id)}`, "DELETE"),
   session: (signal?: AbortSignal) => get<SessionState>("/api/auth/session", signal),
   connect: (token: string) => post<SessionState>("/api/auth/session", { token }),
   disconnect: () => send<SessionState>("/api/auth/session", "DELETE"),

@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AiLoadError, AiSettings, useAiSettings } from "../components/ai-settings.tsx";
 import { DataSettings } from "../components/data-settings.tsx";
+import { PasskeySettings } from "../components/passkey-settings.tsx";
 import { Rail } from "../components/rail.tsx";
 import { SettingsSection, SettingsRow } from "../components/settings-panel.tsx";
 import { SettingsSkeleton } from "../components/skeleton.tsx";
@@ -52,6 +53,9 @@ function Settings() {
 								description="Off keeps everything Anansi has captured"
 								control={<Switch aria-label="Hide items removed at the source" checked={hideRemoved} onCheckedChange={setHideRemoved} />}
 							/>
+						</SettingsSection>
+						<SettingsSection id="sign-in" title="Sign-in" lead="The deploy secret stays your recovery key">
+							<PasskeySettings />
 						</SettingsSection>
 						<SettingsSection id="data" title="Your data" lead={counts ? `${counts.items.toLocaleString()} saves` : undefined}>
 							<DataSettings />

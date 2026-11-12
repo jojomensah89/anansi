@@ -1,3 +1,4 @@
+import { passkeyRoute, hasPasskeys } from "./passkeys.ts";
 import { sql as trailSql } from "drizzle-orm";
 import { coordinateSearch } from "./search-coordinator.ts";
 import { sql } from "drizzle-orm";
@@ -30,7 +31,7 @@ import {
   clearSemanticIndex, estimateSemanticBackfill, semanticIndexStats,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
-import { authorizeLibrary, sessionRoute, type LibraryAuthEnv } from "./library-auth.ts";
+import { authorizeLibrary, sessionRoute, renewSession, type LibraryAuthEnv } from "./library-auth.ts";
 import {
 	EXTENSION_PLATFORM_SOURCES,
 	parseExtensionHeartbeat,
@@ -737,14 +738,15 @@ function paramsFor(pattern: string | RegExp, path: string): string[] | null {
 	return match ? match.slice(1).map((value) => value ?? "") : null;
 }
 
-export async function handleApi(
+async function handleApiInner(
 	env: ApiEnv,
 	request: Request,
 ): Promise<Response> {
 	const url = new URL(request.url);
 	const path = url.pathname.replace(/\/+$/, "");
 
-  if (path === "/api/auth/session") return sessionRoute(env, request);
+  if (path === "/api/auth/session") return sessionRoute(env, request, await hasPasskeys(env.db));
+  if (path.startsWith("/api/auth/")) return passkeyRoute(env, request);
   // Public by design: an app has no credential yet when it registers or trades a code.
   if (path === "/api/oauth/register" && request.method === "POST") return registerClient(env.db, request);
   if (path === "/api/oauth/token" && request.method === "POST") return exchangeToken(env.db, request);
@@ -828,4 +830,8 @@ export async function handleApi(
 	}
 
 	return json({ error: "not found" }, 404);
+}
+
+export async function handleApi(env: ApiEnv, request: Request): Promise<Response> {
+  return renewSession(env, request, await handleApiInner(env, request));
 }

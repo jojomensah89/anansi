@@ -5,7 +5,7 @@ export interface LibraryAuthEnv {
   allowedOrigins?: string[];
 }
 const COOKIE = "anansi_session";
-const TTL = 7 * 24 * 60 * 60;
+export const SESSION_TTL = 30 * 24 * 60 * 60;
 const json = (body: unknown, status = 200, headers: HeadersInit = {}) => Response.json(body, { status, headers });
 export function sameSecret(a: string, b: string): boolean {
   const left = createHmac("sha256", "anansi-comparison").update(a).digest();
@@ -27,7 +27,7 @@ export function authenticated(env: LibraryAuthEnv, request: Request): boolean {
   if (!cookie) return false;
   const [expires, nonce, signature, extra] = cookie.split(".");
   const now = Math.floor(Date.now() / 1000);
-  return !extra && !!nonce && !!signature && Number(expires) > now && Number(expires) <= now + TTL && sameSecret(signature, sign(env.libraryToken, `${expires}.${nonce}`));
+  return !extra && !!nonce && !!signature && Number(expires) > now && Number(expires) <= now + SESSION_TTL && sameSecret(signature, sign(env.libraryToken, `${expires}.${nonce}`));
 }
 export function authorizeLibrary(env: LibraryAuthEnv, request: Request): Response | null {
   if (!env.libraryToken) return json({ error: "library access is not configured" }, 503);
@@ -36,13 +36,13 @@ export function authorizeLibrary(env: LibraryAuthEnv, request: Request): Respons
   if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && !request.headers.has("authorization") && !allowedOrigin(env, request)) return json({ error: "origin is not allowed" }, 403);
   return null;
 }
-export async function sessionRoute(env: LibraryAuthEnv, request: Request): Promise<Response> {
+export async function sessionRoute(env: LibraryAuthEnv, request: Request, hasPasskey = false): Promise<Response> {
   const headers = { "cache-control": "no-store" };
-  if (request.method === "GET") return json({ configured: !!env.libraryToken, authenticated: authenticated(env, request) }, 200, headers);
+  if (request.method === "GET") return json({ configured: !!env.libraryToken, authenticated: authenticated(env, request), hasPasskey }, 200, headers);
   if (!allowedOrigin(env, request)) return json({ error: "origin is not allowed" }, 403, headers);
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   const attrs = `; Path=/api; HttpOnly; SameSite=Strict${secure}`;
-  if (request.method === "DELETE") return json({ authenticated: false }, 200, { ...headers, "set-cookie": `${COOKIE}=; Max-Age=0${attrs}` });
+  if (request.method === "DELETE") return json({ configured: !!env.libraryToken, authenticated: false, hasPasskey }, 200, { ...headers, "set-cookie": `${COOKIE}=; Max-Age=0${attrs}` });
   if (request.method !== "POST") return json({ error: "method not allowed" }, 405, headers);
   if (!env.libraryToken) return json({ error: "library access is not configured" }, 503, headers);
   if (Number(request.headers.get("content-length") ?? 0) > 4096) return json({ error: "request too large" }, 413, headers);
@@ -67,6 +67,22 @@ export async function sessionRoute(env: LibraryAuthEnv, request: Request): Promi
   let body: { token?: unknown };
   try { body = JSON.parse(raw); } catch { return json({ error: "invalid JSON" }, 400, headers); }
   if (!body || typeof body.token !== "string" || !sameSecret(body.token, env.libraryToken)) return json({ error: "unauthorized" }, 401, headers);
-  const payload = `${Math.floor(Date.now() / 1000) + TTL}.${Buffer.from(randomBytes(24)).toString("base64url")}`;
-  return json({ configured: true, authenticated: true }, 200, { ...headers, "set-cookie": `${COOKIE}=${payload}.${sign(env.libraryToken, payload)}; Max-Age=${TTL}${attrs}` });
+  return json({ configured: true, authenticated: true, hasPasskey }, 200, { ...headers, "set-cookie": sessionCookie(env, request) });
+}
+export function sessionCookie(env: LibraryAuthEnv, request: Request): string {
+  const payload = `${Math.floor(Date.now() / 1000) + SESSION_TTL}.${Buffer.from(randomBytes(24)).toString("base64url")}`;
+  return `${COOKIE}=${payload}.${sign(env.libraryToken!, payload)}; Max-Age=${SESSION_TTL}; Path=/api; HttpOnly; SameSite=Strict${new URL(request.url).protocol === "https:" ? "; Secure" : ""}`;
+}
+export function cookieAuthenticated(env: LibraryAuthEnv, request: Request): boolean {
+  return !request.headers.has("authorization") && authenticated(env, request);
+}
+export function renewSession(env: LibraryAuthEnv, request: Request, response: Response): Response {
+  if (!cookieAuthenticated(env, request) || response.headers.getSetCookie().some(cookie => cookie.startsWith(`${COOKIE}=`)) || response.status >= 400) return response;
+  const expires = Number(request.headers.get("cookie")?.match(/(?:^|;\s*)anansi_session=(\d+)\./)?.[1]);
+  if (expires - Math.floor(Date.now() / 1000) < SESSION_TTL / 2) {
+    response = new Response(response.body, response);
+    response.headers.append("set-cookie", sessionCookie(env, request));
+    response.headers.set("cache-control", "no-store");
+  }
+  return response;
 }

@@ -42,3 +42,4 @@ export { getSyncSettings, setSyncSettings, pendingPlatformSync, requestPlatformS
 export { recordPublicGithubCheck } from "./sync-requests.ts";
 
 export { claimPublicGithubCheck } from "./sync-requests.ts";
+export * from "./passkeys.ts";

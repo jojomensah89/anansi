@@ -45,6 +45,6 @@ describe("whole-library authentication",()=>{
     expect((await handleApi(env,request("/api/auth/session",{method:"POST",headers:{origin:"https://evil.test"},body:JSON.stringify({token:env.libraryToken})}))).status).toBe(403);
     expect((await handleApi(env,request("/api/auth/session",{method:"POST",headers:{origin},body:'{"token":"wrong"}'}))).status).toBe(401);
     const status = await (await handleApi(env,request("/api/auth/session"))).json() as unknown;
-    expect(status).toEqual({configured:true,authenticated:false});
+    expect(status).toEqual({configured:true,authenticated:false,hasPasskey:false});
   });
 });
