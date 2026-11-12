@@ -3,7 +3,7 @@
 > Historical plan/evidence: current product guidance is in [README](../../../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
 
 
-Use this to prove stage 1 of the overhaul with real accounts, with Anansi and Stashr both installed in the same browser profile. Repeat it after any capture change.
+Use this to prove stage 1 of the overhaul with real accounts, with Anansi and the reference extension both installed in the same browser profile. Repeat it after any capture change.
 
 ## Setup
 
@@ -29,13 +29,13 @@ Check this once, right after reloading.
 
 ## Live saves
 
-For each platform, use a post you haven't saved before. Stashr and Anansi should both react to the same click.
+For each platform, use a post you haven't saved before. The reference extension and Anansi should both react to the same click.
 
 | Check | X | Reddit | GitHub |
 | --- | --- | --- | --- |
 | Save shows "Saved to Anansi" beside the button | [ ] | [ ] | [ ] |
 | Saved post appears in the library with full text | [ ] | [ ] | [ ] |
-| Stashr also captured it | [ ] | [ ] | [ ] |
+| The reference extension also captured it | [ ] | [ ] | [ ] |
 | Unsave shows "Removed from Anansi" | [ ] | [ ] | [ ] |
 | Unsave updates the library | [ ] | [ ] | [ ] |
 | Three quick save and unsave clicks end in the right final state | [ ] | [ ] | [ ] |

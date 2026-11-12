@@ -6,9 +6,9 @@ Branch: `overhaul`, from GitHub `main` (`2561cfa`) merged with the adapter work 
 
 ## Goal
 
-Anansi is an open-source, self-hosted alternative to Stashr. Saving on a platform should put that save in your library without further thought, including saves made on your phone. Agents should be able to connect and find things. The interface should be pleasant to read, and setting it up should take minutes.
+Anansi is an open-source, self-hosted bookmark library. Saving on a platform should put that save in your library without further thought, including saves made on your phone. Agents should be able to connect and find things. The interface should be pleasant to read, and setting it up should take minutes.
 
-The overhaul merges only when the owner runs Anansi and Stashr side by side and Anansi keeps up.
+The overhaul merges only when the owner runs Anansi and the reference extension side by side and Anansi keeps up.
 
 ## Decisions
 
@@ -47,14 +47,14 @@ Causes found in stage 1, each reproduced in a test:
 
 Not yet proven with real accounts: why the first X page was rejected, and whether any save is still missed after these fixes. The side-by-side checklist settles that.
 
-What Stashr does, from its public docs and a static read of extension 1.0.20:
+What the reference extension does, from its public docs and a static read of extension 1.0.20:
 
 - It watches native buttons, reads page state, and hooks requests, and shows a "Stashed" or "Failed" tooltip.
 - TikTok import uses or opens a TikTok tab and fetches favorites through TikTok's own signed requests. X import uses a background tab. Reddit and GitHub need no tab.
 - Imports stop early at items already saved, using stored watermarks.
 - Its website can start imports through the extension.
 
-Not proven: what triggered the phone save the owner saw appear. Stashr's docs describe a manual import, and no import timer was found in the extension. Stashr's code is proprietary, so we study its behaviour and do not copy it.
+Not proven: what triggered the phone save the owner saw appear. The reference extension's docs describe a manual import, and no import timer was found in the extension. The reference extension's code is proprietary, so we study its behaviour and do not copy it.
 
 **Known limit:** provider sessions live in the browser, so browser-based sync runs only while a desktop browser with the extension is running. With every computer off, only platforms that have a free server path can update.
 
@@ -162,7 +162,7 @@ Submission and public publication remain the owner's decisions.
 ## Needed from the owner
 
 - A signed-in browser for side-by-side tests, starting at stage 1.
-- The phone-save test on Stashr: save on the phone, open the library, and watch for a TikTok tab or import count.
+- The phone-save test on the reference extension: save on the phone, open the library, and watch for a TikTok tab or import count.
 - A clean Cloudflare account at stage 6.
 - A Chrome Web Store developer account and a public privacy policy URL at stage 7.
 

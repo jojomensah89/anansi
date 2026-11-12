@@ -31,11 +31,10 @@ The taxonomy is versioned. A bookmark can receive up to three canonical topics. 
 
 Manual tags remain free-form and are never deleted or rewritten by the AI migration.
 
-## Stashr evidence boundary
+## Reference-extension evidence boundary
 
-Stashr's public documentation describes asynchronous, batched AI tagging; reuse of existing tags where they fit; user steering for preferred topics, style, or language; and a high-confidence duplicate-cleanup flow with exact-match fallback when AI is unavailable. It does not disclose a private taxonomy or implementation. Anansi adopts the observable product principles while making the automatic topic layer stricter and deterministic.
+The reference extension's public documentation describes asynchronous, batched AI tagging; reuse of existing tags where they fit; user steering for preferred topics, style, or language; and a high-confidence duplicate-cleanup flow with exact-match fallback when AI is unavailable. It does not disclose a private taxonomy or implementation. Anansi adopts the observable product principles while making the automatic topic layer stricter and deterministic.
 
-Sources: https://stashr.me/docs/ai-tagging and https://stashr.me/docs/tags.
 
 ## Architecture
 
