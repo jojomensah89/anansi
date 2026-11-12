@@ -547,9 +547,8 @@ textarea::placeholder {
 .sync-settings {font-size:14px;line-height:1.6;scroll-margin-top:24px}
 .sync-settings p {color:var(--muted);margin:8px 0 16px}
 .sync-toolbar {display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
-.sync-feedback {max-width:280px}
 .source-check {font-size:12px;color:var(--muted);padding:12px 16px;border-top:1px solid var(--edge)}
-@media(max-width:600px){.sync-toolbar{flex-wrap:wrap}.sync-feedback{flex-basis:100%}}
+@media(max-width:600px){.sync-toolbar{flex-wrap:wrap}}
 
 .anansi-settings-page > * {width:min(100%,960px)}
 .sync-settings input {background:var(--raised);border:1px solid var(--edge);border-radius:4px;color:var(--text);padding:8px;font:inherit}
@@ -920,23 +919,39 @@ button.anansi-tag-chip:hover {background:var(--accent-soft);color:var(--text)}
 .settings-notice[data-tone=danger]{border-color:var(--danger);background:transparent;color:var(--danger)}
 .settings-index{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;row-gap:8px;align-items:center}
 .settings-index .settings-progress{grid-column:1;width:100%;gap:0}
-.settings-index-action{grid-column:2;grid-row:1 / span 2}
+/* One action width, so every progress bar in the card ends on the same line. */
+.settings-index-action{grid-column:2;grid-row:1 / span 2;min-width:120px}
 .settings-index-figure{grid-column:1;margin:0}
-.settings-cap-row{display:grid;grid-template-columns:160px auto minmax(0,1fr);align-items:center;gap:8px 16px}
+/* Reads like a settings row: label and usage on the left, the field on the action line. */
+.settings-cap-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding-top:4px}
+.settings-cap-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.settings-cap{flex:none;display:flex;align-items:center;gap:8px}
+.settings-cap-error{flex-basis:100%;margin:0;font-size:12px;line-height:16px;text-align:right}
 .settings-estimate-line{margin:0}
 .settings-progress [data-slot=progress-track]{height:6px;border-radius:3px;background:var(--raised);box-shadow:inset 0 0 0 1px var(--line-soft)}
 .settings-progress [data-slot=progress-indicator]{background:var(--accent);border-radius:3px;transition:width 240ms var(--ease-ui)}
 
 /* Joined input and button: one 32px control. */
-.settings-joined{display:flex;align-items:stretch;min-width:0}
-.settings-joined [data-slot=input],.settings-cap-input{height:32px;padding:0 10px;border:1px solid var(--edge);border-radius:6px 0 0 6px;background:var(--ink);color:var(--text);font-size:14px}
+.settings-joined{display:flex;align-items:center;gap:8px;min-width:0}
+.settings-joined [data-slot=input],.settings-cap [data-slot=input],.settings-cap-input{height:32px;padding:0 10px;border:1px solid var(--edge);border-radius:6px;background:var(--ink);color:var(--text);font-size:14px}
 .settings-dialog .settings-cap-input{border-radius:6px;width:140px}
-html.light .settings-joined [data-slot=input],html.light .settings-cap-input{background:var(--card)}
-.settings-joined [data-slot=input]:focus-visible,.settings-cap-input:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);outline:none}
-.settings-joined > [data-slot=button]{margin-left:-1px;border-radius:0 6px 6px 0}
+html.light .settings-joined [data-slot=input],html.light .settings-cap [data-slot=input],html.light .settings-cap-input{background:var(--card)}
+.settings-joined [data-slot=input]:focus-visible,.settings-cap [data-slot=input]:focus-visible,.settings-cap-input:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);outline:none}
 .settings-github{width:260px}
-.settings-github [data-slot=input],.settings-cap [data-slot=input]{flex:1;min-width:0}
-.settings-cap{width:168px}
+.settings-github [data-slot=input]{flex:1;min-width:0}
+.settings-cap [data-slot=input]{width:112px;border-radius:6px;text-align:right;font-variant-numeric:tabular-nums}
+.settings-cap [data-slot=input][aria-invalid=true]{border-color:var(--danger)}
+
+/* Toasts: a raised card from the same ramp, a status dot, the words. */
+[data-sonner-toaster] [data-sonner-toast].cn-toast{align-items:flex-start;gap:10px;padding:12px 16px;font-family:var(--sans);border-color:var(--line);box-shadow:0 8px 24px rgb(0 0 0 / .32)}
+html.light [data-sonner-toaster] [data-sonner-toast].cn-toast{box-shadow:0 6px 20px rgb(32 40 50 / .10)}
+[data-sonner-toaster] [data-sonner-toast] .cn-toast-title[data-title]{font-size:14px;line-height:20px;font-weight:500;color:var(--text)}
+[data-sonner-toaster] [data-sonner-toast] .cn-toast-description[data-description]{margin-top:2px;font-size:13px;line-height:18px;color:var(--muted)}
+[data-sonner-toaster] [data-sonner-toast] .cn-toast-icon[data-icon]{width:auto;height:20px;margin:0;flex:none;display:flex;align-items:center}
+.cn-toast-dot{width:6px;height:6px;border-radius:50%;background:var(--muted)}
+.cn-toast-dot[data-tone=ok]{background:var(--ok)}
+.cn-toast-dot[data-tone=warn]{background:var(--warn)}
+.cn-toast-dot[data-tone=danger]{background:var(--danger)}
 
 /* One button scale on these pages. */
 .workspace-page [data-slot=button],.settings-dialog :is([data-slot=button],[data-slot=alert-dialog-action],[data-slot=alert-dialog-cancel]){height:32px;gap:8px;padding:0 12px;border-radius:6px;font-size:14px;font-weight:400;transition:background-color 120ms var(--ease-ui),color 120ms var(--ease-ui),transform 120ms var(--ease-ui)}
@@ -1065,8 +1080,14 @@ html.light .connect-value{background:var(--raised)}
  .settings-row:has(.settings-github){flex-direction:column;gap:10px}
  .settings-row:has(.settings-github) .settings-row-control{margin-left:0;width:100%}
  .settings-github{width:100%}
- .settings-cap-row{grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
- .settings-cap-row > .settings-label{grid-column:1 / -1}
+ /* Phones: bar and figure take the full width, the action sits beneath. */
+ .settings-index{grid-template-columns:minmax(0,1fr)}
+ .settings-index-action{grid-column:1;grid-row:3;justify-self:start;min-width:0}
+ /* Like the GitHub row: copy above, the field across the row. */
+ .settings-cap-copy{flex-basis:100%}
+ .settings-cap{flex:1}
+ .settings-cap [data-slot=input]{flex:1;min-width:0;width:auto;text-align:left}
+ .settings-cap-error{text-align:left}
 }
 [data-slot=dialog-overlay],[data-slot=alert-dialog-overlay]{z-index:70}[data-slot=dialog-content],[data-slot=alert-dialog-content]{z-index:71}
 
@@ -1137,7 +1158,6 @@ html.light .connect-value{background:var(--raised)}
 .client-access{display:flex;flex-direction:column;gap:2px}
 .client-access-line{display:inline-flex;align-items:center;gap:8px;cursor:pointer;color:var(--muted)}
 .client-access-line [data-on]{color:var(--text)}
-.client-access-error{font-size:12px;line-height:16px;color:var(--danger);white-space:normal}
 .workspace-page .client-more{width:32px;padding:0;color:var(--muted);background:transparent;border-color:transparent}
 .workspace-page .client-more:hover,.workspace-page .client-more[data-popup-open]{background:var(--raised);color:var(--text)}
 .workspace-page .client-retire{height:28px;padding:0 10px;background:transparent;border:1px solid var(--danger);color:var(--danger)}
@@ -1296,3 +1316,7 @@ html.light .mcp-snippet{background:var(--raised)}
  .consent-actions .auth-meta{flex-basis:100%;order:1}
  .consent-actions [data-slot=button]{flex:1}
 }
+
+/* One scrollbar everywhere: thin, themed thumb, no track. Without this the
+   rail drew the browser default beside the library's dark one. */
+* {scrollbar-width:thin;scrollbar-color:var(--edge-strong) transparent}

@@ -16,6 +16,7 @@ import { Label } from "@anansi/ui/components/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@anansi/ui/components/table";
 import { AlertCircle, Bot, Check, ChevronDown, ChevronRight, Copy, KeyRound, MoreHorizontal, Pencil, Plus, RotateCcw } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { ClientWritePermission } from "./client-write-permission.tsx";
 
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
@@ -84,7 +85,6 @@ export function ConnectedClients() {
 	const [data, setData] = useState<{ clients: Client[]; legacyActive: boolean } | null>(null);
 	const [loadError, setLoadError] = useState("");
 	const [busy, setBusy] = useState(false);
-	const [actionError, setActionError] = useState("");
 	const [create, setCreate] = useState<Create | null>(null);
 	const [name, setName] = useState("");
 	const [rename, setRename] = useState<Client | null>(null);
@@ -100,18 +100,17 @@ export function ConnectedClients() {
 	const load = () => void refresh().catch((e: Error) => setLoadError(e.message));
 	useEffect(load, []);
 
-	/** One request at a time; errors stay in the dialog that asked. */
-	async function action(work: () => Promise<void>) {
+	/** One request at a time. A failure is a toast; the dialog stays open to try again. */
+	async function action(failure: string, work: () => Promise<void>) {
 		if (gate.current) return false;
 		gate.current = true;
 		setBusy(true);
-		setActionError("");
 		try {
 			await work();
 			await refresh().catch(() => undefined);
 			return true;
 		} catch (e) {
-			setActionError(e instanceof Error ? e.message : "The request failed");
+			toast.error(failure, { description: e instanceof Error && e.message ? e.message : undefined });
 			return false;
 		} finally {
 			gate.current = false;
@@ -126,13 +125,12 @@ export function ConnectedClients() {
 
 	const startCreate = (kind: KeyKind) => {
 		setName("");
-		setActionError("");
 		setCreate({ kind, key: null });
 	};
 	const submitCreate = (event: FormEvent) => {
 		event.preventDefault();
 		if (!create || !name.trim()) return;
-		void action(async () => {
+		void action("Couldn’t create the key", async () => {
 			const result = await call("", "POST", { kind: create.kind, name: name.trim() });
 			setCreate({ kind: create.kind, key: result.key });
 		});
@@ -140,13 +138,13 @@ export function ConnectedClients() {
 	const submitRename = (event: FormEvent) => {
 		event.preventDefault();
 		if (!rename || !draft.trim()) return;
-		void action(async () => {
+		void action("Couldn’t rename", async () => {
 			await call(`/${rename.id}`, "PATCH", { name: draft.trim() });
 		}).then((ok) => ok && setRename(null));
 	};
 	const runConfirm = () => {
 		if (!confirm) return;
-		void action(async () => {
+		void action(confirm.kind === "retire" ? "Couldn’t retire the token" : "Couldn’t revoke access", async () => {
 			if (confirm.kind === "retire") await call("/retire-legacy", "POST");
 			else await call(`/${confirm.client.id}`, "DELETE");
 		}).then((ok) => ok && setConfirm(null));
@@ -203,11 +201,11 @@ export function ConnectedClients() {
 								<MoreHorizontal {...ICON} />
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end" className="client-menu">
-								<DropdownMenuItem onClick={() => { setDraft(c.name); setActionError(""); setRename(c); }}>
+								<DropdownMenuItem onClick={() => { setDraft(c.name); setRename(c); }}>
 									<Pencil {...ICON} />
 									Rename
 								</DropdownMenuItem>
-								<DropdownMenuItem variant="destructive" onClick={() => { setActionError(""); setConfirm({ kind: "revoke", client: c }); }}>
+								<DropdownMenuItem variant="destructive" onClick={() => setConfirm({ kind: "revoke", client: c })}>
 									Revoke…
 								</DropdownMenuItem>
 							</DropdownMenuContent>
@@ -277,7 +275,7 @@ export function ConnectedClients() {
 								<TableCell className="client-col-access"><span className="client-dim">Read and save</span></TableCell>
 								<TableCell className="client-col-used">—</TableCell>
 								<TableCell className="client-col-menu">
-									<Button variant="destructive" className="client-retire" onClick={() => { setActionError(""); setConfirm({ kind: "retire" }); }}>
+									<Button variant="destructive" className="client-retire" onClick={() => setConfirm({ kind: "retire" })}>
 										Retire
 									</Button>
 								</TableCell>
@@ -329,7 +327,6 @@ export function ConnectedClients() {
 								<Label htmlFor="new-client-name">Name</Label>
 								<Input id="new-client-name" className="client-input" autoFocus maxLength={100} value={name} placeholder="Research assistant" onChange={(e) => setName(e.target.value)} />
 							</div>
-							{actionError && <p className="settings-inline-danger" role="alert">{actionError}</p>}
 							<DialogFooter>
 								<Button type="button" variant="outline" disabled={busy} onClick={() => setCreate(null)}>Cancel</Button>
 								<Button type="submit" disabled={busy || !name.trim()}>{busy ? "Creating" : "Create key"}</Button>
@@ -349,7 +346,6 @@ export function ConnectedClients() {
 							<Label htmlFor="rename-client">Name</Label>
 							<Input id="rename-client" className="client-input" autoFocus maxLength={100} value={draft} onChange={(e) => setDraft(e.target.value)} />
 						</div>
-						{actionError && <p className="settings-inline-danger" role="alert">{actionError}</p>}
 						<DialogFooter>
 							<Button type="button" variant="outline" disabled={busy} onClick={() => setRename(null)}>Cancel</Button>
 							<Button type="submit" disabled={busy || !draft.trim()}>{busy ? "Saving" : "Save"}</Button>
@@ -368,7 +364,6 @@ export function ConnectedClients() {
 								: "It loses access right away. Your saves stay"}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
-					{actionError && <p className="settings-inline-danger" role="alert">{actionError}</p>}
 					<AlertDialogFooter>
 						<AlertDialogCancel disabled={busy}>{confirm?.kind === "retire" ? "Keep it" : "Keep access"}</AlertDialogCancel>
 						<Button variant="destructive" disabled={busy} onClick={runConfirm}>

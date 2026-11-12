@@ -51,6 +51,7 @@ export function PasskeySettings() {
 			queryClient.setQueryData<PasskeyRow[]>(passkeysKey, (rows = []) => rows.filter((r) => r.id !== row.id));
 			setRemoving(null);
 		},
+		onError: (error) => toast.error("Couldn’t remove the passkey", { description: passkeyError(error) ?? undefined }),
 	});
 
 	const signOut = useMutation({
@@ -137,7 +138,6 @@ export function PasskeySettings() {
 						<AlertDialogTitle>Remove {removing?.name}?</AlertDialogTitle>
 						<AlertDialogDescription>It stops signing in to this library</AlertDialogDescription>
 					</AlertDialogHeader>
-					{remove.isError && <p className="settings-inline-danger" role="alert">{passkeyError(remove.error)}</p>}
 					<AlertDialogFooter>
 						<AlertDialogCancel disabled={remove.isPending}>Keep it</AlertDialogCancel>
 						<Button variant="destructive" disabled={remove.isPending} onClick={() => removing && remove.mutate(removing)}>

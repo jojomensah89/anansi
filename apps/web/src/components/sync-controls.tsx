@@ -4,6 +4,7 @@ import { Switch } from "@anansi/ui/components/switch";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "../lib/api.ts";
 import { requestExtensionSync } from "../lib/extension-bridge.ts";
 import { expectIncomingSaves, libraryKeys } from "../lib/library-query.ts";
@@ -22,7 +23,6 @@ const GITHUB_USERNAME = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
 
 /** The library toolbar's Sync now button. */
 export function SyncControls() {
-	const [message, setMessage] = useState("");
 	const [busy, setBusy] = useState(false);
 	const queryClient = useQueryClient();
 	return (
@@ -38,9 +38,10 @@ export function SyncControls() {
 						await api.requestSync(true, reachable);
 						expectIncomingSaves();
 						void queryClient.invalidateQueries({ queryKey: libraryKeys.stats() });
-						setMessage(reachable ? "Sync requested" : "Extension offline, will sync on next check-in");
-					} catch {
-						setMessage("Sync failed, try again");
+						if (reachable) toast.success("Sync requested");
+						else toast("Extension offline", { description: "It syncs on its next check-in" });
+					} catch (error) {
+						toast.error("Sync failed", { description: error instanceof Error && error.message ? error.message : undefined });
 					} finally {
 						setBusy(false);
 					}
@@ -49,16 +50,14 @@ export function SyncControls() {
 				<RefreshCw aria-hidden="true" strokeWidth={1.5} />
 				<span className="toolbar-button-label">{busy ? "Syncing" : "Sync now"}</span>
 			</Button>
-			<span role="status" className="sync-feedback">
-				{message}
-			</span>
 		</div>
 	);
 }
 
 /** Settings › Sync: agent checks and the public GitHub username. */
 export function SyncSettings() {
-	const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+	/** Only the username field's own validation shows on the page; saves answer with a toast. */
+	const [invalid, setInvalid] = useState<string | null>(null);
 	const config = useQuery({
 		queryKey: ["sync-settings"],
 		queryFn: async () => {
@@ -68,17 +67,18 @@ export function SyncSettings() {
 		},
 		retry: 1,
 	});
-	async function save(value: { agentTabs: boolean; githubUsername: string | null }) {
+	async function save(value: { agentTabs: boolean; githubUsername: string | null }, confirm?: string) {
 		try {
 			const response = await fetch("/api/sync/settings", {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify(value),
 			});
-			setMessage(response.ok ? { text: "Saved", error: false } : { text: "Couldn't save sync settings", error: true });
+			if (!response.ok) toast.error("Couldn't save sync settings", { description: `${response.status} ${response.statusText}`.trim() });
+			else if (confirm) toast.success(confirm);
 			await config.refetch();
-		} catch {
-			setMessage({ text: "Couldn't save sync settings", error: true });
+		} catch (error) {
+			toast.error("Couldn't save sync settings", { description: error instanceof Error && error.message ? error.message : undefined });
 		}
 	}
 	if (config.isPending) return <SettingsSkeleton label="Loading sync settings" />;
@@ -126,10 +126,11 @@ export function SyncSettings() {
 							event.preventDefault();
 							const username = String(new FormData(event.currentTarget).get("githubUsername") ?? "").trim();
 							if (username && !GITHUB_USERNAME.test(username)) {
-								setMessage({ text: "Enter a GitHub username, without @ or a link", error: true });
+								setInvalid("Enter a GitHub username, without @ or a link");
 								return;
 							}
-							void save({ agentTabs: data.agentTabs, githubUsername: username || null });
+							setInvalid(null);
+							void save({ agentTabs: data.agentTabs, githubUsername: username || null }, username ? "GitHub username saved" : "GitHub username cleared");
 						}}
 					>
 						<Input
@@ -141,6 +142,9 @@ export function SyncSettings() {
 							maxLength={39}
 							autoComplete="off"
 							spellCheck={false}
+							aria-invalid={invalid ? true : undefined}
+							aria-describedby={invalid ? "github-username-error" : undefined}
+							onChange={() => setInvalid(null)}
 						/>
 						<Button variant="outline" type="submit" aria-label="Save GitHub username">
 							Save
@@ -148,9 +152,9 @@ export function SyncSettings() {
 					</form>
 				}
 			>
-				{message && (
-					<p role={message.error ? "alert" : "status"} className="settings-message" data-tone={message.error ? "danger" : undefined}>
-						{message.text}
+				{invalid && (
+					<p id="github-username-error" role="alert" className="settings-message" data-tone="danger">
+						{invalid}
 					</p>
 				)}
 			</SettingsRow>

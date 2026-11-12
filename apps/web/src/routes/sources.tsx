@@ -75,9 +75,9 @@ function Sources() {
 		const set = (value: boolean) =>
 			setData((previous) => previous && { ...previous, sources: previous.sources.map((entry) => (entry.source === row.source ? { ...entry, enabled: value } : entry)) });
 		set(enabled);
-		api.toggleSource(row.source, enabled).catch(() => {
+		api.toggleSource(row.source, enabled).catch((error: unknown) => {
 			set(!enabled);
-			toast.error(`Couldn't turn ${enabled ? "on" : "off"} ${row.name}`);
+			toast.error(`Couldn't turn ${enabled ? "on" : "off"} ${row.name}`, { description: error instanceof Error && error.message ? error.message : undefined });
 		});
 	};
 

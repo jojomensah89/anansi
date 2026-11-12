@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { act, createElement, useState } from "react";
 import type { Root } from "react-dom/client";
+import { toast } from "sonner";
 import type { AiSettingsResponse } from "../lib/api.ts";
 import { installDom } from "../lib/test-dom.ts";
 import type * as AiModule from "./ai-settings.tsx";
@@ -150,4 +151,37 @@ test("an estimate above the remaining cap asks in a dialog and saves nothing unt
 	await act(async () => byText("Raise cap")!.click());
 	await settle();
 	expect(calls.find((c) => c.method === "PATCH")?.body).toBe('{"semanticSearchEnabled":true,"semanticBudgetLimit":1300,"confirmSemanticBackfill":true}');
+});
+
+test("a bad cap is flagged on the field; a failed save is a toast with the server's words", async () => {
+	const toastError = spyOn(toast, "error").mockImplementation(() => "");
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		const url = String(input);
+		calls.push({ url, method: init?.method ?? "GET", body: init?.body as string | undefined });
+		if (url === "/api/ai" && init?.method === "PATCH") return Response.json({ error: "Cap could not be stored" }, { status: 500 });
+		return Response.json(settings());
+	}) as typeof fetch;
+	await act(async () => root.render(createElement(Harness, { initial: settings() })));
+	const input = document.getElementById("semantic-credit-limit") as HTMLInputElement;
+	const type = (value: string) => {
+		Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")!.set!.call(input, value);
+		input.dispatchEvent(new window.Event("input", { bubbles: true }));
+	};
+
+	await act(async () => type("lots"));
+	await act(async () => byText("Save")!.click());
+	await settle();
+	expect(document.getElementById("semantic-credit-limit-error")?.textContent).toBe("Enter a cap between 1 and 1,000,000");
+	expect(input.getAttribute("aria-invalid")).toBe("true");
+	expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
+	expect(toastError).not.toHaveBeenCalled();
+
+	await act(async () => type("2,000"));
+	expect(document.getElementById("semantic-credit-limit-error")).toBeNull();
+	await act(async () => byText("Save")!.click());
+	await settle();
+	expect(calls.find((c) => c.method === "PATCH")?.body).toBe('{"semanticBudgetLimit":2000}');
+	expect(toastError).toHaveBeenCalledWith("Could not save the cap", { id: undefined, description: "Cap could not be stored" });
+	expect(document.querySelector('[role="alert"]')).toBeNull();
+	toastError.mockRestore();
 });

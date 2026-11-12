@@ -60,7 +60,7 @@ function RootDocument() {
               </div>
             </ConnectionGate>
           </SidebarProvider>
-          <Toaster richColors />
+          <Toaster />
           <TanStackRouterDevtools position="bottom-right" />
         </QueryClientProvider>
         <Scripts />

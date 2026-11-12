@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { act, createElement } from "react";
 import type { Root } from "react-dom/client";
+import { toast } from "sonner";
 import { installDom } from "../lib/test-dom.ts";
 import type * as Module from "./client-write-permission.tsx";
 
@@ -33,6 +34,7 @@ test("permission confirmation, pending, failure, disabling and ineligible rows",
 	let resolve!: (r: Response) => void;
 	let request: { url: string; init: RequestInit } | undefined;
 	globalThis.fetch = ((url: string, init: RequestInit) => { request = { url, init }; return new Promise<Response>((r) => (resolve = r)); }) as typeof fetch;
+	const toastError = spyOn(toast, "error").mockImplementation(() => "");
 	const render = (c = client) => act(async () => root.render(createElement(ClientWritePermission, { client: c, onChange: () => changes++ })));
 
 	await render();
@@ -55,11 +57,14 @@ test("permission confirmation, pending, failure, disabling and ineligible rows",
 	expect(sw()!.hasAttribute("data-disabled")).toBe(true);
 	expect(sw()!.getAttribute("aria-checked")).toBe("true");
 
-	// A refusal rolls back and says so in the dialog.
+	// A refusal rolls back, says so in a toast and keeps the dialog open to try again.
 	await act(async () => resolve(new Response("{}", { status: 403 })));
 	await settle();
 	expect(sw()!.getAttribute("aria-checked")).toBe("false");
-	expect(document.querySelector('[role="alertdialog"] [role="alert"]')?.textContent).toBe("Couldn’t change access. Try again");
+	expect(toastError).toHaveBeenCalledWith("Couldn’t change access for Research");
+	expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+	expect(document.querySelector('[role="alertdialog"] [role="alert"]')).toBeNull();
+	toastError.mockRestore();
 
 	await act(async () => byText("Allow changes")!.click());
 	await act(async () => resolve(new Response("{}")));
