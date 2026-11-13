@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import OAuth2Server, { Request as OAuthRequest, Response as OAuthResponse, OAuthError } from "@node-oauth/oauth2-server";
 import { and, count, eq, isNull, lt } from "drizzle-orm";
 import type { AnansiDb } from "@anansi/db";
@@ -24,7 +24,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const now = () => Math.floor(Date.now() / 1000);
-const token = (prefix: string) => `${prefix}${randomBytes(32).toString("base64url")}`;
+const token = (prefix: string) => `${prefix}${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")}`;
 const noStore = { "cache-control": "no-store", pragma: "no-cache" };
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: noStore });
 const oauthError = (error: string, description: string, status = 400) =>

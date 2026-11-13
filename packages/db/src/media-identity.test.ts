@@ -10,7 +10,7 @@ import { validateRestoreBackup } from "./restore-preflight.ts";
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { MEDIA_IDENTITY_SQL } from "./media-identity.ts";
-const item = (source: string, urls: string[]) => ({source, externalId:"1",url:"https://example.com/1",kind:"post",savedAt:100,savedAtIsExact:true,metrics:{},links:[],raw:{},media:urls.map(originUrl=>({kind:"image",originUrl}))});
+const item = (source: string, urls: string[]) => ({source, externalId:"1",url:"https://example.com/1",kind:"post",body:"",savedAt:100,savedAtIsExact:true,metrics:{},links:[],raw:{},media:urls.map(originUrl=>({kind:"image",originUrl}))});
 test("three re-signed captures preserve stored ID/key and schedule no download; pending links refresh", async()=>{
  const db=openTestDb(); const base="https://p16-common-sign.tiktokcdn.com/a";
  await upsertItems(db,[item("tiktok",[base+"?sig=old"])]);

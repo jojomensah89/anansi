@@ -23,7 +23,7 @@ import { frameKeys } from "../lib/frame-status.ts";
 import { refreshTagKinds, topicColor } from "../lib/tag-colors.ts";
 import { SettingsRow, SettingsSection } from "./settings-panel.tsx";
 import { SettingsSkeleton } from "./skeleton.tsx";
-import { formatCount } from "../lib/format.ts";
+import { saveCount, topicEdited } from "../lib/topics.ts";
 
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
 export const TOPIC_NAME_MAX = 32;
@@ -32,16 +32,6 @@ export const topicsKey = ["ai-topics"] as const;
 
 const fail = (title: string, error: unknown) =>
 	toast.error(title, { description: error instanceof Error && error.message ? error.message : undefined });
-
-/** "1 save", "1,204 saves". */
-export function saveCount(count: number): string {
-	return `${formatCount(count)} ${count === 1 ? "save" : "saves"}`;
-}
-
-/** A built-in whose description is no longer the shipped one. */
-export function topicEdited(topic: Pick<AiTopic, "builtIn" | "description" | "defaultDescription">): boolean {
-	return topic.builtIn && topic.defaultDescription !== undefined && topic.description !== topic.defaultDescription;
-}
 
 /**
  * Settings › AI › Topics: the list automatic tags file saves under.

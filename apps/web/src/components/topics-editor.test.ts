@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { saveCount, topicEdited } from "./topics-editor.tsx";
+import { saveCount, topicEdited } from "../lib/topics.ts";
 
 test("a built-in shows Reset only once its description differs from the shipped one", () => {
 	expect(topicEdited({ builtIn: true, description: "Games", defaultDescription: "Games" })).toBe(false);

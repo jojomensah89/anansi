@@ -21,7 +21,7 @@ async function connect() {
  expect(await listClients(env.db)).toHaveLength(0);
  const login=await handleApi(env,request("/api/auth/session",{token:env.libraryToken},{origin}));
  const cookie=login.headers.get("set-cookie")!.split(";")[0]!;
- const params={client_id:app.client_id,redirect_uri:app.redirect_uris[0],response_type:"code",code_challenge:challenge,code_challenge_method:"S256",resource:origin+"/mcp",state:"test"};
+ const params={client_id:app.client_id,redirect_uri:app.redirect_uris[0]!,response_type:"code",code_challenge:challenge,code_challenge_method:"S256",resource:origin+"/mcp",state:"test"};
  const decision=await handleApi(env,request("/api/oauth/authorize",{params,allow:true},{origin,cookie}));
  const result=await decision.json() as {redirect:string}; expect(result.redirect).toBeString();
  const code=new URL(result.redirect).searchParams.get("code")!; expect(code).toBeString();
