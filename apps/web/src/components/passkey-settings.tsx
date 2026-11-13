@@ -23,7 +23,38 @@ import { SettingsSkeleton } from "./skeleton.tsx";
 
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
 
-/** Settings › Sign-in: the passkeys that open this library, and signing out. */
+/**
+ * Settings › Security › Sign-in: how this library is opened when no passkey
+ * can, and ending the session in this browser.
+ */
+export function SessionSettings() {
+	const queryClient = useQueryClient();
+	const signOut = useMutation({
+		mutationFn: api.disconnect,
+		onSuccess: (next) => {
+			// Nothing from the library stays in memory once the session ends.
+			queryClient.clear();
+			queryClient.setQueryData(sessionKey, next);
+		},
+		onError: (error) => toast.error("Couldn’t sign out", { description: passkeyError(error) ?? undefined }),
+	});
+	return (
+		<>
+			<SettingsRow title="Recovery key" description="The deploy secret signs you in when no passkey can. Keep it somewhere safe" />
+			<SettingsRow
+				title="This browser"
+				description="Stays signed in while you use it"
+				control={
+					<Button variant="outline" disabled={signOut.isPending} onClick={() => signOut.mutate()}>
+						{signOut.isPending ? "Signing out" : "Sign out"}
+					</Button>
+				}
+			/>
+		</>
+	);
+}
+
+/** Settings › Security › Passkeys: the passkeys that open this library. */
 export function PasskeySettings() {
 	const queryClient = useQueryClient();
 	const list = useQuery({ queryKey: passkeysKey, queryFn: () => api.listPasskeys().then((r) => r.passkeys) });
@@ -52,16 +83,6 @@ export function PasskeySettings() {
 			setRemoving(null);
 		},
 		onError: (error) => toast.error("Couldn’t remove the passkey", { description: passkeyError(error) ?? undefined }),
-	});
-
-	const signOut = useMutation({
-		mutationFn: api.disconnect,
-		onSuccess: (next) => {
-			// Nothing from the library stays in memory once the session ends.
-			queryClient.clear();
-			queryClient.setQueryData(sessionKey, next);
-		},
-		onError: (error) => toast.error("Couldn’t sign out", { description: passkeyError(error) ?? undefined }),
 	});
 
 	if (list.isPending) return <SettingsSkeleton label="Loading passkeys" />;
@@ -122,16 +143,6 @@ export function PasskeySettings() {
 					/>
 				</>
 			)}
-			<SettingsRow
-				title="This browser"
-				description="Stays signed in while you use it"
-				control={
-					<Button variant="outline" disabled={signOut.isPending} onClick={() => signOut.mutate()}>
-						{signOut.isPending ? "Signing out" : "Sign out"}
-					</Button>
-				}
-			/>
-
 			<AlertDialog open={removing !== null} onOpenChange={(open) => { if (!open && !remove.isPending) setRemoving(null); }}>
 				<AlertDialogContent className="settings-dialog">
 					<AlertDialogHeader>

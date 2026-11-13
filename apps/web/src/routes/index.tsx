@@ -1,27 +1,29 @@
 import { Button } from "@anansi/ui/components/button";
 import { PhoneActions } from "../components/phone-actions.tsx";
-import { SyncControls } from "../components/sync-controls.tsx";
-import { Search } from "lucide-react";
+import { Search, SlidersHorizontal, SquareCheck, X } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Rail } from "../components/rail.tsx";
 import { Card } from "../components/card.tsx";
-import { Palette } from "../components/palette.tsx";
+import { modKey as paletteModKey, Palette } from "../components/palette.tsx";
 import { Detail } from "../components/detail.tsx";
 import { FilterChips, FilterTrigger, useFilterBar, type Filters } from "../components/filters.tsx";
 import { SelectBar } from "../components/selectbar.tsx";
 import { RowView, TimelineView, ViewTabs, type ViewMode } from "../components/views.tsx";
 import { useMasonry } from "../components/masonry.tsx";
-import { LibraryActions } from "../components/library-actions.tsx";
+import { SaveAsShelf } from "../components/library-actions.tsx";
+import { ShelfViewContext } from "../components/shelf-picker.tsx";
+import { useIsTopic } from "../components/tag-chip.tsx";
 import {
-  CountBone,
   GridSkeleton,
   LoadMoreSkeleton,
   RowsSkeleton,
   useSlowLoad,
 } from "../components/skeleton.tsx";
-import { api, type Collection, type ItemRow, type SemanticSearchStatus } from "../lib/api.ts";
+import { api, type ItemRow, type SemanticSearchStatus } from "../lib/api.ts";
+import { useShelves } from "../lib/shelf-queries.ts";
+import { describeRule, hasRule, openShelfDialog, ruleFromFilters } from "../lib/shelves.ts";
 import { expectIncomingSaves, libraryFreshnessOptions, libraryKeys, libraryStatsChanged, libraryStatsFingerprint, useLibraryQuery } from "../lib/library-query.ts";
 import { useHideRemoved, useShowNsfw } from "../lib/settings.ts";
 import { toLibrarySearch, validateLibrarySearch } from "../lib/library-search.ts";
@@ -74,6 +76,9 @@ function Library() {
   const navigate = Route.useNavigate();
   const queryClient = useQueryClient();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // ⌘ on Apple keyboards, Ctrl elsewhere; decided after hydration.
+  const [modKey, setModKey] = useState("⌘");
+  useEffect(() => setModKey(paletteModKey() === "⌘" ? "⌘" : "Ctrl "), []);
   const view: ViewMode = search.view ?? "grid";
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -103,13 +108,13 @@ function Library() {
    * the back button is for.
    */
   const setFilters = useCallback(
-    (next: Filters) => void navigate({ search: toLibrarySearch(next, view, { q: search.q, item: search.item }), replace: true }),
-    [navigate, search.item, search.q, view],
+    (next: Filters) => void navigate({ search: toLibrarySearch(next, view, { q: search.q, item: search.item, shelf: search.shelf }), replace: true }),
+    [navigate, search.item, search.q, search.shelf, view],
   );
 
   const setView = useCallback(
-    (next: ViewMode) => void navigate({ search: toLibrarySearch(filters, next, { q: search.q, item: search.item }), replace: true }),
-    [navigate, filters, search.item, search.q],
+    (next: ViewMode) => void navigate({ search: toLibrarySearch(filters, next, { q: search.q, item: search.item, shelf: search.shelf }), replace: true }),
+    [navigate, filters, search.item, search.q, search.shelf],
   );
 
   /**
@@ -123,13 +128,17 @@ function Library() {
   const [showNsfw] = useShowNsfw();
 
   const ordering = view === "timeline" ? "posted" : "saved";
-  const library = useLibraryQuery({ filters, query: search.q ?? "", order: ordering, hideRemoved, showNsfw });
+  // A shelf narrows the library like any filter, but it is not one of the bar's chips.
+  const queryFilters = useMemo(() => (search.shelf ? { ...filters, shelf: search.shelf } : filters), [filters, search.shelf]);
+  const library = useLibraryQuery({ filters: queryFilters, query: search.q ?? "", order: ordering, hideRemoved, showNsfw });
+  const shelves = useShelves();
+  const viewing = search.shelf ? (shelves.data?.find((shelf) => shelf.id === search.shelf) ?? null) : null;
+  const isTopic = useIsTopic();
   const items = library.items;
   const masonry = useMasonry(items, 340);
   const stats = useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000, ...libraryFreshnessOptions });
   const total = stats.data?.items ?? 0;
   const authors = stats.data?.authors ?? 0;
-  const visibleCount = search.archived ? (stats.data?.archived ?? 0) : total;
   const counts = stats.data?.bySource ?? {};
 
   useEffect(() => {
@@ -155,13 +164,8 @@ function Library() {
 
   const firstLoad = useSlowLoad(library.isPending && items.length === 0);
 
-  /**
-   * A count has three states, not two: arrived, obviously late, and neither.
-   * Drawing a placeholder in the third would put a grey box on screen for a
-   * query that answers in twenty milliseconds.
-   */
+  /** The rail and the top bar draw their own late placeholder for counts. */
   const statsReady = stats.isSuccess;
-  const statsSlow = useSlowLoad(stats.isPending);
 
   useEffect(() => {
     const node = sentinel.current;
@@ -214,18 +218,12 @@ function Library() {
     void navigate({ search: { ...search, item: item.id } });
   }, [navigate, search]);
 
-  const applyCollection = useCallback((collection: Collection) => {
-    const { query, cursor: _cursor, limit: _limit, order: _order, ...saved } = collection.filters;
-    void navigate({ search: toLibrarySearch(saved, view, { q: query }) });
-  }, [navigate, view]);
-  const collectionFilters = useMemo<Collection["filters"]>(() => ({
-    ...filters,
-    removed: filters.removed ?? (hideRemoved ? "exclude" : "include"),
-    order: ordering,
-    query: search.q,
-  }), [filters, hideRemoved, ordering, search.q]);
+  /** What "Save as shelf" offers as the rule: the filters and search on screen. */
+  const currentRule = useMemo(() => ruleFromFilters({ ...filters, query: search.q }), [filters, search.q]);
+  const goToShelf = useCallback((shelf: { id: string }) => void navigate({ search: { shelf: shelf.id } }), [navigate]);
 
   return (
+    <ShelfViewContext.Provider value={viewing}>
     <div className={`anansi-shell capture-workspace${search.item ? " inspector-open" : ""}`}>
       <Rail total={total} authors={authors} archived={stats.data?.archived ?? 0} bySource={counts} ready={statsReady} />
 
@@ -233,129 +231,79 @@ function Library() {
         <div className="scroll" style={{ flex: 1 }}>
 
           {/*
-            Glass, and therefore sticky inside the scroller rather than fixed
-            above it. Blur over an empty background is just a tint; the header
-            has to have the library passing beneath it for the effect to be
-            anything at all.
+            One row of tools under the frame's top bar: the view you are in on
+            the left, then everything you can do to it. Applied filters get
+            their own row beneath, where they can wrap.
           */}
-          <div className="glass workspace-controls" style={{ position: "sticky", top: 0, zIndex: 30 }}>
-            <div
-              style={{
-                height: 60,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "0 20px",
-              }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{search.q ? "Search results" : search.archived ? "Archived" : "Library"}</span>
-              {/* The expanded rail already shows this count; the header keeps it only when the rail does not. */}
-              <span className="workspace-count" style={{ fontSize: "var(--text-meta)", color: "var(--muted)", fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center", gap: 4 }}>
-                {statsReady && <>{visibleCount.toLocaleString()}<span className="sr-only"> saves</span></>}
-                {!statsReady && statsSlow && <CountBone digits={5} height={9} />}
-              </span>
-              <div className="workspace-search-sync">                <Button variant="ghost"
-                  type="button"
-                  onClick={() => setPaletteOpen(true)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    height: 32,
-                    padding: "0 8px 0 12px",
-                    border: "1px solid var(--edge)",
-                    borderRadius: 6,
-                    background: "var(--card)",
-                    width: 232,
-                    cursor: "pointer",
-                    font: "inherit",
-                  }}
-                >
-                  <Search aria-hidden="true" size={16} strokeWidth={1.5} color="var(--muted)" />
-                  <span style={{ fontSize: "var(--text-body)", color: "var(--fainter)" }}>
-                    {search.q ? search.q : `Search`}
-                  </span>
-                  <span
-                    className="mono"
-                    style={{
-                      marginLeft: "auto",
-                      fontSize: "var(--text-meta)",
-                      color: "var(--muted)",
-                      border: "1px solid var(--edge)",
-                      borderRadius: 3,
-                      padding: "1px 4px",
-                    }}
+          <div className="library-toolbar-wrap">
+            <div className="library-toolbar">
+              <ViewTabs value={view} onChange={setView} />
+              <div className="library-toolbar-end">
+                <div className="library-search">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    className="library-search-field"
+                    onClick={() => setPaletteOpen(true)}
+                    aria-label={search.q ? `Search: ${search.q}` : "Search"}
+                    aria-keyshortcuts="Meta+K Control+K"
+                    data-filled={search.q ? true : undefined}
                   >
-                    ⌘K
-                  </span>
-                </Button>
-
-                {search.q && (
-                  <Button variant="ghost" type="button" onClick={() => void navigate({ search: toLibrarySearch(filters, view, { item: search.item }), replace: true })} style={{ height: 32, border: "none", borderRadius: 6, background: "transparent", color: "var(--muted)", cursor: "pointer", font: "inherit", fontSize: "var(--text-body)" }}>
-                    Clear
+                    <Search aria-hidden="true" size={16} strokeWidth={1.5} />
+                    <span className="library-search-text">{search.q ? search.q : "Search"}</span>
+                    <kbd className="keycap library-search-keys">{modKey}K</kbd>
                   </Button>
-                )}
-                {stats.isError && <Button variant="ghost" type="button" onClick={() => void stats.refetch()} style={{ border: "none", background: "transparent", color: "var(--danger)", cursor: "pointer", font: "inherit" }}>Retry counts</Button>}
-
-                <SyncControls/>
-</div>
-            </div>
-
-            {/*
-              One level: the views you can be in, and everything you can do to
-              them. Search and Add filter were on separate rows, which made
-              choosing a view feel like a different kind of act from narrowing
-              one.
-            */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "0 20px 10px",
-                flexWrap: "wrap",
-              }}
-            >
-              <ViewTabs value={view} onChange={setView} /><FilterTrigger bar={bar} align="left" />
-
-              <div className="library-toolbar-actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-                <PhoneActions><LibraryActions current={collectionFilters} onApply={applyCollection} /><Button variant="ghost" type="button" onClick={() => { setSelecting(s => !s); setPicked(new Set()); }}>Select</Button></PhoneActions><div className="desktop-actions"><LibraryActions current={collectionFilters} onApply={applyCollection} /></div>
-
-                <Button variant="ghost"
+                  {search.q && (
+                    <Button variant="ghost" type="button" className="library-search-clear" aria-label="Clear search" onClick={() => void navigate({ search: toLibrarySearch(filters, view, { item: search.item, shelf: search.shelf }), replace: true })}>
+                      <X aria-hidden="true" size={14} strokeWidth={1.5} />
+                    </Button>
+                  )}
+                </div>
+                <FilterTrigger bar={bar} align="right" />
+                <Button
+                  variant="outline"
                   type="button"
-                  className="desktop-actions"
+                  className="toolbar-button desktop-actions"
+                  aria-pressed={selecting}
                   onClick={() => {
                     setSelecting((s) => !s);
                     setPicked(new Set());
                   }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    height: 32,
-                    padding: "0 12px",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    font: "inherit",
-                    fontSize: "var(--text-body)",
-                    background: selecting ? "var(--accent)" : "var(--card)",
-                    color: selecting ? "var(--accent-text-on-accent)" : "var(--text-dim)",
-                    border: `1px solid ${selecting ? "var(--accent)" : "var(--edge)"}`,
-                  }}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 12l5 5L20 6" />
-                  </svg>
-                  Select
+                  <SquareCheck aria-hidden="true" strokeWidth={1.5} />
+                  {selecting ? "Done" : "Select"}
                 </Button>
+                <div className="desktop-actions"><SaveAsShelf rule={currentRule} onSaved={goToShelf} /></div>
+                <PhoneActions><SaveAsShelf rule={currentRule} onSaved={goToShelf} /><Button variant="outline" className="toolbar-button" type="button" aria-pressed={selecting} onClick={() => { setSelecting(s => !s); setPicked(new Set()); }}>{selecting ? "Done selecting" : "Select"}</Button></PhoneActions>
               </div>
             </div>
-
+            {stats.isError && (
+              <div className="library-notice" role="alert">
+                Counts didn't load
+                <Button variant="ghost" type="button" className="library-notice-action" onClick={() => void stats.refetch()}>Retry</Button>
+              </div>
+            )}
+            {search.shelf && (
+              <div className="shelf-header">
+                {viewing ? (
+                  <>
+                    <span className="shelf-header-label">Rule</span>
+                    <span className="shelf-header-rule">{hasRule(viewing.filters) ? describeRule(viewing.filters, isTopic).join(" · ") : "Saves added by hand"}</span>
+                    <Button variant="ghost" type="button" className="shelf-header-edit" onClick={() => openShelfDialog({ shelf: viewing })}>
+                      <SlidersHorizontal aria-hidden="true" strokeWidth={1.5} />
+                      Edit
+                    </Button>
+                  </>
+                ) : shelves.isSuccess ? (
+                  <span className="shelf-header-rule">This shelf no longer exists</span>
+                ) : null}
+              </div>
+            )}
             <div className={`workspace-filter-row${bar.anyApplied ? " has-filters" : ""}`}><FilterChips bar={bar} matched={!library.hasNextPage && !library.isPending && !library.isError ? items.length : null} />
             </div><SemanticSearchNotice query={search.q} status={library.semantic} />
           </div>
 
-          <div style={{ padding: "16px 20px" }}>
+          <div className="library-content">
           {/*
             The first page and the next page are different waits. An empty
             screen needs a shape; a screen you are already reading needs a line
@@ -375,9 +323,9 @@ function Library() {
 
           {!library.isPending && !library.isError && items.length === 0 && (
             <div style={{ padding: "40px 12px", color: "var(--muted)", fontSize: "var(--text-body)" }}>
-              <div style={{ color: "var(--text-dim)" }}>{search.q ? `No results for “${search.q}”` : bar.anyApplied ? "Nothing matches these filters" : "Nothing saved yet"}</div>
+              <div style={{ color: "var(--text-dim)" }}>{search.q ? `No results for “${search.q}”` : bar.anyApplied ? "Nothing matches these filters" : search.shelf ? "Nothing on this shelf yet" : "Nothing saved yet"}</div>
               <div style={{ fontSize: "var(--text-meta)", color: "var(--muted)", marginTop: 4 }}>
-                {search.q ? "Try fewer words or clear a filter" : bar.anyApplied ? "Clear a filter to see more" : "Save a page, post or star with the Anansi extension"}
+                {search.q ? "Try fewer words or clear a filter" : bar.anyApplied ? "Clear a filter to see more" : search.shelf ? (viewing && hasRule(viewing.filters) ? "No saves match its rule yet" : "Add saves with Add to shelf, or save filters as a rule") : "Save a page, post or star with the Anansi extension"}
               </div>
             </div>
           )}
@@ -388,9 +336,9 @@ function Library() {
               are as tall as their tallest member, so a 137px card beside a
               535px one leaves 400px of hole.
             */
-            <div ref={masonry.ref} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div ref={masonry.ref} style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
               {masonry.buckets.map((bucket, column) => (
-                <div key={column} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+                <div key={column} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
                   {bucket.map((item) => (
                     <Card
                       key={item.id}
@@ -445,10 +393,14 @@ function Library() {
         }}
         onSearch={(query) => {
           setPaletteOpen(false);
-          void navigate({ search: toLibrarySearch(filters, view, { q: query }), replace: true });
+          void navigate({ search: toLibrarySearch(filters, view, { q: query, shelf: search.shelf }), replace: true });
         }}
+        onFilters={(next) => setFilters({ ...filters, ...next })}
+        onView={setView}
+        onSelect={() => { setSelecting(true); setPicked(new Set()); }}
       />
       <Detail id={search.item ?? null} focusNote={focusNoteId === search.item} onClose={() => { setFocusNoteId(null); void navigate({ search: { ...search, item: undefined }, replace: true }); }} />
     </div>
+    </ShelfViewContext.Provider>
   );
 }

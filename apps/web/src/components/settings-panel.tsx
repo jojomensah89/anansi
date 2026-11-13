@@ -1,18 +1,35 @@
 import type { ReactNode } from "react";
 
 /**
- * Settings layout: a label column naming the area, then one panel of rows.
- * Rows put the control on the right and anything that only exists while the
- * control is on (progress, a cap, a status) underneath, full width.
+ * One settings panel: a header that names it in a line, then rows split by
+ * hairlines. Each row puts its label and a one-line description on the left
+ * and the control on the right; anything that only exists while the control
+ * is on (progress, a cap, a status) sits underneath, full width.
  */
-export function SettingsSection({ id, title, lead, children }: { id: string; title: string; lead?: ReactNode; children: ReactNode }) {
+export function SettingsSection({
+	id,
+	title,
+	lead,
+	action,
+	children,
+}: {
+	id: string;
+	title: ReactNode;
+	lead?: ReactNode;
+	/** Sits at the right of the header: a count, or the panel's one action. */
+	action?: ReactNode;
+	children: ReactNode;
+}) {
 	return (
-		<section id={id} className="settings-section" aria-labelledby={`${id}-title`}>
-			<div className="settings-section-head">
-				<h2 id={`${id}-title`}>{title}</h2>
-				{lead && <p>{lead}</p>}
-			</div>
-			<div className="settings-panel">{children}</div>
+		<section id={id} className="settings-panel" aria-labelledby={`${id}-title`}>
+			<header className="settings-panel-head">
+				<div className="settings-panel-copy">
+					<h2 id={`${id}-title`}>{title}</h2>
+					{lead && <p>{lead}</p>}
+				</div>
+				{action && <div className="settings-panel-action">{action}</div>}
+			</header>
+			<div className="settings-panel-rows">{children}</div>
 		</section>
 	);
 }
@@ -24,6 +41,7 @@ export function SettingsRow({
 	description,
 	tone,
 	control,
+	wide,
 	children,
 }: {
 	title: ReactNode;
@@ -33,10 +51,12 @@ export function SettingsRow({
 	/** Colour of the description when it reports a problem. */
 	tone?: "warn" | "danger";
 	control?: ReactNode;
+	/** A control too wide to sit beside the label on a phone (a field, a list): it drops underneath there. */
+	wide?: boolean;
 	children?: ReactNode;
 }) {
 	return (
-		<div className="settings-row">
+		<div className="settings-row" data-wide={wide || undefined}>
 			<div className="settings-row-copy">
 				<div className="settings-row-title">
 					{icon}

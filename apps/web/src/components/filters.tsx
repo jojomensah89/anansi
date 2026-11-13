@@ -2,10 +2,11 @@ import { Button } from "@anansi/ui/components/button";
 import { Checkbox } from "@anansi/ui/components/checkbox";
 import { Input } from "@anansi/ui/components/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@anansi/ui/components/popover";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, LIBRARY_SOURCES, sourceLabel, type Creator, type ItemQuery } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
+import { TagDot } from "./tag-chip.tsx";
 
 /**
  * The filter bar.
@@ -178,7 +179,7 @@ export function useFilterBar({
 }): FilterBar {
   const [openChip, setOpenChip] = useState<FieldKey | null>(null);
   const [picking, setPicking] = useState<"fields" | FieldKey | null>(null);
-  const [tags, setTags] = useState<{ label: string; color: string; count: number }[]>([]);
+  const [tags, setTags] = useState<{ label: string; color: string; count: number; kind?: "topic" | "custom" }[]>([]);
   const [creators, setCreators] = useState<Creator[]>([]);
 
   useEffect(() => {
@@ -245,6 +246,8 @@ export function useFilterBar({
 			value: t.label,
 			label: t.label,
 			count: t.count,
+			// AI topics carry their dot here too; the owner's own tags stay plain.
+			icon: t.kind === "topic" ? <TagDot label={t.label} /> : undefined,
 		})),
       },
     ];
@@ -332,7 +335,7 @@ export function FilterTrigger({ bar, align = "right" }: { bar: FilterBar; align?
     >
       <PopoverTrigger render={<Button variant="outline" className="filter-trigger" />}>
         <Icon d="M4 5h16l-6.5 7.5V19l-3 2v-8.5z" />
-        Add filter
+        Filter
       </PopoverTrigger>
       <FilterMenuContent align={align === "left" ? "start" : "end"} searchable={Boolean(field?.searchable)}>
         {field ? (
@@ -464,6 +467,9 @@ export function FieldFilter({
   searchable?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // The trigger swaps from a button to a chip on the first pick. Anchoring the
+  // menu to this wrapper keeps it in place instead of jumping to the corner.
+  const anchorRef = useRef<HTMLSpanElement>(null);
 
   const field: Field = {
     key: "source",
@@ -476,6 +482,7 @@ export function FieldFilter({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
+      <span ref={anchorRef} style={{ display: "inline-flex" }}>
       {values.length > 0 ? (
         <Chip
           field={field}
@@ -492,7 +499,8 @@ export function FieldFilter({
           {label}
         </PopoverTrigger>
       )}
-      <FilterMenuContent searchable={Boolean(searchable)}>
+      </span>
+      <FilterMenuContent searchable={Boolean(searchable)} anchor={anchorRef}>
         <ValueList
           field={field}
           values={values}
@@ -636,14 +644,17 @@ function FilterMenuContent({
   children,
   align = "start",
   searchable = false,
+  anchor,
 }: {
   children: React.ReactNode;
   align?: "start" | "end";
   searchable?: boolean;
+  anchor?: React.RefObject<HTMLElement | null>;
 }) {
   return (
     <PopoverContent
       align={align}
+      anchor={anchor}
       sideOffset={6}
       initialFocus={(type) => searchable || type === "keyboard"}
       className="filter-menu"

@@ -8,6 +8,10 @@ import { useState } from "react";
 import { ConnectionGate } from "../components/connection-gate.tsx";
 
 import appCss from "../index.css?url";
+import frameCss from "../styles/frame.css?url";
+import shelvesCss from "../styles/shelves.css?url";
+import settingsCss from "../styles/settings.css?url";
+import sourcesCss from "../styles/sources.css?url";
 
 export interface RouterAppContext {}
 
@@ -27,6 +31,13 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      // The app frame and library screen; after index.css so it wins ties.
+      { rel: "stylesheet", href: frameCss },
+      // Shelves: the rail section, dialog, picker and shelf header.
+      { rel: "stylesheet", href: shelvesCss },
+      // Settings and Sources; after the frame, so their panels win ties.
+      { rel: "stylesheet", href: settingsCss },
+      { rel: "stylesheet", href: sourcesCss },
       { rel: "icon", type: "image/png", href: "/favicon.png" },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },

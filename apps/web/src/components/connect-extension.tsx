@@ -43,7 +43,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
  * extension directly; the dialog closes itself once the extension redeems it.
  * Closing early revokes the code.
  */
-export function ConnectExtension() {
+export function ConnectExtension({ label = "Connect extension", className }: { label?: string; className?: string } = {}) {
 	const router = useRouter();
 	const [open, setOpen] = useState(false);
 	const [code, setCode] = useState<{ key: string; id: string } | null>(null);
@@ -112,9 +112,9 @@ export function ConnectExtension() {
 				} else close();
 			}}
 		>
-			<DialogTrigger render={<Button variant="outline" className="toolbar-button connect-extension-trigger" aria-label="Connect extension" />}>
+			<DialogTrigger render={<Button variant="outline" className={className ?? "toolbar-button connect-extension-trigger"} aria-label={label} />}>
 				<KeyRound {...ICON} />
-				<span className="toolbar-button-label">Connect extension</span>
+				<span className="toolbar-button-label">{label}</span>
 			</DialogTrigger>
 			<DialogContent className="settings-dialog connect-dialog">
 				<DialogHeader>

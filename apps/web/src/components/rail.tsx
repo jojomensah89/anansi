@@ -1,5 +1,4 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 import {
 	Sidebar,
 	SidebarContent,
@@ -11,14 +10,12 @@ import {
 	SidebarMenu,
 	SidebarMenuButton,
 	SidebarMenuItem,
-	SidebarTrigger,
 } from "@anansi/ui/components/sidebar";
 import { CountBone, useSlowLoad } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
-import { ExtensionIcon } from "./extension-icon.tsx";
-import { api, LIBRARY_SOURCES, sourceLabel, type ExtensionHealth } from "../lib/api.ts";
-import { extensionStatus } from "../lib/source-state.ts";
-import { StatusDot } from "./status-dot.tsx";
+import { LIBRARY_SOURCES, sourceLabel } from "../lib/api.ts";
+import { AppTopBar, ProgressPill } from "./app-frame.tsx";
+import { RailShelves } from "./rail-shelves.tsx";
 import { GITHUB_URL, X_URL } from "../lib/links.ts";
 
 /** The library rail. The shell owns counts so navigation and content agree. */
@@ -83,41 +80,30 @@ export function RailSocialLinks() {
 }
 
 export function Rail({ total, authors, archived = 0, bySource, ready: readyProp }: RailProps) {
-	const [extension, setExtension] = useState<ExtensionHealth | null>(null);
-	const [tags, setTags] = useState<{ label: string; color: string; count: number; kind: "topic" | "custom" }[]>([]);
 	const path = useRouterState({ select: (s) => s.location.pathname });
 	const archivedView = useRouterState({ select: (s) => s.location.pathname === "/" && (s.location.search as Record<string, unknown>).archived === true });
+	// A shelf is its own place in the rail, so Library is not also lit while one is open.
+	const shelfView = useRouterState({ select: (s) => s.location.pathname === "/" && typeof (s.location.search as Record<string, unknown>).shelf === "string" });
 	const ready = readyProp ?? (total > 0 || archived > 0);
 	const slow = useSlowLoad(!ready);
 	const count = (n: number) => ready ? String(n) : slow ? <CountBone digits={4} height={8} /> : null;
-	useEffect(() => {
-		const controller = new AbortController();
-		api.sources(controller.signal).then((result) => setExtension(result.extension)).catch(() => setExtension(null));
-		api.tags(controller.signal).then((result) => setTags(result.tags)).catch(() => setTags([]));
-		const update = () => { void api.sources(controller.signal).then(result => setExtension(result.extension)).catch(() => {}); };
-        window.addEventListener("anansi-connection-updated", update);
-        return () => { controller.abort(); window.removeEventListener("anansi-connection-updated", update); };
-	}, []);
-	const topics = tags.filter((tag) => tag.kind === "topic" && tag.count > 0).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-	const status = extensionStatus(extension);
-	const extensionTitle = status.state === "online" && extension?.extensionVersion ? `${status.label} · v${extension.extensionVersion}` : status.label;
 
 	return (
+		<>
 		<Sidebar className="anansi-rail" collapsible="icon">
 			<SidebarHeader className="anansi-rail-brand">
 				<div className="anansi-rail-brand-name">
 					<img src="/favicon.png" width="20" height="20" alt="" aria-hidden="true" style={{ borderRadius: 6, objectFit: "cover" }} />
 					<span className="anansi-sidebar-label">Anansi</span>
 				</div>
-				<SidebarTrigger />
 			</SidebarHeader>
 
 			<SidebarContent>
 				<SidebarGroup className="anansi-rail-primary">
 					<SidebarGroupContent>
 						<SidebarMenu>
-							<Item to="/" label="Library" count={count(total)} active={!archivedView && (path === "" || path === "/")}>
-								<NavIcon active={!archivedView && (path === "" || path === "/")} path="M6 4h12v17l-6-4-6 4z" />
+							<Item to="/" label="Library" count={count(total)} active={!archivedView && !shelfView && (path === "" || path === "/")}>
+								<NavIcon active={!archivedView && !shelfView && (path === "" || path === "/")} path="M6 4h12v17l-6-4-6 4z" />
 							</Item>
 							<SidebarMenuItem>
 								<SidebarMenuButton render={<Link to="/" search={{ archived: true }} />} isActive={archivedView} tooltip="Archived" aria-label="Archived">
@@ -135,8 +121,8 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 							<Item to="/mcp" label="MCP server" active={path === "/mcp"}>
 								<NavIcon active={path === "/mcp"} path="M4 4h16v6H4zM4 14h16v6H4zM7 7h.01M7 17h.01M11 7h6M11 17h6" />
 							</Item>
-							<Item to="/settings" label="Settings" active={path === "/settings"}>
-								<NavIcon active={path === "/settings"} path="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.9 6.9l1.4 1.4M17.7 8.3l1.4-1.4M12 3v2M12 19v2M3 12h2M19 12h2" />
+							<Item to="/settings" label="Settings" active={path.startsWith("/settings")}>
+								<NavIcon active={path.startsWith("/settings")} path="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.9 6.9l1.4 1.4M17.7 8.3l1.4-1.4M12 3v2M12 19v2M3 12h2M19 12h2" />
 							</Item>
 						</SidebarMenu>
 					</SidebarGroupContent>
@@ -161,29 +147,16 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 					</SidebarGroupContent>
 				</SidebarGroup>
 
-				{topics.length > 0 && <SidebarGroup className="anansi-rail-topics-group">
-					<SidebarGroupLabel className="anansi-rail-topics">Topics</SidebarGroupLabel>
-					<SidebarGroupContent>
-						<SidebarMenu>
-							{topics.map((topic) => <SidebarMenuItem key={topic.label}>
-								<SidebarMenuButton render={<Link to="/" search={{ tag: [topic.label] }} />} tooltip={topic.label} aria-label={topic.label}>
-									<span aria-hidden="true" className="anansi-topic-dot" />
-									<span className="anansi-sidebar-label">{topic.label}</span>
-									<span className="anansi-sidebar-count">{topic.count}</span>
-								</SidebarMenuButton>
-							</SidebarMenuItem>)}
-						</SidebarMenu>
-					</SidebarGroupContent>
-				</SidebarGroup>}
+				<RailShelves />
 			</SidebarContent>
 
 			<SidebarFooter className="anansi-rail-footer">
-				<Link to="/sources" className="anansi-rail-extension" title={extensionTitle} aria-label={extensionTitle} data-state={status.state}>
-					<span className="anansi-rail-extension-icon"><ExtensionIcon /><StatusDot status={status} /></span>
-					<span className="anansi-sidebar-label">{status.label}</span>
-				</Link>
 				<RailSocialLinks />
 			</SidebarFooter>
 		</Sidebar>
+		{/* Siblings of the rail inside .anansi-shell: the frame's grid places them (styles/frame.css). */}
+		<AppTopBar total={total} archived={archived} ready={ready} />
+		<ProgressPill />
+		</>
 	);
 }

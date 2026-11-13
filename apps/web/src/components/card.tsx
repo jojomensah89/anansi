@@ -6,8 +6,9 @@ import { Avatar } from "./avatar.tsx";
 import { GithubRepoCard } from "./github-repo-card.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 import { TagPopover } from "./tag-popover.tsx";
-import { TagChip } from "./tag-chip.tsx";
+import { TagChip, TagOverflow } from "./tag-chip.tsx";
 import { Bookmark, Star } from "lucide-react";
+import { CardShelfMenu } from "./card-shelf-menu.tsx";
 
 /**
  * One grid card.
@@ -82,7 +83,7 @@ export function Card({
       {selectable && <Checkbox aria-label={`Select ${item.title ?? item.authorName ?? "save"}`} checked={!!selected} onClick={event=>event.stopPropagation()} onCheckedChange={()=>onToggle?.(item)} style={{position:"absolute",top:12,right:12,zIndex:2,width:20,height:20,background:selected?"var(--accent)":"var(--card)",color:"var(--accent-text-on-accent)"}} />}
 
 
-      {!isRepo && <div className="capture-card-identity"><Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} name={item.authorName} size={28} /><span>{item.source === "reddit" && item.subreddit ? `r/${item.subreddit}` : item.authorName ?? item.author ?? (item.source === "web" ? webDomain(item.url) : null)}{item.source === "x" && item.author && <small className="post-handle">@{item.author}</small>}{item.source === "reddit" && item.author && <small className="post-handle">u/{item.author}</small>}</span><span className="capture-card-source"><SourceMark source={item.source} faviconUrl={item.media?.find(m => m.kind === "favicon")?.key ? mediaUrl(item.media.find(m => m.kind === "favicon")!.key) : undefined} size={14} /></span></div>}
+      {!isRepo && <div className="capture-card-identity"><Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} name={item.authorName} size={28} /><span>{item.source === "reddit" && item.subreddit ? `r/${item.subreddit}` : item.authorName ?? item.author ?? (item.source === "web" ? webDomain(item.url) : null)}{item.source === "x" && item.author && <small className="post-handle">@{item.author}</small>}{item.source === "reddit" && item.author && <small className="post-handle">u/{item.author}</small>}</span></div>}
       {item.source === "web" ? <WebPreviewCard item={item} onPreview={changed} footer={<CardFooter item={item} selectable={selectable} onOpen={onOpen} onChanged={changed} />} /> : isRepo ? (
 		<>
 			<GithubRepoCard item={item} footer={<CardFooter item={item} selectable={selectable} onOpen={onOpen} onChanged={changed} />} />
@@ -97,7 +98,7 @@ export function Card({
             shaped.
           */}
           <div style={{ padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 10 }}>
-            {item.title && item.source !== "x" && item.source !== "tiktok" && <div style={{ fontSize:14, fontWeight:600 }}>{item.title}</div>}
+            {item.title && item.source !== "x" && item.source !== "tiktok" && <div style={{ fontSize:14, fontWeight:500, color:"var(--text)" }}>{item.title}</div>}
 
             {(item.excerpt.trim() || (item.source === "tiktok" && item.title)) && (
               <div
@@ -172,22 +173,37 @@ export function Card({
 	);
 }
 
+/**
+ * The card's last line: what you filed it under on the left, when and where on
+ * the right.
+ *
+ * Add tags leads so the action is always in the same place; once a card has
+ * tags it shrinks to its plus and the chips carry the line. Two chips at most,
+ * then a count that lists the rest. The platform mark closes the line, once.
+ * GitHub cards draw their mark in their own header, so they skip it here.
+ */
 export function CardFooter({ item, selectable, onOpen, onChanged }: { item: ItemRow; selectable?: boolean; onOpen?: (item: ItemRow, focusNote?: boolean) => void; onChanged: () => void }) {
- return <footer className="capture-card-footer">
+ const favicon = item.media?.find((m) => m.kind === "favicon")?.key;
+ return <footer className="capture-card-footer" data-has-note={item.hasNote || undefined}>
  <CardOrganization item={item} tags={item.tags ?? []} onChanged={onChanged} />
- {item.platformSaved === 0 && <span title="Removed at source">Removed</span>}
+ <span className="capture-card-meta">
+ {item.platformSaved === 0 && <span className="capture-card-removed" title="Removed at source">Removed</span>}
  {item.favorite && <Star aria-label="Favorite" role="img" size={14} strokeWidth={1.5} fill="currentColor" />}
+ <Button variant="ghost" type="button" className="capture-card-note" disabled={selectable} aria-label={item.hasNote ? "Open private note" : "Add private note"} title="Private note" onClick={event => {event.stopPropagation();onOpen?.(item, true)}}><Bookmark aria-hidden="true" size={14} strokeWidth={1.5} fill={item.hasNote ? "currentColor" : "none"} /></Button>
  <time>{shortDate(item.source === "web" ? item.savedAt : item.postedAt)}</time>
- <Button variant="ghost" type="button" disabled={selectable} aria-label={item.hasNote ? "Open private note" : "Add private note"} title="Private note" onClick={event => {event.stopPropagation();onOpen?.(item, true)}}><Bookmark aria-hidden="true" size={14} strokeWidth={1.5} fill={item.hasNote ? "currentColor" : "none"} /></Button>
+ {item.source !== "github" && <span className="capture-card-source"><SourceMark source={item.source} faviconUrl={favicon ? mediaUrl(favicon) : undefined} size={14} /></span>}
+ <CardShelfMenu itemId={item.id} title={item.title ?? item.authorName ?? item.author ?? "this save"} disabled={selectable} />
+ </span>
  </footer>;
 }
 
 export function CardOrganization({ item, tags, onChanged }: { item: ItemRow; tags: NonNullable<ItemRow["tags"]>; onChanged: () => void }) {
+	const labels = tags.map((tag) => tag.label);
 	return (
-		<div className="anansi-card-org" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap", minWidth: 0, overflow: "hidden" }} onClick={(event) => event.stopPropagation()}>
-			{tags.slice(0, 2).map((tag) => <TagChip key={tag.label} label={tag.label} />)}
-			{tags.length > 2 && <TagPopover itemId={item.id} current={tags.map((tag) => tag.label)} onChanged={onChanged} mode="overflow" overflowCount={tags.length - 2} />}
-			<TagPopover itemId={item.id} current={tags.map((tag) => tag.label)} onChanged={onChanged} iconOnly />
+		<div className="anansi-card-org" data-empty={labels.length === 0 || undefined} onClick={(event) => event.stopPropagation()}>
+			<TagPopover itemId={item.id} current={labels} onChanged={onChanged} iconOnly={false} compactLabel={labels.length > 0} />
+			{labels.slice(0, 2).map((label) => <TagChip key={label} label={label} />)}
+			<TagOverflow labels={labels.slice(2)} />
 		</div>
 	);
 }

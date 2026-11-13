@@ -15,7 +15,9 @@ import { Bone, Loading } from "./skeleton.tsx";
 import { TagPopover } from "./tag-popover.tsx";
 import { TagChip } from "./tag-chip.tsx";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@anansi/ui/components/tooltip";
-import { Archive, ArchiveRestore, ExternalLink, Star, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookMinus, BookPlus, ExternalLink, Star, X } from "lucide-react";
+import { useShelfMembership } from "../lib/shelf-queries.ts";
+import { ShelfPickerPopover, useViewingShelf } from "./shelf-picker.tsx";
 
 type ItemDetailRow = Awaited<ReturnType<typeof api.updateItem>>;
 
@@ -45,7 +47,8 @@ export function Detail({ id, onClose, focusNote }: { id: string | null; onClose:
   useDialogFocus(!!id, dialog, dialog, onClose, true);
 
   const refresh = (next: ItemDetailRow) => {
-    queryClient.setQueryData(libraryKeys.detail(next.id), next);
+    // The PATCH reply has no shelf list; keep the one the picker reads.
+    queryClient.setQueryData<ItemDetailRow & { shelves?: string[] }>(libraryKeys.detail(next.id), (old) => ({ ...next, shelves: (next as { shelves?: string[] }).shelves ?? old?.shelves }));
     void queryClient.invalidateQueries({ queryKey: libraryKeys.pages() });
     void queryClient.invalidateQueries({ queryKey: libraryKeys.stats() });
   };
@@ -138,6 +141,7 @@ export function Detail({ id, onClose, focusNote }: { id: string | null; onClose:
               <IconAction label={item.archived ? "Unarchive" : "Archive"} onClick={() => toggle("archived")}>
                 {item.archived ? <ArchiveRestore aria-hidden="true" strokeWidth={1.5} /> : <Archive aria-hidden="true" strokeWidth={1.5} />}
               </IconAction>
+              <InspectorShelves itemId={item.id} shelves={item.shelves} />
               <IconAction label="Open original" href={item.url}>
                 <ExternalLink aria-hidden="true" strokeWidth={1.5} />
               </IconAction>
@@ -212,6 +216,32 @@ function IconAction({ label, ariaLabel, pressed, onClick, href, children }: { la
     ? <a href={href} target="_blank" rel="noopener noreferrer" className={`${buttonVariants({ variant: "ghost", size: "icon" })} detail-action`} aria-label={ariaLabel ?? label} />
     : <Button variant="ghost" size="icon" className="detail-action" type="button" onClick={onClick} aria-label={ariaLabel ?? label} aria-pressed={pressed} />;
   return <Tooltip><TooltipTrigger render={trigger}>{children}</TooltipTrigger><TooltipContent side="bottom">{label}</TooltipContent></Tooltip>;
+}
+
+/**
+ * Add to shelf, and Remove from the shelf being viewed when this save is on it.
+ * The picker opens under its button and lists the shelves with check marks.
+ */
+function InspectorShelves({ itemId, shelves }: { itemId: string; shelves?: string[] }) {
+  const viewing = useViewingShelf();
+  const membership = useShelfMembership();
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const onViewed = !!viewing && (shelves === undefined || shelves.includes(viewing.id));
+  return <>
+    <Tooltip>
+      <TooltipTrigger render={<Button ref={anchor} variant="ghost" size="icon" className="detail-action" type="button" aria-label="Add to shelf" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((value) => !value)} />}>
+        <BookPlus aria-hidden="true" strokeWidth={1.5} />
+      </TooltipTrigger>
+      <TooltipContent side="bottom">Add to shelf</TooltipContent>
+    </Tooltip>
+    <ShelfPickerPopover itemIds={[itemId]} open={open} onOpenChange={setOpen} anchor={anchor} align="start" />
+    {viewing && onViewed && (
+      <IconAction label={`Remove from ${viewing.name}`} onClick={() => membership.mutate({ shelf: viewing, itemIds: [itemId], on: false })}>
+        <BookMinus aria-hidden="true" strokeWidth={1.5} />
+      </IconAction>
+    )}
+  </>;
 }
 
 function Article({ text, format }: { text: string; format: "plain" | "markdown" }) {

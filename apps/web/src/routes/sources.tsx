@@ -1,23 +1,25 @@
-import { Badge } from "@anansi/ui/components/badge";
 import { Button } from "@anansi/ui/components/button";
 import { Switch } from "@anansi/ui/components/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@anansi/ui/components/table";
+import { ToggleGroup, ToggleGroupItem } from "@anansi/ui/components/toggle-group";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { AlertCircle, ChevronRight, Download, Play, RotateCcw } from "lucide-react";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { AlertCircle, ArrowRight, Download, Play, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ConnectExtension } from "../components/connect-extension.tsx";
+import { ExtensionIcon } from "../components/extension-icon.tsx";
 import { Rail } from "../components/rail.tsx";
-import { SourceCardsSkeleton, useSlowLoad } from "../components/skeleton.tsx";
+import { Bone, Loading, useSlowLoad } from "../components/skeleton.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
+import { StatusDot } from "../components/status-dot.tsx";
 import { api, type ExtensionHealth, type SourceRow, type SourcesResponse } from "../lib/api.ts";
 import { requestExtensionImport } from "../lib/extension-bridge.ts";
-import { type SourceAction, sourceAction, sourcePresentation } from "../lib/source-state.ts";
+import { frameKeys, useExtensionHealth } from "../lib/frame-status.ts";
+import { extensionStatus, importable, type SourceAction, type SourcePresentation, sourceAction, sourcePresentation } from "../lib/source-state.ts";
 
 export const Route = createFileRoute("/sources")({ component: Sources });
 
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
-const CHECKED_SOURCES = new Set(["x", "reddit", "github", "tiktok"]);
 
 /** "just now", "4 min ago", "3 h ago", "yesterday", "6 days ago". */
 export function ago(unix: number | null, now = Date.now()): string {
@@ -31,24 +33,46 @@ export function ago(unix: number | null, now = Date.now()): string {
 	return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
-/** How saves arrived, in the order the bar draws them. */
-function arrivals(row: SourceRow) {
-	return [
-		{ key: "live", label: "Live", value: row.live },
-		{ key: "imported", label: "Imported", value: row.imported },
-		{ key: "manual", label: "Manual", value: row.toolbar + row.contextMenu },
-		{ key: "chrome", label: "Chrome", value: row.chromeBookmarks },
-		{ key: "legacy", label: "Legacy", value: row.legacyUnknown },
-	];
+/** The figures under a source: what it holds, then how most of it arrived. */
+export function sourceCounts(row: SourceRow): string[] {
+	const parts = [`${row.items.toLocaleString()} saved`];
+	if (importable(row)) parts.push(`${row.imported.toLocaleString()} imported`);
+	else if (row.chromeBookmarks > 0) parts.push(`${row.chromeBookmarks.toLocaleString()} bookmarks`);
+	return parts;
 }
 
-type ImportAsk = { state: "asking" } | { state: "sent" } | { state: "missed" };
+/** The footer's one line: when it last worked, or what is in the way. */
+export function sourceFooter(row: SourceRow, status: SourcePresentation): { text: string; tone: "ok" | "accent" | "warn" | "muted" } {
+	switch (status.state) {
+		case "disabled":
+			return { text: "Off", tone: "muted" };
+		case "running":
+			return { text: status.text, tone: "accent" };
+		// The reason is long ("Sign in to TikTok, then try again"), so the card body says it.
+		case "failed":
+			return { text: importable(row) ? "Import failed" : "Capture failed", tone: "warn" };
+		case "retrying":
+			return { text: "Retrying", tone: "warn" };
+		case "disconnected":
+		case "paused":
+		case "queued":
+			return { text: status.text, tone: "muted" };
+		default:
+			return row.lastCaptureAt
+				? { text: `Last capture ${ago(row.lastCaptureAt)}`, tone: "ok" }
+				: { text: "No captures yet", tone: "muted" };
+	}
+}
+
+type ImportAsk = "asking" | "sent";
+type Filter = "all" | "on";
 
 function Sources() {
+	const queryClient = useQueryClient();
 	const [data, setData] = useState<SourcesResponse | null>(null);
 	const [loadFailed, setLoadFailed] = useState(false);
-	const [open, setOpen] = useState<string | null>(null);
 	const [asks, setAsks] = useState<Record<string, ImportAsk>>({});
+	const [filter, setFilter] = useState<Filter>("all");
 	const [stats, setStats] = useState({ items: 0, authors: 0, archived: 0, bySource: {} as Record<string, number> });
 
 	const load = useCallback((signal?: AbortSignal) => {
@@ -56,14 +80,16 @@ function Sources() {
 			.then(([nextStats, nextSources]) => {
 				setStats({ items: nextStats.items, authors: nextStats.authors, archived: nextStats.archived, bySource: nextStats.bySource });
 				setData(nextSources);
+				// The top bar's dot and this page read the same answer.
+				queryClient.setQueryData(frameKeys.extension, nextSources.extension);
 				setLoadFailed(false);
 				// A sent import now shows in the source's own status.
-				setAsks((previous) => Object.fromEntries(Object.entries(previous).filter(([, ask]) => ask.state !== "sent")));
+				setAsks((previous) => Object.fromEntries(Object.entries(previous).filter(([, ask]) => ask !== "sent")));
 			})
 			.catch((error: unknown) => {
 				if ((error as { name?: string }).name !== "AbortError") setLoadFailed(true);
 			});
-	}, []);
+	}, [queryClient]);
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -81,227 +107,199 @@ function Sources() {
 		});
 	};
 
-	const askImport = async (source: string) => {
-		setAsks((previous) => ({ ...previous, [source]: { state: "asking" } }));
-		const ok = await requestExtensionImport(source);
-		setAsks((previous) => ({ ...previous, [source]: { state: ok ? "sent" : "missed" } }));
-		if (ok) window.setTimeout(() => load(), 1500);
+	const askImport = async (row: SourceRow) => {
+		setAsks((previous) => ({ ...previous, [row.source]: "asking" }));
+		const ok = await requestExtensionImport(row.source);
+		setAsks((previous) => {
+			const next = { ...previous };
+			if (ok) next[row.source] = "sent";
+			else delete next[row.source];
+			return next;
+		});
+		if (ok) {
+			toast.success(`${row.name}: import started`);
+			window.setTimeout(() => load(), 1500);
+		} else {
+			toast.error("The extension didn’t answer", { description: "Open the extension popup to import" });
+		}
 	};
 
 	const slow = useSlowLoad(data === null && !loadFailed);
+	// Coming-next platforms are not sources yet; they get no card.
+	const sources = data?.sources.filter((row) => row.support !== "coming_next") ?? [];
+	const onCount = sources.filter((row) => row.enabled).length;
+	const shown = filter === "on" ? sources.filter((row) => row.enabled) : sources;
 
 	return (
 		<div className="anansi-shell">
 			<Rail total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} ready={data !== null} />
-			<main className="workspace-page">
-				<header className="workspace-page-head">
-					<h1>Sources</h1>
-					<div className="workspace-page-tools">
-						<ConnectExtension />
-					</div>
-				</header>
-				<div className="scroll workspace-page-body">
-					{!data && !loadFailed && slow && <SourceCardsSkeleton />}
-					{loadFailed && (
-						<div className="sources-notice" role="alert">
-							<AlertCircle {...ICON} />
-							<span>Couldn't load source status. Your library is unaffected</span>
-							<Button variant="outline" size="sm" onClick={() => load()}>
-								<RotateCcw {...ICON} />
-								Try again
-							</Button>
-						</div>
-					)}
-					{data && (
-						<>
-							<div className="sources-panel sources-table">
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead>Source</TableHead>
-											<TableHead>Status</TableHead>
-											<TableHead className="sources-num">Saves</TableHead>
-											<TableHead className="sources-num">Authors</TableHead>
-											<TableHead>Last capture</TableHead>
-											<TableHead><span className="sr-only">Action</span></TableHead>
-											<TableHead className="sources-num">Capture</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{data.sources.map((row) => (
-											<SourceTableRow
-												key={row.source}
-												row={row}
-												extension={data.extension}
-												expanded={open === row.source}
-												onExpand={() => setOpen((current) => (current === row.source ? null : row.source))}
-												ask={asks[row.source]}
-												onImport={askImport}
-												onToggle={toggle}
-											/>
-										))}
-									</TableBody>
-								</Table>
+			<main className="workspace-page sources-page">
+				<div className="scroll sources-scroll">
+					<div className="sources-frame">
+						<ExtensionCard fallback={data?.extension} />
+
+						{loadFailed && (
+							<div className="sources-notice" role="alert">
+								<AlertCircle {...ICON} />
+								<span>Couldn't load source status. Your library is unaffected</span>
+								<Button variant="outline" onClick={() => load()}>
+									<RotateCcw {...ICON} />
+									Try again
+								</Button>
 							</div>
-							<ul className="sources-panel sources-list" aria-label="Sources">
-								{data.sources.map((row) => (
-									<SourceListItem key={row.source} row={row} extension={data.extension} ask={asks[row.source]} onImport={askImport} onToggle={toggle} />
-								))}
-							</ul>
-						</>
-					)}
+						)}
+
+						{!data && !loadFailed && slow && <SourceGridSkeleton />}
+
+						{data && (
+							<section className="sources-section" aria-labelledby="sources-title">
+								<header className="sources-section-head">
+									<h2 id="sources-title">Platforms</h2>
+									{onCount < sources.length && (
+										<ToggleGroup
+											className="sources-filter"
+											aria-label="Show"
+											value={[filter]}
+											onValueChange={(values) => { if (values[0]) setFilter(values[0] as Filter); }}
+										>
+											<ToggleGroupItem value="all">All <span className="sources-filter-count">{sources.length}</span></ToggleGroupItem>
+											<ToggleGroupItem value="on">On <span className="sources-filter-count">{onCount}</span></ToggleGroupItem>
+										</ToggleGroup>
+									)}
+								</header>
+								<ul className="sources-grid">
+									{shown.map((row) => (
+										<SourceCard key={row.source} row={row} extension={data.extension} ask={asks[row.source]} onImport={askImport} onToggle={toggle} />
+									))}
+								</ul>
+							</section>
+						)}
+					</div>
 				</div>
 			</main>
 		</div>
 	);
 }
 
-interface RowProps {
+/** The extension, full width above the platforms: everything below depends on it. */
+function ExtensionCard({ fallback }: { fallback?: ExtensionHealth }) {
+	const health = useExtensionHealth();
+	const extension = health.data ?? fallback ?? (health.isError ? null : undefined);
+	const status = extensionStatus(extension);
+	const connected = extension?.connection === "connected";
+	const line =
+		status.state === "unknown" ? "Checking"
+		: connected ? `Connected${extension?.extensionVersion ? ` · v${extension.extensionVersion}` : ""}`
+		: extension?.connection === "disconnected" ? `Offline${extension.lastSeenAt ? ` · last seen ${ago(extension.lastSeenAt)}` : ""}`
+		: "Not connected yet";
+
+	return (
+		<section className="extension-card" aria-labelledby="extension-title">
+			<span className="extension-card-mark"><ExtensionIcon /></span>
+			<div className="extension-card-copy">
+				<h2 id="extension-title">Anansi extension</h2>
+				<p>Captures what you save as you browse, and imports your history</p>
+			</div>
+			<div className="extension-card-end">
+				<span className="extension-card-status" data-tone={status.tone} role="status">
+					<StatusDot status={status} />
+					<span>{line}</span>
+				</span>
+				<ConnectExtension
+					label={connected ? "Connect another browser" : "Connect"}
+					className={connected ? "extension-card-action" : "extension-card-action extension-card-action-primary"}
+				/>
+			</div>
+		</section>
+	);
+}
+
+interface CardProps {
 	row: SourceRow;
 	extension: ExtensionHealth;
 	ask?: ImportAsk;
-	onImport: (source: string) => void;
+	onImport: (row: SourceRow) => void;
 	onToggle: (row: SourceRow, enabled: boolean) => void;
 }
 
-function Status({ row, extension, ask }: Pick<RowProps, "row" | "extension" | "ask">) {
-	const status = sourcePresentation(row, extension);
-	return (
-		<span className="sources-status-wrap">
-			<span className="sources-status" data-tone={status.tone}>
-				<span className="sources-dot" data-tone={status.tone} aria-hidden="true" />
-				<span>{status.text}</span>
-			</span>
-			{ask?.state === "missed" && <span className="sources-ask" role="status">Open the extension popup to import</span>}
-			{ask?.state === "sent" && <span className="sources-ask-ok" role="status">Import started</span>}
-		</span>
-	);
-}
+const ACTION: Record<Exclude<SourceAction, "view" | null>, { text: string; Icon: typeof Download }> = {
+	import: { text: "Import", Icon: Download },
+	resume: { text: "Resume", Icon: Play },
+	retry: { text: "Retry import", Icon: RotateCcw },
+};
 
-function Action({ row, extension, ask, onImport }: Pick<RowProps, "row" | "extension" | "ask" | "onImport">) {
+function SourceCard({ row, extension, ask, onImport, onToggle }: CardProps) {
 	const status = sourcePresentation(row, extension);
-	const action: SourceAction = sourceAction(row, status);
+	const action = sourceAction(row, status);
+	const footer = sourceFooter(row, status);
+	const off = status.state === "disabled";
 	const away = status.state === "disconnected";
-	if (action === "view")
-		return (
-			<Link to="/" search={{ source: [row.source] }} className="sources-view">
-				View in library
-			</Link>
-		);
-	if (!action) return null;
-	const [text, Icon] = action === "import" ? ["Import everything", Download] as const : action === "resume" ? ["Resume", Play] as const : ["Try again", RotateCcw] as const;
-	const asking = ask?.state === "asking";
-	return (
-		<Button variant="outline" size="sm" className="sources-action" disabled={away || asking || ask?.state === "sent"} onClick={() => onImport(row.source)}>
-			<Icon {...ICON} />
-			{asking ? "Asking the extension" : text}
-		</Button>
-	);
-}
+	const step = action && action !== "view" ? ACTION[action] : null;
 
-function Capture({ row, onToggle }: Pick<RowProps, "row" | "onToggle">) {
-	if (row.toggleable)
-		return <Switch aria-label={`Capture ${row.name}`} checked={row.enabled} onCheckedChange={(next) => onToggle(row, next)} />;
-	if (row.mode === "manual") return <Badge variant="outline" className="settings-badge">Manual</Badge>;
-	return null;
-}
-
-function SourceTableRow({ row, extension, expanded, onExpand, ask, onImport, onToggle }: RowProps & { expanded: boolean; onExpand: () => void }) {
-	const status = sourcePresentation(row, extension);
-	const check = extension.sources[row.source];
-	const failed = Boolean(check?.lastErrorCode);
-	const parts = arrivals(row);
-	const detailId = `source-detail-${row.source}`;
 	return (
-		<Fragment>
-			<TableRow className="sources-row" data-open={expanded || undefined} data-off={status.state === "disabled" || undefined}>
-				<TableCell>
-					<div className="sources-name">
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							className="sources-chevron"
-							aria-expanded={expanded}
-							aria-controls={detailId}
-							aria-label={`How ${row.name} saves arrived`}
-							onClick={onExpand}
-						>
-							<ChevronRight {...ICON} />
-						</Button>
-						<SourceMark source={row.source} size={20} decorative />
-						<span className="sources-name-text">
-							<span className="sources-title">{row.name}</span>
-							<span className="sources-host">{row.host}</span>
-						</span>
-					</div>
-				</TableCell>
-				<TableCell><Status row={row} extension={extension} ask={ask} /></TableCell>
-				<TableCell className="sources-num sources-figure">{row.items.toLocaleString()}</TableCell>
-				<TableCell className="sources-num sources-figure sources-dim">{row.authors.toLocaleString()}</TableCell>
-				<TableCell>
-					<span className="sources-when">
-						<span>{ago(row.lastCaptureAt)}</span>
-						{CHECKED_SOURCES.has(row.source) && (
-							<span className="sources-host" data-tone={failed ? "warn" : undefined}>
-								{failed ? "last check failed" : check?.lastCheckedAt ? `checked ${ago(check.lastCheckedAt)}` : "not checked yet"}
-							</span>
-						)}
-					</span>
-				</TableCell>
-				<TableCell className="sources-num"><Action row={row} extension={extension} ask={ask} onImport={onImport} /></TableCell>
-				<TableCell className="sources-num"><Capture row={row} onToggle={onToggle} /></TableCell>
-			</TableRow>
-			{expanded && (
-				<TableRow className="sources-detail" data-open>
-					<TableCell colSpan={7} id={detailId}>
-						<div className="sources-arrivals">
-							<span className="sources-host">How saves arrived</span>
-							{row.items > 0 && (
-								<div className="sources-stack" aria-hidden="true">
-									{parts.filter((part) => part.value > 0).map((part) => <i key={part.key} data-part={part.key} style={{ flexGrow: part.value }} />)}
-								</div>
-							)}
-							<dl className="sources-legend">
-								{parts.map((part) => (
-									<div key={part.key}>
-										<dt>{part.value > 0 && <span className="sources-swatch" data-part={part.key} />}{part.label}</dt>
-										<dd data-zero={part.value === 0 || undefined}>{part.value.toLocaleString()}</dd>
-									</div>
-								))}
-							</dl>
-							{row.items > 0 && (
-								<Link to="/" search={{ source: [row.source] }} className="sources-view-all">
-									View {row.items.toLocaleString()} in library
-									<ChevronRight {...ICON} />
-								</Link>
-							)}
-						</div>
-					</TableCell>
-				</TableRow>
-			)}
-		</Fragment>
-	);
-}
-
-/** Phone: one line per platform, its count, its switch, and the action underneath. */
-function SourceListItem({ row, extension, ask, onImport, onToggle }: RowProps) {
-	const action = sourceAction(row, sourcePresentation(row, extension));
-	return (
-		<li className="sources-item">
-			<div className="sources-item-line">
-				<SourceMark source={row.source} size={20} decorative />
-				<span className="sources-name-text">
-					<span className="sources-title">{row.name}</span>
-					<Status row={row} extension={extension} ask={ask} />
+		<li className="source-card" data-off={off || undefined}>
+			<div className="source-card-head">
+				<span className="source-card-mark"><SourceMark source={row.source} size={20} decorative /></span>
+				<span className="source-card-name">
+					<span className="source-card-title">{row.name}</span>
+					<span className="source-card-host">{row.host}</span>
 				</span>
-				<span className="sources-figure">{row.items.toLocaleString()}</span>
-				<Capture row={row} onToggle={onToggle} />
+				{row.toggleable && (
+					<Switch aria-label={`Capture ${row.name}`} checked={row.enabled} onCheckedChange={(next) => onToggle(row, next)} />
+				)}
 			</div>
-			{action && action !== "view" && (
-				<div className="sources-item-action">
-					<Action row={row} extension={extension} ask={ask} onImport={onImport} />
-				</div>
+			{status.state === "failed" || status.state === "retrying" ? (
+				<p className="source-card-note" data-tone="warn" role="status">{status.text}</p>
+			) : (
+				<p className="source-card-note">{row.note}</p>
 			)}
+			<p className="source-card-counts">
+				{sourceCounts(row).map((part, index) => (
+					<span key={part} data-lead={index === 0 || undefined}>{part}</span>
+				))}
+			</p>
+			<div className="source-card-foot">
+				<span className="source-card-status" data-tone={footer.tone}>
+					<span className="source-card-dot" data-tone={footer.tone} aria-hidden="true" />
+					<span>{footer.text}</span>
+				</span>
+				<span className="source-card-actions">
+					{step && (
+						<Button variant="outline" className="source-card-step" disabled={away || ask !== undefined} onClick={() => onImport(row)}>
+							<step.Icon {...ICON} />
+							{ask === "asking" ? "Asking" : step.text}
+						</Button>
+					)}
+					{row.items > 0 && (
+						<Link to="/" search={{ source: [row.source] }} className="source-card-view" aria-label={`View ${row.name} saves`}>
+							{step ? "View" : "View saves"}
+							<ArrowRight {...ICON} />
+						</Link>
+					)}
+				</span>
+			</div>
 		</li>
+	);
+}
+
+function SourceGridSkeleton() {
+	return (
+		<Loading label="Loading sources">
+			<ul className="sources-grid" style={{ marginTop: 48 }}>
+				{Array.from({ length: 5 }, (_, index) => (
+					<li key={index} className="source-card">
+						<div className="source-card-head">
+							<Bone width={20} height={20} radius={5} delay={index * 70} />
+							<span style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+								<Bone width="50%" height={12} delay={index * 70 + 30} />
+								<Bone width="30%" height={10} delay={index * 70 + 60} />
+							</span>
+						</div>
+						<Bone width="80%" height={12} delay={index * 70 + 90} />
+						<Bone width="44%" height={12} delay={index * 70 + 120} />
+					</li>
+				))}
+			</ul>
+		</Loading>
 	);
 }

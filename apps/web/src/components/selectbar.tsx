@@ -2,6 +2,8 @@ import { Input } from "@anansi/ui/components/input";
 import { Button } from "@anansi/ui/components/button";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
+import { useShelfMembership } from "../lib/shelf-queries.ts";
+import { ShelfPickerPopover, useViewingShelf } from "./shelf-picker.tsx";
 
 /**
  * The bulk action bar.
@@ -31,6 +33,9 @@ export function SelectBar({
   const [tagging, setTagging] = useState(false);
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
+  const [shelving, setShelving] = useState(false);
+  const viewing = useViewingShelf();
+  const membership = useShelfMembership();
   const [tags, setTags] = useState<{ label: string; color: string; count: number }[]>([]);
   const input = useRef<HTMLInputElement>(null);
 
@@ -158,6 +163,21 @@ export function SelectBar({
 
         <div style={{ display: "flex", gap: 7, marginLeft: 14 }}>
           <Action label="Tag" onClick={() => setTagging((t) => !t)} busy={busy} />
+          <ShelfPickerPopover
+            itemIds={ids}
+            open={shelving}
+            onOpenChange={setShelving}
+            side="top"
+            align="center"
+            trigger={<Button variant="ghost" type="button" disabled={busy} style={actionStyle(busy)}>Add to shelf</Button>}
+          />
+          {viewing && (
+            <Action
+              label={`Remove from ${viewing.name}`}
+              busy={busy || membership.isPending}
+              onClick={() => membership.mutate({ shelf: viewing, itemIds: ids, on: false }, { onSuccess: onClear })}
+            />
+          )}
           <Action
             label={archived ? "Restore" : "Archive"}
             onClick={() => void run(() => api.archive(ids, !archived))}
@@ -202,26 +222,25 @@ export function SelectBar({
   );
 }
 
+function actionStyle(busy: boolean): React.CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    height: 30,
+    padding: "0 12px",
+    borderRadius: 5,
+    border: "1px solid var(--edge)",
+    background: "var(--card)",
+    color: busy ? "var(--faint)" : "var(--text-dim)",
+    fontSize: "var(--text-body)",
+    cursor: busy ? "wait" : "pointer",
+    font: "inherit",
+  };
+}
+
 function Action({ label, onClick, busy }: { label: string; onClick: () => void; busy: boolean }) {
   return (
-    <Button variant="ghost"
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        height: 30,
-        padding: "0 12px",
-        borderRadius: 5,
-        border: "1px solid var(--edge)",
-        background: "var(--card)",
-        color: busy ? "var(--faint)" : "var(--text-dim)",
-        fontSize: "var(--text-body)",
-        cursor: busy ? "wait" : "pointer",
-        font: "inherit",
-      }}
-    >
+    <Button variant="ghost" type="button" onClick={onClick} disabled={busy} style={actionStyle(busy)}>
       {label}
     </Button>
   );

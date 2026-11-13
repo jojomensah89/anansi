@@ -1,68 +1,67 @@
-import { Switch } from "@anansi/ui/components/switch";
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { AiLoadError, AiSettings, useAiSettings } from "../components/ai-settings.tsx";
-import { DataSettings } from "../components/data-settings.tsx";
-import { PasskeySettings } from "../components/passkey-settings.tsx";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { Bot, Database, KeyRound, Library, type LucideIcon, Sparkles } from "lucide-react";
 import { Rail } from "../components/rail.tsx";
-import { SettingsSection, SettingsRow } from "../components/settings-panel.tsx";
-import { SettingsSkeleton } from "../components/skeleton.tsx";
-import { SyncSettings } from "../components/sync-controls.tsx";
-import { api } from "../lib/api.ts";
-import { useHideRemoved, useShowNsfw } from "../lib/settings.ts";
+import { useLibraryStats } from "../components/settings-sections.tsx";
+import { SETTINGS_SECTIONS, type SettingsSectionId } from "../lib/settings-sections.ts";
 
-export const Route = createFileRoute("/settings")({ component: Settings });
+/**
+ * Settings: a column of areas on the left, the chosen area's panels on the
+ * right. Each area has its own URL (`/settings/ai`); `/settings` goes to the
+ * first. The top bar names the page, so the content carries no title of its own.
+ */
+export const Route = createFileRoute("/settings")({ component: SettingsLayout });
 
-function Settings() {
-	const [counts, setCounts] = useState<Awaited<ReturnType<typeof api.stats>> | null>(null);
-	useEffect(() => { void api.stats().then(setCounts).catch(() => undefined); }, []);
-	const [showNsfw, setShowNsfw] = useShowNsfw();
-	const [hideRemoved, setHideRemoved] = useHideRemoved();
-	const ai = useAiSettings();
-	const aiLead = ai.data?.runtime === "ollama" ? "Runs through Ollama on this machine" : ai.data?.runtime === "cloudflare" ? "Runs in your Cloudflare account. Manual tags are never replaced" : ai.data ? "Manual tags are never replaced" : undefined;
+const ICONS: Record<SettingsSectionId, LucideIcon> = {
+	library: Library,
+	ai: Sparkles,
+	agents: Bot,
+	security: KeyRound,
+	data: Database,
+};
 
+function SettingsLayout() {
+	const stats = useLibraryStats();
+	const counts = stats.data;
 	return (
 		<div className="anansi-shell">
-			<Rail total={counts?.items ?? 0} authors={counts?.authors ?? 0} archived={counts?.archived ?? 0} bySource={counts?.bySource ?? {}} ready={counts !== null} />
-			<main className="workspace-page">
-				<header className="workspace-page-head">
-					<h1>Settings</h1>
-				</header>
-				<div className="scroll workspace-page-body">
-					<div className="settings-layout">
-						<SettingsSection id="sync" title="Sync" lead="Runs when the library opens">
-							<SyncSettings />
-						</SettingsSection>
-						<SettingsSection id="ai" title="AI" lead={aiLead}>
-							{ai.data ? (
-								<AiSettings data={ai.data} setData={ai.setData} />
-							) : ai.loadError ? (
-								<AiLoadError error={ai.loadError} onRetry={ai.reload} />
-							) : (
-								<SettingsSkeleton label="Loading AI settings" />
-							)}
-						</SettingsSection>
-						<SettingsSection id="display" title="Display" lead="Kept in this browser">
-							<SettingsRow
-								title="Show sensitive content"
-								description="Posts X and Reddit mark as sensitive or adult"
-								control={<Switch aria-label="Show sensitive content" checked={showNsfw} onCheckedChange={setShowNsfw} />}
-							/>
-							<SettingsRow
-								title="Hide items removed at the source"
-								description="Off keeps everything Anansi has captured"
-								control={<Switch aria-label="Hide items removed at the source" checked={hideRemoved} onCheckedChange={setHideRemoved} />}
-							/>
-						</SettingsSection>
-						<SettingsSection id="sign-in" title="Sign-in" lead="The deploy secret stays your recovery key">
-							<PasskeySettings />
-						</SettingsSection>
-						<SettingsSection id="data" title="Your data" lead={counts ? `${counts.items.toLocaleString()} saves` : undefined}>
-							<DataSettings />
-						</SettingsSection>
+			<Rail total={counts?.items ?? 0} authors={counts?.authors ?? 0} archived={counts?.archived ?? 0} bySource={counts?.bySource ?? {}} ready={counts !== undefined} />
+			<main className="workspace-page settings-page">
+				<div className="scroll settings-scroll">
+					<div className="settings-frame">
+						<SettingsNav />
+						<div className="settings-content">
+							<Outlet />
+						</div>
 					</div>
 				</div>
 			</main>
 		</div>
+	);
+}
+
+function SettingsNav() {
+	const path = useRouterState({ select: (state) => state.location.pathname });
+	return (
+		<nav className="settings-nav" aria-label="Settings">
+			<ul>
+				{SETTINGS_SECTIONS.map((section) => {
+					const Icon = ICONS[section.id];
+					const active = path === `/settings/${section.id}`;
+					return (
+						<li key={section.id}>
+							<Link
+								to="/settings/$section"
+								params={{ section: section.id }}
+								className="settings-nav-link"
+								aria-current={active ? "page" : undefined}
+							>
+								<Icon aria-hidden="true" strokeWidth={1.5} />
+								<span>{section.label}</span>
+							</Link>
+						</li>
+					);
+				})}
+			</ul>
+		</nav>
 	);
 }

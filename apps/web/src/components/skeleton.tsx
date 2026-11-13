@@ -296,29 +296,6 @@ export function CreatorRowsSkeleton({ count = 10 }: { count?: number }) {
   );
 }
 
-/** Source table rows: mark and name, status, figures, switch. */
-export function SourceCardsSkeleton({ count = 5 }: { count?: number }) {
-  return (
-    <Loading label="Loading sources">
-      <div className="sources-panel">
-        {Array.from({ length: count }, (_, index) => (
-          <div key={index} style={{ display: "flex", alignItems: "center", gap: 12, height: 60, padding: "0 20px", borderTop: index ? "1px solid var(--line-soft)" : undefined }}>
-            <Bone width={20} height={20} radius={5} delay={index * 70} />
-            <span style={{ display: "flex", flexDirection: "column", gap: 6, width: 180 }}>
-              <Bone width="70%" height={12} delay={index * 70 + 30} />
-              <Bone width="44%" height={10} delay={index * 70 + 60} />
-            </span>
-            <Bone width={200} height={12} delay={index * 70 + 90} />
-            <span style={{ flex: 1 }} />
-            <Bone width={40} height={12} delay={index * 70 + 120} />
-            <Bone width={32} height={18} radius={9} delay={index * 70 + 150} />
-          </div>
-        ))}
-      </div>
-    </Loading>
-  );
-}
-
 /* ------------------------------------------------------------ counts --- */
 
 /**

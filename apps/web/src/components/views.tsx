@@ -1,5 +1,4 @@
 import { ToggleGroup, ToggleGroupItem } from "@anansi/ui/components/toggle-group";
-import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@anansi/ui/components/tooltip";
 import { CardFooter } from "./card.tsx";
 import { WebPreviewCard } from "./web-preview-card.tsx";
 import { mediaUrl, shortDate, type ItemRow } from "../lib/api.ts";
@@ -175,23 +174,13 @@ export function TimelineView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: 
 
 /**
  * Each icon draws what the view does to the same set of items: packed
- * rectangles, stacked lines, and a column against a date. The label stays —
- * an icon alone would be a guess, and these three are close
- * enough in meaning to be worth spelling out.
+ * rectangles, stacked lines, and a column against a date. The label stays
+ * beside it on wide screens; on a phone the icons stand alone and the name
+ * moves to the accessible label.
  */
 function TabIcon({ d }: { d: string }) {
   return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d={d} />
     </svg>
   );
@@ -201,11 +190,26 @@ const MODES: { value: ViewMode; label: string; icon: string }[] = [
   // Four panes, deliberately uneven, the way the masonry packs them.
   { value: "grid", label: "Grid", icon: "M4 4h7v9H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 15h7v5H4z" },
   // A thumbnail and its lines.
-  { value: "row", label: "Row", icon: "M4 6h4v4H4zM10 6h10M10 10h7M4 14h4v4H4zM10 14h10M10 18h7" },
+  { value: "row", label: "Rows", icon: "M4 6h4v4H4zM10 6h10M10 10h7M4 14h4v4H4zM10 14h10M10 18h7" },
   // A spine with events hanging off it.
   { value: "timeline", label: "Timeline", icon: "M7 3v18M7 7h11M7 13h8M7 18h12" },
 ];
 
 export function ViewTabs({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
-  return <TooltipProvider><ToggleGroup value={[value]} onValueChange={values => {if(values[0]) onChange(values[0] as ViewMode);}} aria-label="Library view" style={{display:"flex",gap:2}}>{MODES.map(m => <Tooltip key={m.value}><TooltipTrigger render={<ToggleGroupItem value={m.value} aria-label={m.label} style={{width:32,height:32,padding:6,background:value===m.value?"var(--raised)":"transparent",color:"var(--text)",borderRadius:5}} />}><TabIcon d={m.icon}/></TooltipTrigger><TooltipContent>{m.label}</TooltipContent></Tooltip>)}</ToggleGroup></TooltipProvider>;
+  return (
+    <ToggleGroup
+      value={[value]}
+      onValueChange={(values) => { if (values[0]) onChange(values[0] as ViewMode); }}
+      aria-label="Library view"
+      className="view-tabs"
+      spacing={0}
+    >
+      {MODES.map((m) => (
+        <ToggleGroupItem key={m.value} value={m.value} aria-label={m.label} className="view-tab">
+          <TabIcon d={m.icon} />
+          <span className="view-tab-label">{m.label}</span>
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
 }

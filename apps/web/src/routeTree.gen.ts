@@ -17,6 +17,8 @@ import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as DotwellKnownSplatRouteImport } from './routes/[.]well-known.$'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
 import { Route as OauthAuthorizeRouteImport } from './routes/oauth.authorize'
+import { Route as SettingsIndexRouteImport } from './routes/settings.index'
+import { Route as SettingsSectionRouteImport } from './routes/settings.$section'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -58,37 +60,52 @@ const OauthAuthorizeRoute = OauthAuthorizeRouteImport.update({
   path: '/oauth/authorize',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsSectionRoute = SettingsSectionRouteImport.update({
+  id: '/$section',
+  path: '/$section',
+  getParentRoute: () => SettingsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/sources': typeof SourcesRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/$': typeof ApiSplatRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/settings/$section': typeof SettingsSectionRoute
+  '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
-  '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/$': typeof ApiSplatRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/settings/$section': typeof SettingsSectionRoute
+  '/settings': typeof SettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/creators': typeof CreatorsRoute
   '/mcp': typeof McpRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/sources': typeof SourcesRoute
   '/.well-known/$': typeof DotwellKnownSplatRoute
   '/api/$': typeof ApiSplatRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/settings/$section': typeof SettingsSectionRoute
+  '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -101,16 +118,19 @@ export interface FileRouteTypes {
     | '/.well-known/$'
     | '/api/$'
     | '/oauth/authorize'
+    | '/settings/$section'
+    | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/creators'
     | '/mcp'
-    | '/settings'
     | '/sources'
     | '/.well-known/$'
     | '/api/$'
     | '/oauth/authorize'
+    | '/settings/$section'
+    | '/settings'
   id:
     | '__root__'
     | '/'
@@ -121,13 +141,15 @@ export interface FileRouteTypes {
     | '/.well-known/$'
     | '/api/$'
     | '/oauth/authorize'
+    | '/settings/$section'
+    | '/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CreatorsRoute: typeof CreatorsRoute
   McpRoute: typeof McpRoute
-  SettingsRoute: typeof SettingsRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   SourcesRoute: typeof SourcesRoute
   DotwellKnownSplatRoute: typeof DotwellKnownSplatRoute
   ApiSplatRoute: typeof ApiSplatRoute
@@ -192,14 +214,42 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OauthAuthorizeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/': {
+      id: '/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/$section': {
+      id: '/settings/$section'
+      path: '/$section'
+      fullPath: '/settings/$section'
+      preLoaderRoute: typeof SettingsSectionRouteImport
+      parentRoute: typeof SettingsRoute
+    }
   }
 }
+
+interface SettingsRouteChildren {
+  SettingsSectionRoute: typeof SettingsSectionRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsSectionRoute: SettingsSectionRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CreatorsRoute: CreatorsRoute,
   McpRoute: McpRoute,
-  SettingsRoute: SettingsRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   SourcesRoute: SourcesRoute,
   DotwellKnownSplatRoute: DotwellKnownSplatRoute,
   ApiSplatRoute: ApiSplatRoute,

@@ -43,6 +43,8 @@ export interface LibrarySearch {
   q?: string;
   /** The drawer is URL state while the library underneath keeps its scroll. */
   item?: string;
+  /** Viewing one shelf: the library narrowed to the saves on it. */
+  shelf?: string;
 }
 
 /** Long enough for any real handle or tag, short enough not to reach the query. */
@@ -82,6 +84,7 @@ export function validateLibrarySearch(search: Record<string, unknown>): LibraryS
   const media = typeof search.media === "string" ? search.media : undefined;
   const q = typeof search.q === "string" ? search.q.trim().slice(0, 500) : "";
   const item = typeof search.item === "string" ? search.item.trim().slice(0, 160) : "";
+  const shelf = typeof search.shelf === "string" ? search.shelf.trim().slice(0, 160) : "";
   return {
     source: asList(search.source),
     author: asList(search.author),
@@ -98,19 +101,20 @@ export function validateLibrarySearch(search: Record<string, unknown>): LibraryS
     view: VIEWS.find((v) => v === search.view),
     q: q || undefined,
     item: item || undefined,
+    shelf: shelf || undefined,
   };
 }
 
 const some = (value: string[] | undefined) =>
   value && value.length > 0 ? value : undefined;
 
-export type LibraryFilters = Omit<LibrarySearch, "view" | "q" | "item">;
+export type LibraryFilters = Omit<LibrarySearch, "view" | "q" | "item" | "shelf">;
 
 /** Absent rather than empty, so a cleared filter leaves no trace in the URL. */
 export function toLibrarySearch(
   filters: LibraryFilters,
   view: ViewMode,
-  state: Pick<LibrarySearch, "q" | "item"> = {},
+  state: Pick<LibrarySearch, "q" | "item" | "shelf"> = {},
 ): LibrarySearch {
   return {
     source: some(filters.source),
@@ -126,5 +130,6 @@ export function toLibrarySearch(
     view: view === "grid" ? undefined : view,
     q: state.q?.trim() || undefined,
     item: state.item?.trim() || undefined,
+    shelf: state.shelf?.trim() || undefined,
   };
 }

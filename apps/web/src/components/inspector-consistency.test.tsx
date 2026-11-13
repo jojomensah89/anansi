@@ -31,12 +31,12 @@ function renderDetail(item: ItemDetail) {
 test("inspector actions are labelled icon buttons, favorite shows its pressed state", () => {
 	const html = renderDetail(detailItem());
 	const bar = html.slice(html.indexOf('role="toolbar"'), html.indexOf("</header>") > 0 ? html.indexOf("<header") : undefined);
-	for (const label of ["Remove from favorites", "Archive", "Open original", "Close item detail"]) expect(bar).toContain(`aria-label="${label}"`);
+	for (const label of ["Remove from favorites", "Archive", "Add to shelf", "Open original", "Close item detail"]) expect(bar).toContain(`aria-label="${label}"`);
 	expect(bar).toMatch(/aria-label="Remove from favorites"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*aria-label="Remove from favorites"/);
 	expect(bar).toMatch(/<a[^>]*href="https:\/\/x\.com\/cj\/status\/1"[^>]*target="_blank"/);
 	// Icons, not words or glyphs.
 	for (const removed of ["☆", "★", "↗", "Favorited", "Open original ↗", "Save note"]) expect(html).not.toContain(removed);
-	expect(bar.match(/<svg/g)?.length).toBe(4);
+	expect(bar.match(/<svg/g)?.length).toBe(5);
 });
 
 test("inspector favorite toggles its label and pressed state; archive becomes unarchive", () => {

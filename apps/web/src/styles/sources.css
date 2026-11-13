@@ -1,0 +1,97 @@
+/* ---------------------------------------------------------------------------
+ * Sources.
+ *
+ * The extension across the top, because every platform below depends on it;
+ * then one card per platform. The platform's own mark is the card's only
+ * colour, and the status dot says whether it is working. A card reads top to
+ * bottom: who, what it captures, how much is here, and how it is doing with
+ * the one thing to do about it.
+ *
+ * Loaded after frame.css (see routes/__root.tsx).
+ * ------------------------------------------------------------------------ */
+
+.sources-scroll{flex:1;min-height:0;height:100%}
+.sources-frame{container:sources / inline-size;display:flex;flex-direction:column;gap:32px;max-width:1120px;margin:0 auto;padding:32px 24px 64px;font-size:14px;line-height:20px;color:var(--text)}
+
+/* ---------------------------------------------------------- extension --- */
+
+.extension-card{display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;column-gap:16px;padding:20px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.extension-card-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:var(--raised);border:1px solid var(--line-soft)}
+.extension-card-copy{min-width:0}
+.extension-card-copy h2{margin:0;font-size:16px;line-height:24px;font-weight:500;color:var(--text)}
+.extension-card-copy p{margin:2px 0 0;color:var(--muted);text-wrap:pretty}
+.extension-card-end{display:flex;align-items:center;gap:16px}
+.extension-card-status{display:inline-flex;align-items:center;gap:8px;color:var(--text-dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.extension-card-status[data-tone=warn]{color:var(--warn)}
+.extension-card-status .status-dot{--dot-halo:var(--card)}
+.workspace-page .extension-card-action{gap:8px;font-size:14px;font-weight:400}
+.workspace-page .extension-card-action .toolbar-button-label{display:inline}
+.workspace-page .extension-card-action-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text-on-accent);font-weight:500}
+.workspace-page .extension-card-action-primary svg{color:currentColor}
+@media (hover:hover) and (pointer:fine){
+ .workspace-page .extension-card-action-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:var(--accent-text-on-accent)}
+}
+
+/* ---------------------------------------------------------- platforms --- */
+
+.sources-section-head{display:flex;align-items:center;gap:12px;min-height:32px;margin-bottom:12px}
+.sources-section-head h2{margin:0;font-size:14px;line-height:20px;font-weight:500;color:var(--text)}
+.sources-filter{margin-left:auto;gap:0!important;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--rail)}
+.sources-filter [data-slot=toggle-group-item]{height:26px;gap:6px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:14px;font-weight:400;transition:color 150ms var(--ease-out),background-color 150ms var(--ease-out)}
+.sources-filter [data-slot=toggle-group-item][data-pressed]{background:var(--card);color:var(--text);font-weight:500;box-shadow:0 0 0 1px var(--edge)}
+.sources-filter [data-slot=toggle-group-item]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.sources-filter-count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+.sources-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:0;padding:0;list-style:none}
+@container sources (max-width:900px){.sources-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container sources (max-width:560px){.sources-grid{grid-template-columns:minmax(0,1fr);gap:12px}}
+
+.source-card{display:flex;flex-direction:column;gap:12px;min-width:0;padding:16px 16px 0;background:var(--card);border:1px solid var(--line);border-radius:12px;transition:border-color 150ms var(--ease-out)}
+@media (hover:hover) and (pointer:fine){.source-card:hover{border-color:var(--edge)}}
+.source-card-head{display:flex;align-items:center;gap:12px;min-width:0}
+.source-card-mark{display:grid;place-items:center;width:36px;height:36px;flex:none;border-radius:8px;background:var(--raised);transition:opacity 150ms var(--ease-out),filter 150ms var(--ease-out)}
+.source-card-name{flex:1;min-width:0;display:flex;flex-direction:column}
+.source-card-title{font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-card-host{font-size:12px;line-height:16px;color:var(--muted)}
+.source-card-note{flex:1;margin:0;color:var(--muted);text-wrap:pretty}
+.source-card-note[data-tone=warn]{color:var(--warn)}
+.source-card-counts{display:flex;flex-wrap:wrap;gap:4px 8px;margin:0;color:var(--muted);font-variant-numeric:tabular-nums}
+.source-card-counts [data-lead]{color:var(--text);font-weight:500}
+.source-card-counts span + span::before{content:"·";margin-right:8px;color:var(--edge-strong)}
+
+.source-card-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;margin:0 -16px;padding:8px 12px 8px 16px;border-top:1px solid var(--line-soft)}
+.source-card-status{display:inline-flex;align-items:center;gap:8px;min-width:0;font-size:12px;line-height:16px;color:var(--muted);font-variant-numeric:tabular-nums}
+.source-card-status > span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-card-status[data-tone=warn]{color:var(--warn)}
+.source-card-status[data-tone=accent]{color:var(--text-dim)}
+.source-card-dot{width:6px;height:6px;flex:none;border-radius:50%;background:var(--muted)}
+.source-card-dot[data-tone=ok]{background:var(--ok)}
+.source-card-dot[data-tone=accent]{background:var(--accent)}
+.source-card-dot[data-tone=warn]{background:var(--warn)}
+.source-card-dot[data-tone=muted]{background:transparent;box-shadow:inset 0 0 0 1.5px var(--edge-strong)}
+.source-card-actions{display:flex;align-items:center;gap:4px;flex:none}
+.workspace-page .source-card-step{height:28px;gap:6px;padding:0 10px}
+.workspace-page .source-card-step svg{width:14px;height:14px}
+.source-card-view{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 8px;border-radius:6px;color:var(--text-dim);white-space:nowrap;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),transform 150ms var(--ease-out)}
+.source-card-view svg{width:14px;height:14px;color:var(--muted)}
+.source-card-view:active{transform:scale(.97)}
+.source-card-view:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+@media (hover:hover) and (pointer:fine){.source-card-view:hover{background:var(--raised);color:var(--text)}}
+
+/* Off: the mark goes grey and the words step back; the switch stays in reach. */
+.source-card[data-off] .source-card-mark{opacity:.55;filter:grayscale(1)}
+.source-card[data-off] .source-card-title{color:var(--text-dim)}
+.source-card[data-off] .source-card-counts [data-lead]{color:var(--text-dim)}
+
+/* ---------------------------------------------------------------- phone --- */
+
+@container sources (max-width:640px){
+ .extension-card{grid-template-columns:40px minmax(0,1fr);row-gap:16px;padding:16px}
+ .extension-card-end{grid-column:1 / -1;justify-content:space-between;flex-wrap:wrap;gap:12px}
+}
+@media (max-width:640px){
+ .sources-frame{gap:24px;padding:16px 16px 48px}
+}
+@media (prefers-reduced-motion:reduce){
+ .source-card-view:active{transform:none}
+}
