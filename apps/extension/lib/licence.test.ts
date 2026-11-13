@@ -286,9 +286,15 @@ describe("builds that never ask", () => {
 		}
 	});
 
-	test("only the store build requires a key", () => {
+	test("the free store build asks for no key", () => {
 		expect(licenceRequiredForMode(resolveExtensionBuildMode(undefined))).toBe(false);
-		expect(licenceRequiredForMode(resolveExtensionBuildMode("store"))).toBe(true);
+		expect(licenceRequiredForMode(resolveExtensionBuildMode("store"))).toBe(false);
+	});
+
+	test("when the store build is paid again, only it requires a key", () => {
+		expect(licenceRequiredForMode(resolveExtensionBuildMode(undefined), true)).toBe(false);
+		expect(licenceRequiredForMode(resolveExtensionBuildMode("private"), true)).toBe(false);
+		expect(licenceRequiredForMode(resolveExtensionBuildMode("store"), true)).toBe(true);
 	});
 
 	test("the store build with no key is required, and blocks capture", async () => {

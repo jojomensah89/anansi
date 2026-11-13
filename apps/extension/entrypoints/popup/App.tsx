@@ -41,6 +41,9 @@ import { type LicenceGate, licenceAllowsCapture } from "../../lib/licence.ts";
 import { LicenceRow, LicenceScreen, readLicence } from "./Licence.tsx";
 import "./App.css";
 
+/** Pay-what-you-want checkout on Polar ("Support Anansi", from $0). */
+const SUPPORT_URL = "https://buy.polar.sh/polar_cl_23HStXNgQMfXFavpX5s33s4PzRtZuNxJU1WWl0cIfgF";
+
 /**
  * The popup.
  *
@@ -1201,6 +1204,14 @@ export default function App() {
 
       <footer className="pop-foot">
         <span className="meta num">{footerText}</span>
+        <button
+          type="button"
+          className="btn ghost sm"
+          title="Anansi is free. If it saves you time, pay what you want."
+          onClick={() => void browser.tabs.create({ url: SUPPORT_URL })}
+        >
+          Support
+        </button>
         <button
           type="button"
           className="btn ghost sm"

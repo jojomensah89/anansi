@@ -53,9 +53,15 @@ export function resolveExtensionBuildMode(value: unknown): ExtensionBuildMode {
 	throw new Error("ANANSI_EXTENSION_BUILD_MODE must be public, private or store");
 }
 
-/** Only the store build checks a licence; source builds never do. */
-export function licenceRequiredForMode(mode: ExtensionBuildMode): boolean {
-	return mode === "store";
+/**
+ * The extension is free for now, so no build asks for a licence key. The
+ * licence code stays in the repo, ready for a paid store build later: flip
+ * this to true and only the store build will ask again. Source builds never do.
+ */
+export const STORE_REQUIRES_LICENCE = false;
+
+export function licenceRequiredForMode(mode: ExtensionBuildMode, storeRequiresLicence = STORE_REQUIRES_LICENCE): boolean {
+	return storeRequiresLicence && mode === "store";
 }
 
 /**
