@@ -4,11 +4,9 @@ import { RadioGroup, RadioGroupItem } from "@anansi/ui/components/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@anansi/ui/components/select";
 import { ToggleGroup, ToggleGroupItem } from "@anansi/ui/components/toggle-group";
 import { Check, Copy, Lock } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { api } from "../lib/api.ts";
+import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 import { ConnectedClients } from "./connected-clients.tsx";
 import { clientSnippet, MCP_CLIENTS, MCP_TOKEN_PLACEHOLDER, type McpClientId } from "./mcp-config.ts";
-import { Rail } from "./rail.tsx";
 
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
 type CopyTarget = "endpoint" | "snippet";
@@ -148,28 +146,10 @@ function ToolColumn({ title, tools }: { title?: ReactNode; tools: ReadonlyArray<
 
 export function McpServerPage() {
 	const endpoint = useMcpEndpoint();
-	const [ready, setReady] = useState(false);
-	const [stats, setStats] = useState({ items: 0, authors: 0, archived: 0, bySource: {} as Record<string, number> });
-
-	useEffect(() => {
-		const controller = new AbortController();
-		api
-			.stats(controller.signal)
-			.then((next) => {
-				setStats({ items: next.items, authors: next.authors, archived: next.archived, bySource: next.bySource });
-				setReady(true);
-			})
-			.catch(() => {});
-		return () => controller.abort();
-	}, []);
-
 	const readHalf = Math.ceil(MCP_TOOL_CATALOG.length / 2);
 
 	return (
-		<div className="anansi-shell">
-			<Rail ready={ready} total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} />
-
-			{/* The top bar names the page; the address leads the content. */}
+		// The top bar names the page; the address leads the content.
 			<main className="workspace-page mcp-page">
 				<div className="scroll workspace-page-body">
 					<div className="mcp-layout">
@@ -207,6 +187,5 @@ export function McpServerPage() {
 					</div>
 				</div>
 			</main>
-		</div>
 	);
 }

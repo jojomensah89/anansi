@@ -1,23 +1,24 @@
 import { Button } from "@anansi/ui/components/button";
 import { Switch } from "@anansi/ui/components/switch";
 import { ToggleGroup, ToggleGroupItem } from "@anansi/ui/components/toggle-group";
-import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AlertCircle, ArrowRight, Download, Play, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { ConnectExtension } from "../components/connect-extension.tsx";
 import { ExtensionIcon } from "../components/extension-icon.tsx";
-import { Rail } from "../components/rail.tsx";
 import { Bone, Loading, useSlowLoad } from "../components/skeleton.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
 import { StatusDot } from "../components/status-dot.tsx";
-import { api, type ExtensionHealth, type SourceRow, type SourcesResponse } from "../lib/api.ts";
+import type { ExtensionHealth, SourceRow } from "../lib/api.ts";
+import { formatCount } from "../lib/format.ts";
+import { expectIncomingSaves } from "../lib/library-query.ts";
+import { useSources, useToggleSource } from "../lib/source-queries.ts";
 import { requestExtensionImport } from "../lib/extension-bridge.ts";
-import { frameKeys, useExtensionHealth } from "../lib/frame-status.ts";
+import { useExtensionHealth } from "../lib/frame-status.ts";
 import { extensionStatus, importable, type SourceAction, type SourcePresentation, sourceAction, sourcePresentation } from "../lib/source-state.ts";
 
-export const Route = createFileRoute("/sources")({ component: Sources });
+export const Route = createFileRoute("/_app/sources")({ component: Sources });
 
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
 
@@ -35,9 +36,9 @@ export function ago(unix: number | null, now = Date.now()): string {
 
 /** The figures under a source: what it holds, then how most of it arrived. */
 export function sourceCounts(row: SourceRow): string[] {
-	const parts = [`${row.items.toLocaleString()} saved`];
-	if (importable(row)) parts.push(`${row.imported.toLocaleString()} imported`);
-	else if (row.chromeBookmarks > 0) parts.push(`${row.chromeBookmarks.toLocaleString()} bookmarks`);
+	const parts = [`${formatCount(row.items)} saved`];
+	if (importable(row)) parts.push(`${formatCount(row.imported)} imported`);
+	else if (row.chromeBookmarks > 0) parts.push(`${formatCount(row.chromeBookmarks)} bookmarks`);
 	return parts;
 }
 
@@ -68,46 +69,16 @@ type ImportAsk = "asking" | "sent";
 type Filter = "all" | "on";
 
 function Sources() {
-	const queryClient = useQueryClient();
-	const [data, setData] = useState<SourcesResponse | null>(null);
-	const [loadFailed, setLoadFailed] = useState(false);
+	const sources = useSources();
+	const { mutate: toggleSource } = useToggleSource();
 	const [asks, setAsks] = useState<Record<string, ImportAsk>>({});
 	const [filter, setFilter] = useState<Filter>("all");
-	const [stats, setStats] = useState({ items: 0, authors: 0, archived: 0, bySource: {} as Record<string, number> });
+	const data = sources.data;
+	const { refetch } = sources;
 
-	const load = useCallback((signal?: AbortSignal) => {
-		Promise.all([api.stats(signal), api.sources(signal)])
-			.then(([nextStats, nextSources]) => {
-				setStats({ items: nextStats.items, authors: nextStats.authors, archived: nextStats.archived, bySource: nextStats.bySource });
-				setData(nextSources);
-				// The top bar's dot and this page read the same answer.
-				queryClient.setQueryData(frameKeys.extension, nextSources.extension);
-				setLoadFailed(false);
-				// A sent import now shows in the source's own status.
-				setAsks((previous) => Object.fromEntries(Object.entries(previous).filter(([, ask]) => ask !== "sent")));
-			})
-			.catch((error: unknown) => {
-				if ((error as { name?: string }).name !== "AbortError") setLoadFailed(true);
-			});
-	}, [queryClient]);
+	const toggle = useCallback((row: SourceRow, enabled: boolean) => toggleSource({ row, enabled }), [toggleSource]);
 
-	useEffect(() => {
-		const controller = new AbortController();
-		load(controller.signal);
-		return () => controller.abort();
-	}, [load]);
-
-	const toggle = (row: SourceRow, enabled: boolean) => {
-		const set = (value: boolean) =>
-			setData((previous) => previous && { ...previous, sources: previous.sources.map((entry) => (entry.source === row.source ? { ...entry, enabled: value } : entry)) });
-		set(enabled);
-		api.toggleSource(row.source, enabled).catch((error: unknown) => {
-			set(!enabled);
-			toast.error(`Couldn't turn ${enabled ? "on" : "off"} ${row.name}`, { description: error instanceof Error && error.message ? error.message : undefined });
-		});
-	};
-
-	const askImport = async (row: SourceRow) => {
+	const askImport = useCallback(async (row: SourceRow) => {
 		setAsks((previous) => ({ ...previous, [row.source]: "asking" }));
 		const ok = await requestExtensionImport(row.source);
 		setAsks((previous) => {
@@ -116,68 +87,71 @@ function Sources() {
 			else delete next[row.source];
 			return next;
 		});
-		if (ok) {
-			toast.success(`${row.name}: import started`);
-			window.setTimeout(() => load(), 1500);
-		} else {
+		if (!ok) {
 			toast.error("The extension didn’t answer", { description: "Open the extension popup to import" });
+			return;
 		}
-	};
+		toast.success(`${row.name}: import started`);
+		// Saves are about to arrive: the rail's counts check quickly for a while.
+		expectIncomingSaves();
+		// A sent import then shows in the source's own status.
+		window.setTimeout(() => {
+			void refetch().then(() => setAsks((previous) => Object.fromEntries(Object.entries(previous).filter(([source, ask]) => source !== row.source || ask !== "sent"))));
+		}, 1500);
+	}, [refetch]);
 
-	const slow = useSlowLoad(data === null && !loadFailed);
+	const loadFailed = sources.isError && !data;
+	const slow = useSlowLoad(sources.isPending);
 	// Coming-next platforms are not sources yet; they get no card.
-	const sources = data?.sources.filter((row) => row.support !== "coming_next") ?? [];
-	const onCount = sources.filter((row) => row.enabled).length;
-	const shown = filter === "on" ? sources.filter((row) => row.enabled) : sources;
+	const rows = data?.sources.filter((row) => row.support !== "coming_next") ?? [];
+	const onCount = rows.filter((row) => row.enabled).length;
+	const shown = filter === "on" ? rows.filter((row) => row.enabled) : rows;
 
 	return (
-		<div className="anansi-shell">
-			<Rail total={stats.items} authors={stats.authors} archived={stats.archived} bySource={stats.bySource} ready={data !== null} />
-			<main className="workspace-page sources-page">
-				<div className="scroll sources-scroll">
-					<div className="sources-frame">
-						<ExtensionCard fallback={data?.extension} />
+		<main className="workspace-page sources-page">
+			<div className="scroll sources-scroll">
+				<div className="sources-frame">
+					<ExtensionCard fallback={data?.extension} />
 
-						{loadFailed && (
-							<div className="sources-notice" role="alert">
-								<AlertCircle {...ICON} />
-								<span>Couldn't load source status. Your library is unaffected</span>
-								<Button variant="outline" onClick={() => load()}>
-									<RotateCcw {...ICON} />
-									Try again
-								</Button>
-							</div>
-						)}
+					{loadFailed && (
+						<div className="sources-notice" role="alert">
+							<AlertCircle {...ICON} />
+							<span>Couldn't load source status. Your library is unaffected</span>
+							<Button variant="outline" onClick={() => void refetch()}>
+								<RotateCcw {...ICON} />
+								Try again
+							</Button>
+						</div>
+					)}
 
-						{!data && !loadFailed && slow && <SourceGridSkeleton />}
+					{!data && !loadFailed && slow && <SourceGridSkeleton />}
 
-						{data && (
-							<section className="sources-section" aria-labelledby="sources-title">
-								<header className="sources-section-head">
-									<h2 id="sources-title">Platforms</h2>
-									{onCount < sources.length && (
-										<ToggleGroup
-											className="sources-filter"
-											aria-label="Show"
-											value={[filter]}
-											onValueChange={(values) => { if (values[0]) setFilter(values[0] as Filter); }}
-										>
-											<ToggleGroupItem value="all">All <span className="sources-filter-count">{sources.length}</span></ToggleGroupItem>
-											<ToggleGroupItem value="on">On <span className="sources-filter-count">{onCount}</span></ToggleGroupItem>
-										</ToggleGroup>
-									)}
-								</header>
-								<ul className="sources-grid">
-									{shown.map((row) => (
-										<SourceCard key={row.source} row={row} extension={data.extension} ask={asks[row.source]} onImport={askImport} onToggle={toggle} />
-									))}
-								</ul>
-							</section>
-						)}
-					</div>
+					{data && (
+						<section className="sources-section" aria-labelledby="sources-title">
+							<header className="sources-section-head">
+								<h2 id="sources-title">Platforms</h2>
+								{onCount < rows.length && (
+									<ToggleGroup
+										className="sources-filter"
+										aria-label="Show"
+										value={[filter]}
+										onValueChange={(values) => { if (values[0]) setFilter(values[0] as Filter); }}
+									>
+										<ToggleGroupItem value="all">All <span className="sources-filter-count">{formatCount(rows.length)}</span></ToggleGroupItem>
+										<ToggleGroupItem value="on">On <span className="sources-filter-count">{formatCount(onCount)}</span></ToggleGroupItem>
+									</ToggleGroup>
+								)}
+							</header>
+							<ul className="sources-grid">
+								{shown.map((row) => (
+									<SourceCard key={row.source} row={row} extension={data.extension} ask={asks[row.source]} onImport={askImport} onToggle={toggle} />
+								))}
+							</ul>
+						</section>
+					)}
 				</div>
-			</main>
-		</div>
+			</div>
+		</main>
 	);
 }
 

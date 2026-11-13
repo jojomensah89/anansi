@@ -14,17 +14,28 @@ import {
 import { CountBone, useSlowLoad } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 import { LIBRARY_SOURCES, sourceLabel } from "../lib/api.ts";
-import { AppTopBar, ProgressPill } from "./app-frame.tsx";
+import { formatCount } from "../lib/format.ts";
+import { useLibraryStats } from "../lib/library-query.ts";
+import { validateLibrarySearch } from "../lib/library-search.ts";
 import { RailShelves } from "./rail-shelves.tsx";
 import { GITHUB_URL, X_URL } from "../lib/links.ts";
 
-/** The library rail. The shell owns counts so navigation and content agree. */
-export interface RailProps {
-	total: number;
-	authors: number;
-	archived?: number;
-	bySource: Record<string, number>;
-	ready?: boolean;
+/**
+ * The rail's own name for a source, where width is tight. The full label
+ * stays the accessible name and the tooltip; the API's labels are unchanged.
+ */
+export function railSourceLabel(source: string): string {
+	return source === "web" ? "Web pages" : sourceLabel(source);
+}
+
+/** Only one exact source filter lights a source row; any other filter is a library view. */
+function activeSource(path: string, search: Record<string, unknown>): string | null {
+	if (path !== "/") return null;
+	const parsed = validateLibrarySearch(search);
+	if (parsed.shelf || parsed.archived || parsed.q || parsed.source?.length !== 1) return null;
+	const { source: _source, view: _view, item: _item, ...rest } = parsed;
+	if (Object.values(rest).some((value) => value !== undefined)) return null;
+	return parsed.source[0] ?? null;
 }
 
 function NavIcon({ path, active }: { path: string; active: boolean }) {
@@ -79,17 +90,28 @@ export function RailSocialLinks() {
 	);
 }
 
-export function Rail({ total, authors, archived = 0, bySource, ready: readyProp }: RailProps) {
+/**
+ * The rail. Rendered once by the app shell (routes/_app.tsx), so it stays
+ * mounted across pages and its counts come from the shared stats query.
+ */
+export function Rail() {
+	const stats = useLibraryStats();
+	const total = stats.data?.items ?? 0;
+	const authors = stats.data?.authors ?? 0;
+	const archived = stats.data?.archived ?? 0;
+	const bySource = stats.data?.bySource ?? {};
 	const path = useRouterState({ select: (s) => s.location.pathname });
-	const archivedView = useRouterState({ select: (s) => s.location.pathname === "/" && (s.location.search as Record<string, unknown>).archived === true });
-	// A shelf is its own place in the rail, so Library is not also lit while one is open.
-	const shelfView = useRouterState({ select: (s) => s.location.pathname === "/" && typeof (s.location.search as Record<string, unknown>).shelf === "string" });
-	const ready = readyProp ?? (total > 0 || archived > 0);
+	const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
+	const archivedView = path === "/" && search.archived === true;
+	// A shelf or a source is its own place in the rail, so Library is not also lit while one is open.
+	const shelfView = path === "/" && typeof search.shelf === "string";
+	const sourceView = activeSource(path, search);
+	const libraryActive = !archivedView && !shelfView && !sourceView && (path === "" || path === "/");
+	const ready = stats.isSuccess;
 	const slow = useSlowLoad(!ready);
-	const count = (n: number) => ready ? String(n) : slow ? <CountBone digits={4} height={8} /> : null;
+	const count = (n: number) => ready ? formatCount(n) : slow ? <CountBone digits={4} height={8} /> : null;
 
 	return (
-		<>
 		<Sidebar className="anansi-rail" collapsible="icon">
 			<SidebarHeader className="anansi-rail-brand">
 				<div className="anansi-rail-brand-name">
@@ -102,8 +124,8 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 				<SidebarGroup className="anansi-rail-primary">
 					<SidebarGroupContent>
 						<SidebarMenu>
-							<Item to="/" label="Library" count={count(total)} active={!archivedView && !shelfView && (path === "" || path === "/")}>
-								<NavIcon active={!archivedView && !shelfView && (path === "" || path === "/")} path="M6 4h12v17l-6-4-6 4z" />
+							<Item to="/" label="Library" count={count(total)} active={libraryActive}>
+								<NavIcon active={libraryActive} path="M6 4h12v17l-6-4-6 4z" />
 							</Item>
 							<SidebarMenuItem>
 								<SidebarMenuButton render={<Link to="/" search={{ archived: true }} />} isActive={archivedView} tooltip="Archived" aria-label="Archived">
@@ -135,9 +157,9 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 							{LIBRARY_SOURCES.map((source) => {
 								return (
 									<SidebarMenuItem key={source}>
-										<SidebarMenuButton render={<Link to="/" search={{ source: [source] }} />} tooltip={sourceLabel(source)} aria-label={sourceLabel(source)}>
+										<SidebarMenuButton render={<Link to="/" search={{ source: [source] }} />} isActive={sourceView === source} tooltip={sourceLabel(source)} aria-label={sourceLabel(source)}>
 											<span className="anansi-source-icon"><SourceMark source={source} size={15} /></span>
-											<span className="anansi-sidebar-label">{sourceLabel(source)}</span>
+											<span className="anansi-sidebar-label">{railSourceLabel(source)}</span>
 											<span className="anansi-sidebar-count">{count(bySource[source] ?? 0)}</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
@@ -154,9 +176,5 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 				<RailSocialLinks />
 			</SidebarFooter>
 		</Sidebar>
-		{/* Siblings of the rail inside .anansi-shell: the frame's grid places them (styles/frame.css). */}
-		<AppTopBar total={total} archived={archived} ready={ready} />
-		<ProgressPill />
-		</>
 	);
 }

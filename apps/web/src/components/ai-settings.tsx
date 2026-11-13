@@ -18,6 +18,7 @@ import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 
 import { toast } from "sonner";
 import { api, type AiSettingsResponse } from "../lib/api.ts";
 import { SettingsNotice, SettingsRow } from "./settings-panel.tsx";
+import { formatCount } from "../lib/format.ts";
 
 type Preview = Awaited<ReturnType<typeof api.semanticPreview>>;
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
@@ -39,7 +40,7 @@ export function parseCap(draft: string): number | null {
 export function capShortfall(preview: Preview, limit: number, used: number): string | null {
 	const remaining = Math.max(0, limit - used);
 	if (preview.runtime !== "cloudflare" || preview.estimate.estimatedCredits <= remaining) return null;
-	return `Indexing needs ${preview.estimate.estimatedCredits.toLocaleString()} credits but only ${remaining.toLocaleString()} are left this month. Raise the cap or wait for the reset`;
+	return `Indexing needs ${formatCount(preview.estimate.estimatedCredits)} credits but only ${formatCount(remaining)} are left this month. Raise the cap or wait for the reset`;
 }
 
 export function useAiSettings() {
@@ -221,7 +222,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 								{paused ? "Resume" : "Pause"}
 							</Button>
 							<p className="settings-figure settings-index-figure">
-								{indexed.toLocaleString()} indexed · {pending.toLocaleString()} pending · {total.toLocaleString()} total
+								{formatCount(indexed)} indexed · {formatCount(pending)} pending · {formatCount(total)} total
 								{paused ? " · paused" : draining && pending > 0 ? " · updating" : ""}
 							</p>
 						</div>
@@ -230,7 +231,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 								<div className="settings-cap-row">
 									<div className="settings-cap-copy">
 										<label htmlFor="semantic-credit-limit" className="settings-label">Monthly credit cap</label>
-										<span className="settings-muted">{data.settings.semanticBudgetUsed.toLocaleString()} used · resets {data.settings.semanticBudgetMonth}</span>
+										<span className="settings-muted">{formatCount(data.settings.semanticBudgetUsed)} used · resets {data.settings.semanticBudgetMonth}</span>
 									</div>
 									<form className="settings-cap" onSubmit={(event) => { event.preventDefault(); void saveCap(); }}>
 										<Input
@@ -247,7 +248,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 								</div>
 								{estimate && (
 									<p className="settings-muted settings-estimate-line">
-										{estimate.estimate.itemCount.toLocaleString()} saves · about {estimate.estimate.estimatedCredits.toLocaleString()} credits to index · cap {data.settings.semanticBudgetLimit.toLocaleString()}
+										{formatCount(estimate.estimate.itemCount)} saves · about {formatCount(estimate.estimate.estimatedCredits)} credits to index · cap {formatCount(data.settings.semanticBudgetLimit)}
 									</p>
 								)}
 								<p className="settings-meta">1 credit indexes up to 1,000 characters. It tracks workload, not your bill</p>
@@ -255,7 +256,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 						)}
 						{!cloudflare && estimate && (
 							<p className="settings-muted settings-estimate-line">
-								{estimate.estimate.itemCount.toLocaleString()} saves · {estimate.estimate.newChunks.toLocaleString()} chunks. Runs on this machine, no credits used
+								{formatCount(estimate.estimate.itemCount)} saves · {formatCount(estimate.estimate.newChunks)} chunks. Runs on this machine, no credits used
 							</p>
 						)}
 					</>
@@ -289,8 +290,8 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 								{reclassifying ? "Reclassifying" : "Reclassify"}
 							</Button>
 							<p className="settings-figure settings-index-figure">
-								{tagging.complete.toLocaleString()} complete · {tagging.pending.toLocaleString()} pending
-								{tagging.failed > 0 && <span className="settings-inline-warn"> · {tagging.failed.toLocaleString()} failed</span>}
+								{formatCount(tagging.complete)} complete · {formatCount(tagging.pending)} pending
+								{tagging.failed > 0 && <span className="settings-inline-warn"> · {formatCount(tagging.failed)} failed</span>}
 							</p>
 						</div>
 						<p className="settings-muted">Topic list {data.taxonomyVersion}</p>
@@ -303,7 +304,7 @@ export function AiSettings({ data, setData }: { data: AiSettingsResponse; setDat
 					<AlertDialogHeader>
 						<AlertDialogTitle>The cap is too low to index everything</AlertDialogTitle>
 						<AlertDialogDescription>
-							{overCap && `Indexing needs about ${overCap.preview.estimate.estimatedCredits.toLocaleString()} credits and ${Math.max(0, overCap.limit - data.settings.semanticBudgetUsed).toLocaleString()} are left this month. Raise the cap to ${(Math.ceil(overCap.needed / 100) * 100).toLocaleString()} to start, or leave search by meaning off`}
+							{overCap && `Indexing needs about ${formatCount(overCap.preview.estimate.estimatedCredits)} credits and ${formatCount(Math.max(0, overCap.limit - data.settings.semanticBudgetUsed))} are left this month. Raise the cap to ${formatCount(Math.ceil(overCap.needed / 100) * 100)} to start, or leave search by meaning off`}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

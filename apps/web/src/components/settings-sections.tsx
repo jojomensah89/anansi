@@ -1,10 +1,9 @@
 import { Button } from "@anansi/ui/components/button";
 import { Switch } from "@anansi/ui/components/switch";
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight } from "lucide-react";
-import { api } from "../lib/api.ts";
-import { libraryKeys } from "../lib/library-query.ts";
+import { formatCount } from "../lib/format.ts";
+import { useLibraryStats } from "../lib/library-query.ts";
 import type { SettingsSectionId } from "../lib/settings-sections.ts";
 import { useHideRemoved, useShowNsfw } from "../lib/settings.ts";
 import { AiLoadError, AiSettings, useAiSettings } from "./ai-settings.tsx";
@@ -20,10 +19,6 @@ import { TopicsEditor } from "./topics-editor.tsx";
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
 
 /** The library's counts, shared with the rail and the library page. */
-export function useLibraryStats() {
-	return useQuery({ queryKey: libraryKeys.stats(), queryFn: ({ signal }) => api.stats(signal), retry: 1, staleTime: 15_000 });
-}
-
 /** A quiet link that reads as a button: it goes somewhere rather than changing something. */
 function GoTo({ to, children }: { to: "/sources" | "/mcp"; children: string }) {
 	return (
@@ -122,7 +117,7 @@ function SecuritySection() {
 function DataSection() {
 	const stats = useLibraryStats();
 	return (
-		<SettingsSection id="data" title="Your data" lead={stats.data ? `${stats.data.items.toLocaleString()} saves` : "Export and restore"}>
+		<SettingsSection id="data" title="Your data" lead={stats.data ? `${formatCount(stats.data.items)} saves` : "Export and restore"}>
 			<DataSettings />
 		</SettingsSection>
 	);

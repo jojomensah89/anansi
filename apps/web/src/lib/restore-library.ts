@@ -1,6 +1,7 @@
 import type { RestoreTable } from "@anansi/db";
 import { validateRestoreBackup } from "@anansi/db/restore-preflight";
 import { api } from "./api.ts";
+import { formatCount } from "./format.ts";
 
 const TABLES = ["items", "tags", "itemTags", "itemTagOverrides", "itemSourceLinks", "highlights", "media", "collections", "shelfItems", "aiTopics"] as const satisfies readonly RestoreTable[];
 const MAX_FILE_BYTES = 100_000_000;
@@ -33,7 +34,7 @@ export async function restoreLibraryFile(file: File, onProgress: (message: strin
       }
       ({ restore } = await api.restoreChunk(backupId, table, offset, rows.slice(offset, offset + count)));
       const done = TABLES.reduce((sum, name) => sum + restore.progress[name], 0);
-      onProgress(`Restored ${done.toLocaleString()} of ${total.toLocaleString()} records…`);
+      onProgress(`Restored ${formatCount(done)} of ${formatCount(total)} records…`);
     }
   }
   await api.restoreFinish(backupId);

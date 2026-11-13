@@ -18,6 +18,7 @@ import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@anans
 import { Archive, ArchiveRestore, BookMinus, BookPlus, ExternalLink, Star, X } from "lucide-react";
 import { useShelfMembership } from "../lib/shelf-queries.ts";
 import { ShelfPickerPopover, useViewingShelf } from "./shelf-picker.tsx";
+import { formatCount } from "../lib/format.ts";
 
 type ItemDetailRow = Awaited<ReturnType<typeof api.updateItem>>;
 
@@ -191,7 +192,7 @@ export function Detail({ id, onClose, focusNote }: { id: string | null; onClose:
                 {noteState === "saving" ? "Saving" : noteState === "error" ? "Not saved, your text is kept" : noteState === "saved" && !dirty ? "Saved" : ""}
               </span>
               {noteState === "error" && <Button variant="ghost" size="sm" type="button" className="detail-note-retry" onClick={() => flush(item.id)}>Retry</Button>}
-              {note.length > 19_000 && <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{note.length.toLocaleString()} / 20,000</span>}
+              {note.length > 19_000 && <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{formatCount(note.length)} / 20,000</span>}
             </div>
           </Section>
 

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, type AiSettingsResponse, type ExtensionHealth } from "./api.ts";
+import { formatCount } from "./format.ts";
 
 /**
  * What the app frame watches on every page: the extension's connection and
@@ -61,9 +62,7 @@ export interface BackgroundJob {
 
 const PLATFORM: Record<string, string> = { x: "X", github: "GitHub", reddit: "Reddit", tiktok: "TikTok", web: "web" };
 
-function count(n: number): string {
-	return n.toLocaleString("en-GB");
-}
+const count = formatCount;
 
 function list(names: string[]): string {
 	if (names.length <= 1) return names[0] ?? "";

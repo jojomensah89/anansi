@@ -10,13 +10,13 @@ import { ArrowDown, ArrowUp, Ellipsis, Pencil, Plus, SlidersHorizontal, Trash2, 
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import type { Shelf, ShelfSuggestion } from "../lib/api.ts";
+import { formatCount } from "../lib/format.ts";
 import { validateLibrarySearch } from "../lib/library-search.ts";
 import { useDeleteShelf, useDismissSuggestion, useMoveShelf, useRenameShelf, useSaveShelf, useShelfSuggestions, useShelves } from "../lib/shelf-queries.ts";
 import {
-	closeShelfDialog, dropIndex, openShelfDialog, ruleFromFilters, suggestionToShelf, useShelfDialogRequest, visibleSuggestion,
+	dropIndex, openShelfDialog, suggestionToShelf, visibleSuggestion,
 } from "../lib/shelves.ts";
 import { topicColor } from "../lib/tag-colors.ts";
-import { ShelfDialog } from "./shelf-dialog.tsx";
 import { ShelfIcon } from "./shelf-icons.tsx";
 
 /**
@@ -28,7 +28,7 @@ import { ShelfIcon } from "./shelf-icons.tsx";
  * row's menu also opens on right-click. Below the shelves, at most one quiet
  * suggestion turns a busy topic into a shelf.
  *
- * The shelf dialog lives here because every page renders the rail.
+ * The shelf dialog itself is mounted once by the app shell (routes/_app.tsx).
  */
 
 export function RailShelves() {
@@ -74,23 +74,16 @@ export function RailShelves() {
 		moveTo(shelf, index + (event.key === "ArrowUp" ? -1 : 1));
 	};
 
-	const request = useShelfDialogRequest();
-	const currentRule = location.pathname === "/" ? (() => {
-		const search = validateLibrarySearch(location.search as Record<string, unknown>);
-		return ruleFromFilters({ ...search, query: search.q });
-	})() : null;
-
 	const phone = usePhone();
 	const dialogs = (
 		<>
-			<ShelfDialog request={request} currentRule={currentRule} onClose={closeShelfDialog} />
 			<AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
 				<AlertDialogContent className="shelf-dialog shelf-confirm">
 					<AlertDialogHeader>
 						<AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
 						<AlertDialogDescription>
 							{deleting && deleting.count > 0
-								? `The shelf goes away. Its ${deleting.count.toLocaleString("en-GB")} save${deleting.count === 1 ? "" : "s"} stay in your library.`
+								? `The shelf goes away. Its ${formatCount(deleting.count)} save${deleting.count === 1 ? "" : "s"} stay in your library.`
 								: "The shelf goes away. Your saves stay in your library."}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
@@ -114,8 +107,7 @@ export function RailShelves() {
 		</>
 	);
 	// On phones the rail is the bottom tab bar: no room for shelves there, so they live in ⌘K.
-	// The dialogs stay mounted, since ⌘K and the add-to-shelf picker open them.
-	if (phone) return dialogs;
+	if (phone) return null;
 
 	return (
 		<SidebarGroup className="rail-shelves">
@@ -220,13 +212,13 @@ function ShelfRow({ shelf, index, total, active, renaming, menuOpen, dragging, s
 					className="rail-shelf-link"
 					isActive={active}
 					tooltip={shelf.name}
-					aria-label={`${shelf.name}, ${shelf.count.toLocaleString("en-GB")} saves`}
+					aria-label={`${shelf.name}, ${formatCount(shelf.count)} saves`}
 					aria-current={active ? "page" : undefined}
 					onKeyDown={onKeyDown}
 				>
 					<ShelfIcon icon={shelf.icon} color={shelf.color} />
 					<span className="anansi-sidebar-label">{shelf.name}</span>
-					<span className="anansi-sidebar-count rail-shelf-count">{shelf.count.toLocaleString("en-GB")}</span>
+					<span className="anansi-sidebar-count rail-shelf-count">{formatCount(shelf.count)}</span>
 				</SidebarMenuButton>
 			)}
 			{!renaming && (
@@ -288,7 +280,7 @@ export function SuggestionRow({ suggestion, onCreated }: { suggestion: ShelfSugg
 			<p className="rail-suggestion-text">
 				Make a shelf from <span aria-hidden="true" className="rail-suggestion-dot" style={{ background: topicColor(suggestion.label) }} />
 				<span className="rail-suggestion-topic">{suggestion.label}</span>
-				<span className="rail-suggestion-count"> · {suggestion.count.toLocaleString("en-GB")}</span>
+				<span className="rail-suggestion-count"> · {formatCount(suggestion.count)}</span>
 			</p>
 			<div className="rail-suggestion-actions">
 				<button

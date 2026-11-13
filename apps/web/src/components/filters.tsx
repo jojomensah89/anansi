@@ -7,6 +7,7 @@ import { api, LIBRARY_SOURCES, sourceLabel, type Creator, type ItemQuery } from 
 import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
 import { TagDot } from "./tag-chip.tsx";
+import { formatCount } from "../lib/format.ts";
 
 /**
  * The filter bar.
@@ -438,7 +439,7 @@ export function FilterChips({ bar, matched }: { bar: FilterBar; matched: number 
             className="filter-match-count"
             style={{ marginLeft: "auto", fontSize: "var(--text-meta)", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}
           >
-            {matched.toLocaleString()} match{matched === 1 ? "" : "es"}
+            {formatCount(matched)} match{matched === 1 ? "" : "es"}
           </span>
         )}
       </div>
@@ -735,7 +736,7 @@ export function ValueList({
               <span className="filter-option-label">{option.label}</span>
               {withCounts && (
                 <span className="filter-option-count">
-                  {option.count === undefined ? "" : option.count.toLocaleString()}
+                  {option.count === undefined ? "" : formatCount(option.count)}
                 </span>
               )}
             </label>

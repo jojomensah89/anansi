@@ -13,6 +13,7 @@ import { useDialogFocus } from "../lib/use-dialog-focus.ts";
 import { Avatar } from "./avatar.tsx";
 import { Bone, useSlowLoad } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
+import { formatCount } from "../lib/format.ts";
 
 /**
  * ⌘K.
@@ -169,7 +170,7 @@ export function Palette({ open, onClose, onOpen, onSearch, total, filters, onFil
 			group: "Authors",
 			label: creator.authorName ?? creator.authorHandle ?? "",
 			detail: creator.authorHandle ? `${creator.source === "reddit" ? "u/" : "@"}${creator.authorHandle}` : undefined,
-			meta: <span className="tabular">{creator.saves.toLocaleString("en-GB")}</span>,
+			meta: <span className="tabular">{formatCount(creator.saves)}</span>,
 			icon: <Avatar src={creator.authorAvatar} seed={creator.authorHandle ?? creator.authorName} name={creator.authorName} size={20} />,
 			run: () => {
 				onClose();
@@ -181,7 +182,7 @@ export function Palette({ open, onClose, onOpen, onSearch, total, filters, onFil
 			id: `topic:${topic.label}`,
 			group: "Topics",
 			label: topic.label,
-			meta: <span className="tabular">{topic.count.toLocaleString("en-GB")}</span>,
+			meta: <span className="tabular">{formatCount(topic.count)}</span>,
 			icon: <span aria-hidden="true" className="palette-topic-dot" style={{ background: topicColor(topic.label) }} />,
 			run: () => {
 				onClose();
@@ -194,7 +195,7 @@ export function Palette({ open, onClose, onOpen, onSearch, total, filters, onFil
 			id: `shelf:${shelf.id}`,
 			group: "Shelves",
 			label: shelf.name,
-			meta: <span className="tabular">{shelf.count.toLocaleString("en-GB")}</span>,
+			meta: <span className="tabular">{formatCount(shelf.count)}</span>,
 			icon: <ShelfIcon icon={shelf.icon} color={shelf.color} />,
 			run: () => go("/", { shelf: shelf.id }),
 		}));
@@ -268,7 +269,7 @@ export function Palette({ open, onClose, onOpen, onSearch, total, filters, onFil
 						className="palette-input"
 						value={query}
 						onChange={(event) => setQuery(event.target.value)}
-						placeholder={total > 0 ? `Search ${total.toLocaleString("en-GB")} saves` : "Search saves"}
+						placeholder={total > 0 ? `Search ${formatCount(total)} saves` : "Search saves"}
 						aria-label="Search saves, authors, topics and pages"
 						role="combobox"
 						aria-expanded="true"

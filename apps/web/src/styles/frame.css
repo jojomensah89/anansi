@@ -46,6 +46,8 @@ html.light {
 .app-crumbs ol{display:flex;align-items:center;gap:8px;min-width:0;margin:0;padding:0;list-style:none}
 .app-crumb{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .app-crumb [aria-current=page]{color:var(--text);font-weight:500}
+/* The breadcrumb's last item is the page's h1: same size as the trail, the title by colour and weight. */
+.app-crumb-title{display:inline;margin:0;font-size:inherit;line-height:inherit;letter-spacing:normal}
 .app-crumb-link{color:var(--muted);border-radius:4px;transition:color 150ms var(--ease-out)}
 .app-crumb-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .app-crumb-sep{color:var(--edge-strong)}
@@ -127,18 +129,62 @@ html.light .view-tab[data-slot=toggle-group-item][data-pressed]{box-shadow:0 0 0
 .library-toolbar-wrap:has(.workspace-filter-row.has-filters)::after{display:none}
 .library-toolbar-wrap .workspace-filter-row.has-filters{border-bottom:1px solid var(--line)}
 
+.library-main{display:flex;flex:1;flex-direction:column;min-width:0}
+.library-scroll{flex:1}
 .library-content{padding:16px 20px}
+.library-masonry{display:flex;gap:16px;align-items:flex-start}
+.library-masonry-column{display:flex;flex:1;flex-direction:column;gap:16px;min-width:0}
+.library-sentinel{height:40px}
+.library-semantic-notice{margin:0 20px 8px;padding:8px 12px;border:1px solid var(--edge);border-radius:6px;background:var(--card);color:var(--muted);font-size:14px;line-height:20px}
+.library-semantic-pending{margin-left:8px;color:var(--muted)}
+
+/* Empty, failed and paused states: one sentence where the saves would be, and a way on. */
+.library-state{display:flex;align-items:center;gap:12px;padding:12px;color:var(--muted);font-size:14px;line-height:20px}
+.library-state-empty{flex-direction:column;align-items:flex-start;gap:4px;padding:40px 12px}
+.library-state-title{color:var(--text-dim)}
+.library-state-hint{font-size:12px;line-height:16px}
+.library-state-more{padding:8px}
+.library-state-more{color:var(--danger)}
+.library-state .library-state-retry[data-slot=button]{height:28px;padding:0 10px;border:1px solid var(--edge);border-radius:6px;background:var(--card);color:var(--text-dim);font-size:14px}
+
+.authors-page{display:flex;flex:1;flex-direction:column;min-width:0}
 
 /* ------------------------------------------------------------- cards --- */
 
-.anansi-card{transition:border-color 150ms var(--ease-out),background-color 150ms var(--ease-out)}
-.anansi-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Height follows content: a text-only save is a short card and a four-image one is tall. */
+.anansi-card{position:relative;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--card);cursor:pointer;transition:border-color 150ms var(--ease-out),background-color 150ms var(--ease-out)}
+.anansi-card[data-selected]{border-color:var(--accent)}
+.anansi-card:has(> .anansi-card-open:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+
+/* The card's one main control, stretched over it; its own controls sit above. */
+.anansi-card-open[data-slot=button]{position:absolute;inset:0;z-index:1;width:auto;height:auto;min-width:0;padding:0;border:0;border-radius:inherit;background:transparent;cursor:pointer;transform:none;transition:none}
+.anansi-card-open[data-slot=button]:hover,.anansi-card-open[data-slot=button]:active{background:transparent;transform:none}
+.anansi-card-open[data-slot=button]:focus-visible{outline:none;box-shadow:none}
+.anansi-card-org,
+.capture-card-meta :is(button,.card-shelf-menu){position:relative;z-index:2}
+/* The tag row's empty space and its plain chips still open the card; only its controls take the click. */
+.anansi-card-org{pointer-events:none}
+.anansi-card-org > :is(.anansi-tag-add,.anansi-tag-overflow){pointer-events:auto}
+
+/* Rows: the same structure as a card, one line per save. */
+.library-rows{display:flex;flex-direction:column}
+.library-row{position:relative;display:flex;align-items:flex-start;gap:12px;padding:12px 8px;border-bottom:1px solid var(--line-soft);cursor:pointer}
+.library-row:has(> .anansi-card-open:focus-visible){outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px}
+
 .capture-card-identity{display:flex;align-items:center;gap:8px;padding:12px 12px 0;font-size:14px;line-height:20px;min-width:0}
+/* A web page's site in the avatar's place: its favicon on a quiet tile, the same 28px slot. */
+.capture-card-site{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;border-radius:6px;background:var(--raised);color:var(--muted)}
+.capture-card-site img{border-radius:3px}
+.web-preview-site{display:flex;align-items:center;gap:8px;min-width:0;font-size:14px;line-height:20px;color:var(--muted)}
+.web-preview-site-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .capture-card-identity > span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;color:var(--text)}
 .capture-card-identity .post-handle{font-weight:400}
 
 .capture-card-footer{display:flex;align-items:center;gap:8px;min-width:0;min-height:44px;padding:8px 12px;font-size:12px;line-height:16px;color:var(--muted);white-space:nowrap}
 .anansi-card-org{display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden}
+/* Whole chips only: those that do not fit wait, measured, out of the flow, and "+n" lists them. */
+.anansi-tag-slot{display:inline-flex;flex:none;min-width:0}
+.anansi-tag-slot[data-hidden]{position:absolute;left:0;top:0;visibility:hidden;pointer-events:none}
 .capture-card-meta{display:flex;align-items:center;gap:8px;flex:none}
 .capture-card-meta time{font-variant-numeric:tabular-nums}
 .capture-card-source{display:inline-flex;align-items:center;color:var(--muted)}
@@ -161,7 +207,7 @@ html.light .view-tab[data-slot=toggle-group-item][data-pressed]{box-shadow:0 0 0
 @media (hover:hover) and (pointer:fine){
  .capture-card-footer:not([data-has-note]) .capture-card-note{opacity:0;transition:opacity 150ms var(--ease-out)}
  .anansi-card:is(:hover,:focus-within) .capture-card-note{opacity:1}
- .anansi-card:hover{border-color:var(--edge-strong) !important}
+ .anansi-card:not([data-selected]):hover{border-color:var(--edge-strong)}
  .capture-card-footer :is(.anansi-tag-trigger,.anansi-tag-more,.capture-card-note):hover{background:var(--raised);color:var(--text)}
  .library-toolbar :is(.toolbar-button,.filter-trigger,[data-slot=popover-trigger]):hover{background:var(--raised);color:var(--text)}
  .library-search-field[data-slot=button]:hover{border-color:var(--edge-strong);background:var(--card)}
@@ -176,7 +222,7 @@ html.light .view-tab[data-slot=toggle-group-item][data-pressed]{box-shadow:0 0 0
 
 /* ------------------------------------------------------------- tags --- */
 
-.anansi-tag-chip[data-slot=badge]{display:inline-block;flex:0 1 auto;min-width:0;max-width:112px;height:24px;padding:0 8px;border:0;border-radius:4px;background:var(--raised);color:var(--text-dim);font-size:12px;font-weight:400;line-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.anansi-tag-chip[data-slot=badge]{display:inline-block;flex:none;min-width:0;max-width:160px;height:24px;padding:0 8px;border:0;border-radius:4px;background:var(--raised);color:var(--text-dim);font-size:12px;font-weight:400;line-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .detail-tags .anansi-tag-chip[data-slot=badge]{max-width:none}
 .anansi-tag-dot{display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:50%;vertical-align:1px;flex:none}
 

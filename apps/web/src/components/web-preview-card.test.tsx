@@ -5,7 +5,8 @@ import {WebPreviewCard} from "./web-preview-card.tsx";
 import type {ItemRow} from "../lib/api.ts";
 const item = {id:"web-1",source:"web",title:"A useful page",url:"https://example.com/article",excerpt:"A useful description",media:[]} as unknown as ItemRow;
 test("web image card is lazy and uses stored media",()=>{const s=renderToStaticMarkup(createElement(WebPreviewCard,{item:{...item,media:[{key:"aa/bb/cover.png",kind:"card",url:"https://example.com/cover.png"}]}}));expect(s).toContain("/api/media/aa/bb/cover.png");expect(s).toContain('loading="lazy"');expect(s).toContain("1.91 / 1");expect(s).toContain("A useful description");});
-test("web fallback has domain and title without invented media",()=>{const s=renderToStaticMarkup(createElement(WebPreviewCard,{item}));expect(s).toContain("example.com");expect(s).toContain("A useful page");expect(s).not.toContain("<img");});
+// The grid card names its site once, in the card's identity line, so the preview itself does not repeat the domain.
+test("web fallback has the title without invented media or a second domain line",()=>{const s=renderToStaticMarkup(createElement(WebPreviewCard,{item}));expect(s).not.toContain("example.com");expect(s).toContain("A useful page");expect(s).not.toContain("<img");});
 test("row renders readable title and domain",()=>{const s=renderToStaticMarkup(createElement(WebPreviewCard,{item,compact:true}));expect(s).toContain("example.com");expect(s).toContain("A useful page");});
 
 

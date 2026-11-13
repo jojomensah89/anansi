@@ -135,7 +135,7 @@ html.light .shelf-form .shelf-input[data-slot=input]{background:var(--card)}
 .shelf-icon-search{position:relative;display:flex;align-items:center}
 .shelf-icon-search > svg{position:absolute;left:10px;color:var(--muted);pointer-events:none}
 .shelf-form .shelf-icon-search .shelf-input[data-slot=input]{padding-left:34px}
-.shelf-icon-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));grid-auto-rows:36px;align-content:start;gap:4px;height:160px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--edge-strong) transparent;padding:2px;margin:-2px}
+.shelf-icon-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));grid-auto-rows:36px;align-content:start;gap:4px;height:180px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--edge-strong) transparent;padding:2px;margin:-2px}
 .shelf-icon-option{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),transform 150ms var(--ease-out)}
 .shelf-icon-option[aria-checked=true]{background:var(--raised);box-shadow:inset 0 0 0 1px var(--edge-strong)}
 .shelf-icon-option:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}

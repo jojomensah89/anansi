@@ -9,6 +9,7 @@ import { useShelfMembership, useShelves } from "../lib/shelf-queries.ts";
 import { openShelfDialog } from "../lib/shelves.ts";
 import { Bone } from "./skeleton.tsx";
 import { ShelfIcon } from "./shelf-icons.tsx";
+import { formatCount } from "../lib/format.ts";
 
 /** The shelf the library is showing, if any: cards and the inspector offer "Remove from shelf" on it. */
 export const ShelfViewContext = createContext<Shelf | null>(null);
@@ -138,7 +139,7 @@ export function ShelfPicker({ itemIds, onDone }: { itemIds: string[]; onDone: ()
 									{single && <span className="shelf-picker-check" aria-hidden="true">{checked && <Check size={16} strokeWidth={1.5} />}</span>}
 									<ShelfIcon icon={row.shelf.icon} color={row.shelf.color} />
 									<span className="shelf-picker-name">{row.label}</span>
-									<span className="shelf-picker-count">{row.shelf.count.toLocaleString("en-GB")}</span>
+									<span className="shelf-picker-count">{formatCount(row.shelf.count)}</span>
 								</>
 							) : (
 								<>

@@ -110,6 +110,21 @@ const some = (value: string[] | undefined) =>
 
 export type LibraryFilters = Omit<LibrarySearch, "view" | "q" | "item" | "shelf">;
 
+/** The filter half of a library URL: what the bar's chips and a shelf rule describe. */
+export function libraryFiltersOf(search: LibrarySearch): LibraryFilters {
+  return {
+    source: search.source,
+    author: search.author,
+    type: search.type,
+    tag: search.tag,
+    media: search.media,
+    removed: search.removed,
+    archived: search.archived,
+    favorite: search.favorite,
+    nsfw: search.nsfw,
+  };
+}
+
 /** Absent rather than empty, so a cleared filter leaves no trace in the URL. */
 export function toLibrarySearch(
   filters: LibraryFilters,

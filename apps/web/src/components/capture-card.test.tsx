@@ -10,7 +10,9 @@ for (const source of ["x", "github", "reddit", "tiktok", "web"] as const) {
  const html = renderToStaticMarkup(<QueryClientProvider client={new QueryClient()}><Card item={item} selectable selected /></QueryClientProvider>);
  expect(html).toContain('aria-pressed="true"');
  expect(html).toContain(source === 'github' ? 'Ama Mensah/' : 'capture-card-identity');
- if(source !== 'github') expect(html).toContain('capture-card-source');
+ // GitHub draws its mark in its header; a web save leads with its favicon in the identity slot.
+ if(source !== 'github' && source !== 'web') expect(html).toContain('capture-card-source');
+ if(source === 'web') { expect(html).toContain('capture-card-site'); expect(html).not.toContain('capture-card-source'); }
  expect(html).toContain('<svg');
  expect(html).toContain('right:12px');
  expect(html).not.toContain('left:9px');

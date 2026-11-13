@@ -1,22 +1,21 @@
 import { Button } from "@anansi/ui/components/button";
 import { Input } from "@anansi/ui/components/input";
-import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/avatar.tsx";
 import { FieldFilter } from "../components/filters.tsx";
-import { Rail } from "../components/rail.tsx";
 import { Bone, CountBone, useSlowLoad } from "../components/skeleton.tsx";
 import { SourceMark } from "../components/sourcemark.tsx";
-import { api, type Creator, LIBRARY_SOURCES, sourceLabel } from "../lib/api.ts";
+import { type Creator, LIBRARY_SOURCES, sourceLabel } from "../lib/api.ts";
 import { authorHandleLine } from "../lib/author-handle.ts";
 import { useCreatorsQuery } from "../lib/creators-query.ts";
-import { libraryKeys } from "../lib/library-query.ts";
+import { formatCount } from "../lib/format.ts";
+import { useLibraryStats } from "../lib/library-query.ts";
 
 /** The same source vocabulary the library uses. */
 const PLATFORMS = LIBRARY_SOURCES.map((value) => ({ value, label: sourceLabel(value) }));
 
-export const Route = createFileRoute("/creators")({ component: Creators });
+export const Route = createFileRoute("/_app/creators")({ component: Creators });
 
 /**
  * Authors, browsed.
@@ -29,12 +28,7 @@ export const Route = createFileRoute("/creators")({ component: Creators });
 function Creators() {
 	const [filter, setFilter] = useState("");
 	const [platforms, setPlatforms] = useState<string[]>([]);
-	const statsQuery = useQuery({
-		queryKey: libraryKeys.stats(),
-		queryFn: ({ signal }) => api.stats(signal),
-		retry: 1,
-		staleTime: 15_000,
-	});
+	const statsQuery = useLibraryStats();
 	const creatorQuery = useCreatorsQuery(filter, platforms);
 	const creators = creatorQuery.creators;
 	const stats = statsQuery.data;
@@ -64,20 +58,12 @@ function Creators() {
 	}, [creatorQuery.fetchNextPage, creatorQuery.hasNextPage, creatorQuery.isFetchingNextPage]);
 
 	return (
-		<div className="anansi-shell">
-			<Rail
-				total={stats?.items ?? 0}
-				authors={stats?.authors ?? 0}
-				archived={stats?.archived ?? 0}
-				bySource={bySource}
-			/>
-
-			<div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+			<div className="authors-page">
 				<header className="authors-header">
 					<div className="authors-title">
-						<h1>Authors</h1>
+						<h2>Authors</h2>
 						{stats ? (
-							<span className="authors-count">{stats.authors.toLocaleString()}</span>
+							<span className="authors-count">{formatCount(stats.authors)}</span>
 						) : (
 							slow && <CountBone digits={4} height={10} />
 						)}
@@ -93,7 +79,7 @@ function Creators() {
 						)}
 						{narrowed && !firstLoad && (
 							<span className="authors-matches" aria-live="polite">
-								{total.toLocaleString()} {total === 1 ? "match" : "matches"}
+								{formatCount(total)} {total === 1 ? "match" : "matches"}
 							</span>
 						)}
 						<Input
@@ -133,7 +119,6 @@ function Creators() {
 					<div ref={sentinel} style={{ height: 1 }} aria-hidden="true" />
 				</div>
 			</div>
-		</div>
 	);
 }
 
@@ -155,7 +140,7 @@ function AuthorTile({ creator }: { creator: Creator }) {
 				</span>
 				{handleLine && <span className="author-tile-handle">{handleLine}</span>}
 			</span>
-			<span className="author-tile-saves">{creator.saves.toLocaleString()}</span>
+			<span className="author-tile-saves">{formatCount(creator.saves)}</span>
 		</a>
 	);
 }

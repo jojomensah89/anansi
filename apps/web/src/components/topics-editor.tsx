@@ -23,6 +23,7 @@ import { frameKeys } from "../lib/frame-status.ts";
 import { refreshTagKinds, topicColor } from "../lib/tag-colors.ts";
 import { SettingsRow, SettingsSection } from "./settings-panel.tsx";
 import { SettingsSkeleton } from "./skeleton.tsx";
+import { formatCount } from "../lib/format.ts";
 
 const ICON = { "aria-hidden": true, strokeWidth: 1.5 } as const;
 export const TOPIC_NAME_MAX = 32;
@@ -34,7 +35,7 @@ const fail = (title: string, error: unknown) =>
 
 /** "1 save", "1,204 saves". */
 export function saveCount(count: number): string {
-	return `${count.toLocaleString()} ${count === 1 ? "save" : "saves"}`;
+	return `${formatCount(count)} ${count === 1 ? "save" : "saves"}`;
 }
 
 /** A built-in whose description is no longer the shipped one. */

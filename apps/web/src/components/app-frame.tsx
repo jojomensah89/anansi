@@ -4,6 +4,8 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { Info } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import type { Shelf } from "../lib/api.ts";
+import { formatCount } from "../lib/format.ts";
+import { useLibraryStats } from "../lib/library-query.ts";
 import { useShelves } from "../lib/shelf-queries.ts";
 import { ShelfIcon } from "./shelf-icons.tsx";
 import { settingsSection, settingsSectionForHash } from "../lib/settings-sections.ts";
@@ -17,7 +19,7 @@ import { SyncControls } from "./sync-controls.tsx";
 /**
  * The frame every page shares, beside the rail: a slim bar that says where you
  * are and whether the extension is reachable, and a pill in the corner while
- * background work runs. The rail renders it so pages get it without wiring.
+ * background work runs. The app shell (routes/_app.tsx) renders both once.
  */
 
 interface Crumb {
@@ -47,7 +49,11 @@ function crumbsFor(path: string, hash: string, search: Record<string, unknown>, 
 	return [{ label: names[clean] ?? "Anansi" }];
 }
 
-export function AppTopBar({ total, archived, ready }: { total: number; archived: number; ready: boolean }) {
+export function AppTopBar() {
+	const stats = useLibraryStats();
+	const total = stats.data?.items ?? 0;
+	const archived = stats.data?.archived ?? 0;
+	const ready = stats.isSuccess;
 	const location = useRouterState({ select: (state) => state.location });
 	const search = (location.search ?? {}) as Record<string, unknown>;
 	const shelves = useShelves();
@@ -69,8 +75,11 @@ export function AppTopBar({ total, archived, ready }: { total: number; archived:
 								<li className="app-crumb">
 									{crumb.to && !last ? (
 										<Link to={crumb.to} className="app-crumb-link">{crumb.label}</Link>
+									) : last ? (
+										// Where you are is the page's title: every page gets its one h1 here.
+										<h1 aria-current="page" className={crumb.icon ? "app-crumb-title app-crumb-with-icon" : "app-crumb-title"}>{crumb.icon}{crumb.label}</h1>
 									) : (
-										<span aria-current={last ? "page" : undefined} className={crumb.icon ? "app-crumb-with-icon" : undefined}>{crumb.icon}{crumb.label}</span>
+										<span className={crumb.icon ? "app-crumb-with-icon" : undefined}>{crumb.icon}{crumb.label}</span>
 									)}
 								</li>
 							</Fragment>
@@ -79,7 +88,7 @@ export function AppTopBar({ total, archived, ready }: { total: number; archived:
 				</ol>
 				{libraryCount !== null && (
 					<span className="app-crumb-count">
-						{ready ? <>{libraryCount.toLocaleString("en-GB")}<span className="sr-only"> saves</span></> : slow ? <CountBone digits={4} height={8} /> : null}
+						{ready ? <>{formatCount(libraryCount)}<span className="sr-only"> saves</span></> : slow ? <CountBone digits={4} height={8} /> : null}
 					</span>
 				)}
 			</nav>

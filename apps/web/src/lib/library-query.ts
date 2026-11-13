@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { api, type ItemQuery, type ItemRow, type Page } from "./api.ts";
 
@@ -156,4 +156,20 @@ export function useLibraryQuery({
       return [...pages].reverse().find((page) => page.semantic)?.semantic;
     }, [result.data?.pages]),
   };
+}
+
+/**
+ * The library's counts: the rail, the top bar, the palette and the change
+ * probe all read this one query. The app shell keeps an observer mounted on
+ * every page, so the numbers are cached across navigation and a page never
+ * starts from blank counts.
+ */
+export function useLibraryStats() {
+  return useQuery({
+    queryKey: libraryKeys.stats(),
+    queryFn: ({ signal }) => api.stats(signal),
+    retry: 1,
+    staleTime: 15_000,
+    ...libraryFreshnessOptions,
+  });
 }

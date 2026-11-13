@@ -1,3 +1,4 @@
+import { Button } from "@anansi/ui/components/button";
 import { ToggleGroup, ToggleGroupItem } from "@anansi/ui/components/toggle-group";
 import { CardFooter } from "./card.tsx";
 import { WebPreviewCard } from "./web-preview-card.tsx";
@@ -18,33 +19,16 @@ import type { ViewMode } from "../lib/library-search.ts";
 
 /* ---------------------------------------------------------------- Row --- */
 
+const label = (item: ItemRow) => item.title ?? item.authorName ?? item.author ?? "saved item";
+
 export function RowView({ items, onOpen, onChanged }: { items: ItemRow[]; onChanged?: () => void; onOpen: (i: ItemRow) => void }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
+    <div className="library-rows">
       {items.map((item) => {
         const thumb = item.media?.[0] ?? item.quoted?.media?.[0];
         return (
-          <div
-            key={item.id}
-            role="button"
-            tabIndex={0}
-            onKeyDown={event=>{if(event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {event.preventDefault();onOpen(item);}}}
-            onClick={() => onOpen(item)}
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 13,
-              padding: "12px 8px",
-              width: "100%",
-              textAlign: "left",
-              background: "transparent",
-              border: "none",
-              borderBottom: "1px solid var(--line-soft)",
-              cursor: "pointer",
-              font: "inherit",
-              color: "inherit",
-            }}
-          >
+          <article key={item.id} className="library-row" aria-label={label(item)}>
+            <Button variant="ghost" type="button" className="anansi-card-open" aria-label={`Open ${label(item)}`} onClick={() => onOpen(item)} />
             {item.source === "web" ? <WebPreviewCard item={item} compact onPreview={onChanged} footer={<CardFooter item={item} onOpen={onOpen} onChanged={()=>onChanged?.()} />} /> : thumb ? (
               <span style={{ position: "relative", flexShrink: 0 }}>
                 <img
@@ -102,7 +86,7 @@ export function RowView({ items, onOpen, onChanged }: { items: ItemRow[]; onChan
               {/* The placeholder tile already shows the mark; keep the column so dates still line up. */}
               {!thumb && <span aria-hidden="true" style={{ width: 20, flexShrink: 0 }} />}
             </span>}
-          </div>
+          </article>
         );
       })}
     </div>

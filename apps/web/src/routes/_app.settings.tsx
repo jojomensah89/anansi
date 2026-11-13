@@ -1,7 +1,5 @@
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Bot, Database, KeyRound, Library, type LucideIcon, Sparkles } from "lucide-react";
-import { Rail } from "../components/rail.tsx";
-import { useLibraryStats } from "../components/settings-sections.tsx";
 import { SETTINGS_SECTIONS, type SettingsSectionId } from "../lib/settings-sections.ts";
 
 /**
@@ -9,7 +7,7 @@ import { SETTINGS_SECTIONS, type SettingsSectionId } from "../lib/settings-secti
  * right. Each area has its own URL (`/settings/ai`); `/settings` goes to the
  * first. The top bar names the page, so the content carries no title of its own.
  */
-export const Route = createFileRoute("/settings")({ component: SettingsLayout });
+export const Route = createFileRoute("/_app/settings")({ component: SettingsLayout });
 
 const ICONS: Record<SettingsSectionId, LucideIcon> = {
 	library: Library,
@@ -20,22 +18,17 @@ const ICONS: Record<SettingsSectionId, LucideIcon> = {
 };
 
 function SettingsLayout() {
-	const stats = useLibraryStats();
-	const counts = stats.data;
 	return (
-		<div className="anansi-shell">
-			<Rail total={counts?.items ?? 0} authors={counts?.authors ?? 0} archived={counts?.archived ?? 0} bySource={counts?.bySource ?? {}} ready={counts !== undefined} />
-			<main className="workspace-page settings-page">
-				<div className="scroll settings-scroll">
-					<div className="settings-frame">
-						<SettingsNav />
-						<div className="settings-content">
-							<Outlet />
-						</div>
+		<main className="workspace-page settings-page">
+			<div className="scroll settings-scroll">
+				<div className="settings-frame">
+					<SettingsNav />
+					<div className="settings-content">
+						<Outlet />
 					</div>
 				</div>
-			</main>
-		</div>
+			</div>
+		</main>
 	);
 }
 

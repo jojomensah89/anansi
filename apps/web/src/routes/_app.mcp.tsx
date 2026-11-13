@@ -8,7 +8,7 @@ import { serverEnv } from "../server/env.ts";
  * by configured clients. Both live at the same public endpoint so setup copy
  * and client configuration cannot drift apart.
  */
-export const Route = createFileRoute("/mcp")({
+export const Route = createFileRoute("/_app/mcp")({
   component: McpServerPage,
   server: {
     handlers: {

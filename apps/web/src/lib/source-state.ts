@@ -1,4 +1,5 @@
 import type { ExtensionHealth, SourceRow } from "./api.ts";
+import { formatCount } from "./format.ts";
 
 export type SourceState =
 	| "coming_next"
@@ -22,7 +23,7 @@ export interface SourcePresentation {
 }
 
 function plural(count: number, word: string): string {
-	return `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
+	return `${formatCount(count)} ${word}${count === 1 ? "" : "s"}`;
 }
 
 const PLATFORM: Record<string, string> = { x: "X", reddit: "Reddit", github: "GitHub", tiktok: "TikTok" };
