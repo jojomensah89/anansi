@@ -19,6 +19,9 @@ import {
 import { createRelayHandshake } from "../lib/relay-handshake.ts";
 import { captureSourceFromUrl } from "../lib/platforms/registry.ts";
 import { createSaveToast, deliverWithConfirmation, rejectedSaveAction } from "../lib/save-toast.ts";
+import { importScreenCopy, parseImportScreenCommand } from "../lib/import-screen.ts";
+import { createImportOverlay } from "../lib/import-overlay.ts";
+import markSrc from "../public/icon/96.png?inline";
 
 export default defineContentScript({
   matches: [
@@ -85,7 +88,22 @@ export default defineContentScript({
       } else void browser.runtime.sendMessage(parsed.message).catch(() => {});
     });
 
+    // Drawn only when the worker says this is a tab it opened for an import.
+    const importScreen = createImportOverlay({
+      document,
+      markSrc,
+      onClose: () =>
+        void browser.runtime
+          .sendMessage({ anansi: "import-screen", action: "close" })
+          .catch(() => {}),
+    });
+
     browser.runtime.onMessage.addListener((message: unknown) => {
+      const screen = parseImportScreenCommand(message);
+      if (screen) {
+        importScreen.render(importScreenCopy(screen));
+        return Promise.resolve(true);
+      }
       const incoming = message as {
         anansi?: unknown;
         action?: unknown;

@@ -78,6 +78,15 @@ describe("public and private WXT build modes", () => {
 		).toThrow("Server origin");
 	});
 
+	test("store is a public build: it never bakes in a connection", () => {
+		expect(resolveExtensionBuildMode("store")).toBe("store");
+		for (const command of ["prepare", "build", "zip"]) {
+			expect(
+				connectionForWxtConfig(validOrigin, validToken, command, "store"),
+			).toBeNull();
+		}
+	});
+
 	test("prepare can generate types without a configured private connection", () => {
 		expect(
 			connectionForWxtConfig(undefined, undefined, "prepare", "private"),

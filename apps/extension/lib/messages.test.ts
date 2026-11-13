@@ -318,6 +318,31 @@ describe("parseExtensionMessage", () => {
 		).toMatchObject({ ok: true, source: null });
 	});
 
+	test("licence commands come only from the popup, and activation carries only a key", () => {
+		for (const action of ["licence-status", "licence-check", "licence-deactivate"]) {
+			const command = { anansi: "popup-command", messageVersion: MESSAGE_PROTOCOL_VERSION, action };
+			expect(parseExtensionMessage(command, extensionRuntimeContext)).toMatchObject({ ok: true });
+			expect(
+				parseExtensionMessage(command, tabRuntimeContext("https://www.reddit.com/user/example/saved")),
+			).toMatchObject({ ok: false, error: { code: "direction_mismatch" } });
+		}
+		const activate = {
+			anansi: "popup-command",
+			messageVersion: MESSAGE_PROTOCOL_VERSION,
+			action: "licence-activate",
+			licenceKey: "ANANSI-1111-2222",
+		};
+		expect(parseExtensionMessage(activate, extensionRuntimeContext)).toMatchObject({ ok: true });
+		for (const bad of [
+			{ ...activate, licenceKey: 42 },
+			{ ...activate, licenceKey: undefined },
+			{ ...activate, licenceKey: "A".repeat(257) },
+			{ ...activate, source: "x" },
+		]) {
+			expect(parseExtensionMessage(bad, extensionRuntimeContext)).toMatchObject({ ok: false });
+		}
+	});
+
 	test("the popup's capture switch names one platform source and a boolean", () => {
 		const toggle = { anansi: "popup-command", messageVersion: MESSAGE_PROTOCOL_VERSION, action: "set-source", source: "tiktok", enabled: false };
 		expect(parseExtensionMessage(toggle, extensionRuntimeContext)).toMatchObject({ ok: true, source: "tiktok" });

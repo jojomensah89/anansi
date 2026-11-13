@@ -5,7 +5,12 @@ export interface ExtensionConnection {
 	readonly token: string;
 }
 
-export type ExtensionBuildMode = "public" | "private";
+/**
+ * public: what anyone builds from source. private: the owner's build with a
+ * baked connection. store: the prebuilt Web Store package, a public build in
+ * every respect except that it asks for a licence key.
+ */
+export type ExtensionBuildMode = "public" | "private" | "store";
 
 const CONNECTION_KEY = "anansiConnection";
 const DISCONNECTED_KEY = "anansiConnectionExplicitlyDisconnected";
@@ -44,7 +49,13 @@ export function validateExtensionConnection(
 export function resolveExtensionBuildMode(value: unknown): ExtensionBuildMode {
 	if (value === undefined || value === "" || value === "public") return "public";
 	if (value === "private") return "private";
-	throw new Error("ANANSI_EXTENSION_BUILD_MODE must be public or private");
+	if (value === "store") return "store";
+	throw new Error("ANANSI_EXTENSION_BUILD_MODE must be public, private or store");
+}
+
+/** Only the store build checks a licence; source builds never do. */
+export function licenceRequiredForMode(mode: ExtensionBuildMode): boolean {
+	return mode === "store";
 }
 
 /**
@@ -60,7 +71,8 @@ export function connectionForWxtConfig(
 	modeValue: unknown = "public",
 ): ExtensionConnection | null {
 	const mode = resolveExtensionBuildMode(modeValue);
-	if (mode === "public") return null;
+	// The store package ships unconfigured, exactly like a public build.
+	if (mode === "public" || mode === "store") return null;
 
 	if (typeof command === "string" && command.toLowerCase() === "prepare") {
 		try {
