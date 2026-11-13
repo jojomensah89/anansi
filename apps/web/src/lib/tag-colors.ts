@@ -1,4 +1,5 @@
-import { useSyncExternalStore } from "react";
+import { useContext, useEffect } from "react";
+import { useQuery, QueryClientContext, QueryClient } from "@tanstack/react-query";
 import { api } from "./api.ts";
 
 /**
@@ -63,44 +64,32 @@ export function topicColor(key: string): string {
 type Kinds = ReadonlyMap<string, "topic" | "custom">;
 
 const EMPTY: Kinds = new Map();
-let kinds: Kinds = EMPTY;
-let loading: Promise<void> | null = null;
-let loadedAt = 0;
-const listeners = new Set<() => void>();
+const standaloneClient = new QueryClient();
+const clients = new Map<QueryClient, number>();
+function keyOf(label: string): string { return label.trim().toLowerCase(); }
+const selectKinds = (data: Awaited<ReturnType<typeof api.tags>>): Kinds =>
+ new Map(data.tags.map(tag => [keyOf(tag.label), tag.kind]));
 
-function keyOf(label: string): string {
-	return label.trim().toLowerCase();
-}
-
+/** Compatibility for callers that already have fresh tag data. */
 export function setTagKinds(tags: { label: string; kind: "topic" | "custom" }[]): void {
-	kinds = new Map(tags.map((tag) => [keyOf(tag.label), tag.kind]));
-	loadedAt = Date.now();
-	for (const listener of listeners) listener();
+ for (const client of clients.keys()) client.setQueryData(["tags"], { tags });
 }
-
-/** Ask again, at most once a minute; a tag edit can call it after saving. */
+/** Existing edit handlers now invalidate the same cache as every tag query. */
 export function refreshTagKinds(force = false): void {
-	if (loading || (!force && loadedAt && Date.now() - loadedAt < 60_000)) return;
-	loading = api
-		.tags()
-		.then((result) => setTagKinds(result.tags))
-		.catch(() => {})
-		.finally(() => {
-			loading = null;
-		});
+ for (const client of clients.keys()) {
+  if (force) void client.invalidateQueries({ queryKey: ["tags"] });
+  else void client.prefetchQuery({ queryKey: ["tags"], queryFn: ({ signal }) => api.tags(signal), staleTime: 60_000 });
+ }
 }
-
-function subscribe(listener: () => void): () => void {
-	listeners.add(listener);
-	refreshTagKinds();
-	return () => listeners.delete(listener);
-}
-
-const snapshot = () => kinds;
-const serverSnapshot = () => EMPTY;
-
 export function useTagKinds(): Kinds {
-	return useSyncExternalStore(subscribe, snapshot, serverSnapshot);
+ const providerClient = useContext(QueryClientContext);
+ const client = providerClient ?? standaloneClient;
+ useEffect(() => {
+  if (!providerClient) return;
+  clients.set(client, (clients.get(client) ?? 0) + 1);
+  return () => { const count = (clients.get(client) ?? 1) - 1; if (count) clients.set(client, count); else clients.delete(client); };
+ }, [client, providerClient]);
+ return useQuery({ queryKey: ["tags"], queryFn: ({ signal }) => api.tags(signal), select: selectKinds, staleTime: 60_000, retry: false, enabled: !!providerClient }, client).data ?? EMPTY;
 }
 
 export function isTopic(kindsMap: Kinds, label: string): boolean {

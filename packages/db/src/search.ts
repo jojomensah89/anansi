@@ -263,7 +263,7 @@ export async function searchItemsPage(db: AnansiDb, opts: SearchOptions): Promis
       and ${visibleSourceClause(sql`i.source`)}
       ${anyOf(sql`i.source`, opts.source)}
       ${anyOf(sql`i.author_handle`, opts.author)}
-      ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+      ${tagClause(opts.tag)} ${archiveClause(opts.archived ?? opts.shelf?.rule?.archived)}
       ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
       ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
       ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
@@ -305,7 +305,7 @@ export async function hydrateSearchItems(
       and ${visibleSourceClause(sql`i.source`)}
       ${anyOf(sql`i.source`, opts.source)}
       ${anyOf(sql`i.author_handle`, opts.author)}
-      ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+      ${tagClause(opts.tag)} ${archiveClause(opts.archived ?? opts.shelf?.rule?.archived)}
       ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
       ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
       ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
@@ -373,7 +373,7 @@ export async function hydrateSemanticChunkMatches(
 		  and ${visibleSourceClause(sql`i.source`)}
 		  ${anyOf(sql`i.source`, opts.source)}
 		  ${anyOf(sql`i.author_handle`, opts.author)}
-		  ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+		  ${tagClause(opts.tag)} ${archiveClause(opts.archived ?? opts.shelf?.rule?.archived)}
 		  ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
 		  ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
 		  and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
@@ -869,11 +869,11 @@ function queryClause(query: string | undefined): SQL {
  * The grid and every shelf rule go through this one builder, so a shelf
  * always holds exactly what the same filters show in the library.
  */
-export function libraryFilterClause(opts: LibraryFilter, hasNsfw = true): SQL {
+export function libraryFilterClause(opts: LibraryFilter & { shelf?: ShelfScope }, hasNsfw = true): SQL {
   return sql`${anyOf(sql`i.source`, opts.source)}
       ${anyOf(sql`i.author_handle`, opts.author)}
       ${tagClause(opts.tag)}
-      ${archiveClause(opts.archived)}
+      ${archiveClause(opts.archived ?? opts.shelf?.rule?.archived)}
       ${removedClause(opts.removed)}
       ${mediaClause(opts.media)}
       ${typeClause(opts.contentType)}

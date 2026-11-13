@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import type { ItemRow, Page, Shelf } from "./api.ts";
 import { libraryKeys } from "./library-query.ts";
-import { applyMembership, applyReorder, restoreMembership, sendMembership } from "./shelf-queries.ts";
+import { applyMembership, applyReorder, restoreMembership, sendMembership, sendMembershipAndCache } from "./shelf-queries.ts";
 import { shelfKeys } from "./shelves.ts";
 
 const shelf = (id: string, position: number, count = 10): Shelf => ({
@@ -83,4 +83,14 @@ test("a large selection is sent in batches of 500, and the last reply's shelf wi
 	expect(bodies.map((body) => [body.itemIds.length, body.action])).toEqual([[500, "add"], [500, "add"], [100, "add"]]);
 	expect(result.changed).toBe(1100);
 	expect(result.shelf?.count).toBe(300);
+});
+
+test("creating with attached saves replaces the cached zero count", async () => {
+ const client = new QueryClient(); const created = shelf("new", 0, 0);
+ client.setQueryData(shelfKeys.list(), { shelves: [created] });
+ globalThis.fetch = (async () => Response.json({ changed: 2, shelf: { ...created, count: 2 } })) as unknown as typeof fetch;
+ const result = await sendMembershipAndCache(client, { shelf: created, itemIds: ["a", "b"], on: true });
+ expect(result.shelf?.count).toBe(2);
+ expect(client.getQueryData<{ shelves: Shelf[] }>(shelfKeys.list())!.shelves[0]!.count).toBe(2);
+ expect(client.getQueryState(shelfKeys.list())!.isInvalidated).toBe(true);
 });

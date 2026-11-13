@@ -69,7 +69,7 @@ describe("shelf membership", () => {
 		const db = openTestDb();
 		const id = await seed(db, ["a", "b"]);
 		// Filters that narrow nothing leave the shelf hand-filled.
-		expect(shelfRule({ removed: "exclude", order: "saved", archived: false, favorite: false })).toBeNull();
+		expect(shelfRule({ removed: "include", order: "saved", archived: false, favorite: false })).toBeNull();
 		const shelf = await createShelf(db, { name: "Picks", filters: { removed: "include" } });
 		expect(shelf.count).toBe(0);
 		await changeShelfItems(db, shelf.id, [id.b!], "add");
@@ -257,4 +257,14 @@ describe("shelf backup", () => {
 		backup.shelfItems[0].shelfId = "missing";
 		expect(() => validateRestoreBackup(backup)).toThrow("shelfItems");
 	});
+});
+
+test("still-saved and archived rules populate counts and views", async () => {
+ const db = openTestDb(); const ids = await seed(db, ["live", "archived"]);
+ await setArchived(db, [ids.archived!], true);
+ for (const [filters, expected] of [[{ removed: "exclude" }, ids.live], [{ archived: true }, ids.archived]] as const) {
+  const shelf = await createShelf(db, { name: "Rule", filters });
+  expect(shelf.count).toBe(1);
+  expect(await shelfIds(db, shelf.id)).toEqual([expected!]);
+ }
 });

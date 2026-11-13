@@ -95,6 +95,7 @@ test("creating a shelf without a rule sends an empty rule and says how to fill i
 });
 
 test("creating with the library's filters shows them in plain words; Remove rule drops them", async () => {
+	client.setQueryData(["tags"], { tags: [{ label: "Design", kind: "topic", color: "", count: 4 }] });
 	await render(createElement(dialogMod.ShelfDialog, { request: { rule: { source: ["reddit"], tag: ["Design"] } }, currentRule: { source: ["reddit"], tag: ["Design"] }, onClose: () => {} }));
 	await settle();
 	expect(document.querySelector(".shelf-rule-text")!.textContent).toBe("Source is Reddit · Topic is Design");

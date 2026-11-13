@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -15,7 +16,7 @@ import { Input } from "@anansi/ui/components/input";
 import { Label } from "@anansi/ui/components/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@anansi/ui/components/table";
 import { AlertCircle, Bot, Check, ChevronDown, ChevronRight, Copy, KeyRound, MoreHorizontal, Pencil, Plus, RotateCcw } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ClientWritePermission } from "./client-write-permission.tsx";
 
@@ -82,8 +83,9 @@ type Create = { kind: KeyKind; key: string | null };
  * extension's capture keys, and the old shared token while it is still live.
  */
 export function ConnectedClients() {
-	const [data, setData] = useState<{ clients: Client[]; legacyActive: boolean } | null>(null);
-	const [loadError, setLoadError] = useState("");
+	const clientsQuery = useQuery({ queryKey: ["clients"], queryFn: () => call(), retry: false });
+	const data = clientsQuery.data ?? null;
+	const loadError = clientsQuery.error?.message ?? "";
 	const [busy, setBusy] = useState(false);
 	const [create, setCreate] = useState<Create | null>(null);
 	const [name, setName] = useState("");
@@ -92,13 +94,8 @@ export function ConnectedClients() {
 	const [confirm, setConfirm] = useState<Confirm | null>(null);
 	const gate = useRef(false);
 
-	const refresh = async () => {
-		const next = await call();
-		setData(next);
-		setLoadError("");
-	};
-	const load = () => void refresh().catch((e: Error) => setLoadError(e.message));
-	useEffect(load, []);
+	const refresh = () => clientsQuery.refetch({ throwOnError: true });
+	const load = () => void refresh().catch(() => undefined);
 
 	/** One request at a time. A failure is a toast; the dialog stays open to try again. */
 	async function action(failure: string, work: () => Promise<void>) {

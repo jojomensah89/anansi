@@ -1,8 +1,9 @@
+import { parseShelfRule as shelfRule } from "./shelf-rule.ts";
 import { asc, eq, sql, type SQL } from "drizzle-orm";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { mutationChanges } from "./ai-jobs.ts";
 import { collections, shelfSuggestionDismissals } from "./schema.ts";
-import { libraryFilterClause, shelfMembership, type LibraryFilter, type ShelfScope } from "./search.ts";
+import { libraryFilterClause, shelfMembership, type ShelfScope } from "./search.ts";
 import { activeTopics } from "./topic-settings.ts";
 import type { AnansiDb } from "./types.ts";
 import { visibleSourceClause } from "./visibility.ts";
@@ -60,42 +61,7 @@ const dialect = new SQLiteSyncDialect();
 const paramCount = (query: SQL) => dialect.sqlToQuery(query).params.length;
 const now = () => Math.floor(Date.now() / 1000);
 
-function textList(value: unknown): string[] {
-	const list = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
-	return [...new Set(list.filter((entry): entry is string => typeof entry === "string" && entry.length > 0 && entry.length <= 200))];
-}
-
-/**
- * Read stored filters as a rule. Both the library URL's `type` and the query
- * layer's `contentType` are accepted. Returns null when nothing in them
- * narrows the library, which makes the shelf hand-filled only.
- */
-export function shelfRule(filters: unknown): LibraryFilter | null {
-	if (!filters || typeof filters !== "object" || Array.isArray(filters)) return null;
-	const raw = filters as Record<string, unknown>;
-	const rule: LibraryFilter = {};
-	const source = textList(raw.source);
-	const author = textList(raw.author);
-	const tag = textList(raw.tag);
-	const contentType = textList(raw.contentType ?? raw.type);
-	if (source.length) rule.source = source;
-	if (author.length) rule.author = author;
-	if (tag.length) rule.tag = tag;
-	if (contentType.length) rule.contentType = contentType;
-	if (typeof raw.media === "string" && ["any", "image", "video", "none"].includes(raw.media)) rule.media = raw.media;
-	// The library reads these two only when they are switched on.
-	if (raw.favorite === true) rule.favorite = true;
-	if (raw.nsfw === true) rule.nsfw = true;
-	if (raw.archived === true) rule.archived = true;
-	if (raw.removed === "exclude" || raw.removed === "only") rule.removed = raw.removed;
-	if (typeof raw.query === "string" && raw.query.trim()) rule.query = raw.query.trim().slice(0, 500);
-	if (typeof raw.since === "number" && Number.isFinite(raw.since)) rule.since = raw.since;
-	if (typeof raw.until === "number" && Number.isFinite(raw.until)) rule.until = raw.until;
-	const narrows = Boolean(rule.source || rule.author || rule.tag || rule.contentType || rule.media || rule.favorite || rule.archived
-		|| rule.removed === "only" || rule.query || rule.since !== undefined || rule.until !== undefined);
-	return narrows ? rule : null;
-}
-
+export { parseShelfRule as shelfRule } from "./shelf-rule.ts";
 /** What gets stored: the client's filters without paging or a nested shelf. */
 function storedFilters(filters: unknown): ShelfFilters {
 	if (filters === undefined || filters === null) return {};
@@ -178,7 +144,7 @@ async function perShelf<Row>(db: AnansiDb, parts: SQL[]): Promise<Row[]> {
 /** What the shelf shows by default: visible, unarchived, safe-for-work saves. */
 function countPart(shelf: ShelfScope): SQL {
 	return sql`select ${shelf.id} as id, count(*) as n from items i
-		where ${visibleSourceClause(sql`i.source`)} and i.archived_at is null and coalesce(i.nsfw, 0) = 0
+		where ${visibleSourceClause(sql`i.source`)} ${shelf.rule?.archived ? sql`and i.archived_at is not null` : sql`and i.archived_at is null`} ${shelf.rule?.nsfw ? sql`` : sql`and coalesce(i.nsfw, 0) = 0`}
 		and ${shelfMembership(shelf)}`;
 }
 

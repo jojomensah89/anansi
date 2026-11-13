@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { act, createElement } from "react";
 import type { Root } from "react-dom/client";
@@ -53,7 +54,7 @@ function serve(initial: Row[], legacyActive = false) {
 }
 
 const settle = async () => { for (let i = 0; i < 5; i++) await act(async () => { await new Promise((r) => setTimeout(r, 20)); }); };
-const render = async () => { await act(async () => root.render(createElement(mod.ConnectedClients))); await settle(); };
+const render = async () => { await act(async () => root.render(createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }, createElement(mod.ConnectedClients)))); await settle(); };
 const button = (name: string) => [...document.querySelectorAll<HTMLElement>("button,[role=menuitem]")].find((b) => b.textContent?.trim() === name);
 const press = async (el: HTMLElement | undefined | null) => {
 	expect(el).toBeTruthy();

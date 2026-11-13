@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@anansi/ui/components/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@anansi/ui/components/dialog";
 import { Input } from "@anansi/ui/components/input";
@@ -5,7 +6,7 @@ import { Search } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SHELF_COLORS, type Shelf, type ShelfColor } from "../lib/api.ts";
-import { sendMembership, useSaveShelf } from "../lib/shelf-queries.ts";
+import { sendMembershipAndCache, useSaveShelf } from "../lib/shelf-queries.ts";
 import { describeRule, hasRule, shelfColor, type ShelfDialogRequest, type ShelfRule, topicShelfColor, topicShelfIcon } from "../lib/shelves.ts";
 import { useIsTopic } from "./tag-chip.tsx";
 import { searchShelfIcons, ShelfIcon } from "./shelf-icons.tsx";
@@ -34,10 +35,14 @@ export interface ShelfDialogProps {
 }
 
 export function ShelfDialog({ request, currentRule, onClose }: ShelfDialogProps) {
+	// The form leaves with its panel: the last request stays drawn while the
+	// dialog fades out, and is let go only once the close has finished.
+	const [shown, setShown] = useState(request);
+	if (request !== null && request !== shown) setShown(request);
 	return (
-		<Dialog open={request !== null} onOpenChange={(open) => !open && onClose()}>
+		<Dialog open={request !== null} onOpenChange={(open) => !open && onClose()} onOpenChangeComplete={(open) => { if (!open) setShown(null); }}>
 			<DialogContent className="shelf-dialog" showCloseButton={false}>
-				{request && <ShelfForm key={request.shelf?.id ?? "new"} request={request} currentRule={currentRule ?? null} onClose={onClose} />}
+				{shown && <ShelfForm key={shown.shelf?.id ?? "new"} request={shown} currentRule={currentRule ?? null} onClose={onClose} />}
 			</DialogContent>
 		</Dialog>
 	);
@@ -54,6 +59,7 @@ export function ShelfForm({ request, currentRule, onClose, onSubmitted }: { requ
 	const [icon, setIcon] = useState(editing?.icon ?? (topic ? topicShelfIcon(topic) : "folder"));
 	const [rule, setRule] = useState<ShelfRule>(editing?.filters ?? request.rule ?? {});
 	const save = useSaveShelf();
+	const client = useQueryClient();
 	const nameId = useId();
 
 	const parts = describeRule(rule, isTopic);
@@ -69,7 +75,8 @@ export function ShelfForm({ request, currentRule, onClose, onSubmitted }: { requ
 				onSuccess: async ({ shelf }) => {
 					if (request.itemIds?.length) {
 						try {
-							await sendMembership({ shelf, itemIds: request.itemIds, on: true });
+							const result = await sendMembershipAndCache(client, { shelf, itemIds: request.itemIds, on: true });
+							if (result.shelf) shelf = result.shelf;
 						} catch (error) {
 							toast.error(`Couldn't add to ${shelf.name}`, { description: error instanceof Error ? error.message : undefined });
 						}

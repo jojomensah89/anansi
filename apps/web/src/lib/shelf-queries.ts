@@ -138,6 +138,22 @@ export function restoreMembership(client: QueryClient, snapshot: MembershipSnaps
 	for (const [key, data] of snapshot.pages) client.setQueryData(key, data);
 }
 
+/** Cancel an earlier list fetch before writing the authoritative membership count. */
+export async function sendMembershipAndCache(client: QueryClient, change: MembershipChange) {
+ try {
+  const result = await sendMembership(change);
+  await client.cancelQueries({ queryKey: shelfKeys.list() });
+  if (result.shelf) {
+   const shelf = result.shelf;
+   client.setQueryData<ShelfList>(shelfKeys.list(), old => ({ shelves: (old?.shelves ?? []).some(s => s.id === shelf.id)
+    ? old!.shelves.map(s => s.id === shelf.id ? shelf : s) : [...(old?.shelves ?? []), shelf] }));
+  }
+  return result;
+ } finally {
+  void client.invalidateQueries({ queryKey: shelfKeys.list() });
+ }
+}
+
 /** Up to 500 ids per request, in order; the last reply carries the shelf's new count. */
 export async function sendMembership({ shelf, itemIds, on }: MembershipChange): Promise<{ changed: number; shelf: Shelf | null }> {
 	let changed = 0;

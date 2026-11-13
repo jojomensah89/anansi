@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { sourceLabel, type ItemQuery, type Shelf, type ShelfColor, type ShelfInput, type ShelfSuggestion } from "./api.ts";
+import { type ItemQuery, type Shelf, type ShelfColor, type ShelfInput, type ShelfSuggestion } from "./api.ts";
 import { libraryKeys } from "./library-query.ts";
 import { topicColorIndex } from "./tag-colors.ts";
 
@@ -91,49 +91,7 @@ export function visibleSuggestion(suggestions: readonly ShelfSuggestion[] | unde
 
 /* --------------------------------------------------------------- rule --- */
 
-const MEDIA_WORDS: Record<string, string> = { any: "Has media", image: "Has images", video: "Has video", none: "No media" };
-const TYPE_WORDS: Record<string, string> = { post: "Post", video: "Video", article: "Article", thread: "Thread reply", comment: "Comment", repo: "Repo" };
-
-function either(values: string[]): string {
-	if (values.length <= 1) return values[0] ?? "";
-	return `${values.slice(0, -1).join(", ")} or ${values[values.length - 1]}`;
-}
-
-/** Source names without the "bookmarks"/"stars" tail, which reads oddly mid-sentence. */
-function sourceWord(source: string): string {
-	return ({ x: "X", github: "GitHub", reddit: "Reddit", tiktok: "TikTok", web: "Web" } as Record<string, string>)[source] ?? sourceLabel(source);
-}
-
-/**
- * A rule in plain words, one clause per field: "Source is Reddit",
- * "Topic is Design or Science". `isTopic` decides whether a tag reads as a
- * topic or as one of the owner's tags.
- */
-export function describeRule(rule: ShelfRule | null | undefined, isTopic: (label: string) => boolean = () => false): string[] {
-	if (!rule) return [];
-	const parts: string[] = [];
-	if (rule.query?.trim()) parts.push(`Matches “${rule.query.trim()}”`);
-	if (rule.source?.length) parts.push(`Source is ${either(rule.source.map(sourceWord))}`);
-	if (rule.tag?.length) {
-		const topics = rule.tag.filter(isTopic);
-		const tags = rule.tag.filter((label) => !isTopic(label));
-		if (topics.length) parts.push(`Topic is ${either(topics)}`);
-		if (tags.length) parts.push(`Tag is ${either(tags)}`);
-	}
-	if (rule.author?.length) parts.push(`Author is ${either(rule.author.map((handle) => `@${handle}`))}`);
-	if (rule.type?.length) parts.push(`Type is ${either(rule.type.map((type) => TYPE_WORDS[type] ?? type))}`);
-	if (rule.media) parts.push(MEDIA_WORDS[rule.media] ?? `Media is ${rule.media}`);
-	if (rule.favorite) parts.push("Favorites");
-	if (rule.archived) parts.push("Archived");
-	if (rule.removed === "exclude") parts.push("Still saved");
-	if (rule.removed === "only") parts.push("Removed at source");
-	return parts;
-}
-
-/** A rule that narrows nothing means the shelf is filled by hand. */
-export function hasRule(rule: ShelfRule | null | undefined): boolean {
-	return describeRule(rule).length > 0;
-}
+export { describeRule, hasRule } from "@anansi/db/shelf-rule";
 
 /**
  * The library's filters, kept only where they narrow: what a shelf stores as
