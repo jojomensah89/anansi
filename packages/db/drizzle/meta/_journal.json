@@ -232,6 +232,13 @@
       "when": 1794787200000,
       "tag": "0032_topics_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1794873600000,
+      "tag": "0033_shelves_and_topics",
+      "breakpoints": true
     }
   ]
 }

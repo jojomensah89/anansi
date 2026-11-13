@@ -146,9 +146,11 @@ export interface AiTagResult {
 /**
  * Replace the AI topics of every save in a batch. Each statement only touches
  * saves whose job this caller still holds, so a claim lost to an expired
- * lease cannot write. Manual tags and suppressed topics are left alone.
+ * lease cannot write. Manual tags and suppressed topics are left alone, and
+ * so are the tags in `keepTagIds`: topics the owner switched off keep what
+ * they already gave.
  */
-export async function publishAiTags(db: AnansiDb, results: readonly AiTagResult[], model: string, token: string, now = nowSeconds()): Promise<void> {
+export async function publishAiTags(db: AnansiDb, results: readonly AiTagResult[], model: string, token: string, now = nowSeconds(), keepTagIds: readonly string[] = []): Promise<void> {
 	if (results.length === 0) return;
 	const jobIds = JSON.stringify(results.map((result) => result.jobId));
 	const topics = new Map(results.flatMap((result) => result.topics.map((topic) => [topic.id, topic] as const)));
@@ -164,7 +166,7 @@ export async function publishAiTags(db: AnansiDb, results: readonly AiTagResult[
 			ON CONFLICT(id) DO UPDATE SET kind = 'topic', color = excluded.color WHERE tags.kind != 'topic'`);
 	}
 	await db.run(sql`
-		DELETE FROM item_tags WHERE provenance = 'ai' AND item_id IN (
+		DELETE FROM item_tags WHERE provenance = 'ai' AND tag_id NOT IN (SELECT value FROM json_each(${JSON.stringify(keepTagIds)})) AND item_id IN (
 			SELECT item_id FROM ai_enrichment_jobs
 			WHERE claim_token = ${token} AND status = 'running' AND id IN (SELECT value FROM json_each(${jobIds}))
 		)`);

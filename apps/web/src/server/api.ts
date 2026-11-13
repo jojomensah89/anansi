@@ -29,6 +29,8 @@ import {
 	getLibraryRestore,
   getAiSettings, setAiSettings, reconcileAiJobs, aiProgress, aiProgressAll, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
   clearSemanticIndex, estimateSemanticBackfill, semanticIndexStats,
+  ShelfError, changeShelfItems, createShelf, deleteShelf, dismissShelfSuggestion, listShelves, reorderShelves, shelfScope, shelfSuggestions, shelvesForItem, updateShelf,
+  TopicSettingsError, createTopic, deleteTopic, requeueTagging, topicSettings, updateTopic, TOPIC_LIMIT,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
 import { authorizeLibrary, sessionRoute, renewSession, type LibraryAuthEnv } from "./library-auth.ts";
@@ -143,8 +145,12 @@ const itemsRoute: Route = {
       if (env.waitUntil) env.waitUntil(quiet); else void quiet;
     }
 		try {
+			const shelfId = q.get("shelf");
+			const shelf = shelfId ? await shelfScope(env.db, shelfId) : undefined;
+			if (shelfId && !shelf) return json({ error: "No such shelf" }, 404);
 			return json(
 				await previewState(env.db, await listItems(env.db, {
+					shelf: shelf ?? undefined,
 					cursor: q.get("cursor") ?? undefined,
 					// Repeated params, so ?source=x&source=tiktok is "either of these".
 					// getAll returns [] for an absent param, which the query layer
@@ -180,7 +186,7 @@ const itemRoute: Route = {
 		if (!found) return json({ error: "not found" }, 404);
     const events = await env.db.all<{ observedAt: number; receivedAt: number; outcome: string }>(trailSql`select observed_at as observedAt, received_at as receivedAt, outcome from capture_events where item_id = ${found.id} order by received_at desc limit 1`);
     const jobs = await env.db.all<{ status: string; lastError: string | null }>(trailSql`select status, last_error as lastError from ai_enrichment_jobs where item_id = ${found.id} and kind = 'tagging' order by updated_at desc limit 1`);
-    return json({ ...found, captureTrail: events[0] ?? null, taggingState: jobs[0] ?? null });
+    return json({ ...found, captureTrail: events[0] ?? null, taggingState: jobs[0] ?? null, shelves: await shelvesForItem(env.db, found.id) });
 	},
 };
 
@@ -191,7 +197,11 @@ const searchRoute: Route = {
 		const query = q.get("q") ?? "";
 		if (!query.trim()) return json({ error: "q is required" }, 400);
         try {
+          const shelfId = q.get("shelf");
+          const shelf = shelfId ? await shelfScope(env.db, shelfId) : undefined;
+          if (shelfId && !shelf) return json({ error: "No such shelf" }, 404);
           const searchOptions: SearchOptions = {
+            shelf: shelf ?? undefined,
             query, source: q.getAll("source"), author: q.getAll("author"), tag: q.getAll("tag"),
             media: q.get("media") ?? undefined, contentType: q.getAll("type"),
             archived: q.get("archived") === "1", favorite: q.get("favorite") === "1" ? true : undefined,
@@ -714,6 +724,72 @@ const itemTagsRoute = (method: "POST" | "DELETE"): Route => ({
     return json({ok:true});
   }
 });
+/** Validation failures from the shelf and topic modules carry their own status. */
+async function guarded(work: () => Promise<Response>): Promise<Response> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof ShelfError || error instanceof TopicSettingsError) return json({ error: error.message }, error.status);
+    throw error;
+  }
+}
+const body = async (request: Request) => await request.json().catch(() => null) as Record<string, unknown> | null;
+
+/**
+ * Shelves. The older /api/collections routes below stay as aliases over the
+ * same rows, so a client mid-update keeps working.
+ */
+const shelfRoutes: Route[] = [
+  {method:"GET",path:"/api/shelves",handle:async({env})=>json({shelves:await listShelves(env.db)})},
+  {method:"POST",path:"/api/shelves",handle:({env,request})=>guarded(async()=>{
+    const input = await body(request);
+    if (!input) return json({error:"invalid shelf"},400);
+    return json({shelf:await createShelf(env.db,{name:input.name,color:input.color,icon:input.icon,filters:input.filters})});
+  })},
+  {method:"POST",path:"/api/shelves/reorder",handle:({env,request})=>guarded(async()=>{
+    const input = await body(request);
+    if (!Array.isArray(input?.ids) || input.ids.length > 500 || input.ids.some((id: unknown)=>typeof id !== "string")) return json({error:"expected { ids: [...] }"},400);
+    return json({shelves:await reorderShelves(env.db,input.ids as string[])});
+  })},
+  {method:"GET",path:"/api/shelves/suggestions",handle:async({env})=>json({suggestions:await shelfSuggestions(env.db)})},
+  {method:"POST",path:"/api/shelves/suggestions/dismiss",handle:({env,request})=>guarded(async()=>{
+    await dismissShelfSuggestion(env.db,(await body(request))?.topic);
+    return json({dismissed:true});
+  })},
+  {method:"PATCH",path:/^\/api\/shelves\/([\w-]+)$/,handle:({env,request,params})=>guarded(async()=>{
+    const input = await body(request);
+    if (!input) return json({error:"invalid shelf"},400);
+    return json({shelf:await updateShelf(env.db,params[0]!,{name:input.name,color:input.color,icon:input.icon,filters:input.filters})});
+  })},
+  {method:"DELETE",path:/^\/api\/shelves\/([\w-]+)$/,handle:async({env,params})=>await deleteShelf(env.db,params[0]!) ? json({deleted:true}) : json({error:"No such shelf"},404)},
+  {method:"POST",path:/^\/api\/shelves\/([\w-]+)\/items$/,handle:({env,request,params})=>guarded(async()=>{
+    const input = await body(request);
+    return json(await changeShelfItems(env.db,params[0]!,input?.itemIds,input?.action));
+  })},
+];
+
+/** The owner's topic list. Changing it never retags by itself; /api/ai/retag does. */
+const topicRoutes: Route[] = [
+  {method:"GET",path:"/api/ai/topics",handle:async({env})=>json({topics:await topicSettings(env.db),limit:TOPIC_LIMIT})},
+  {method:"POST",path:"/api/ai/topics",handle:({env,request})=>guarded(async()=>{
+    const input = await body(request);
+    if (!input) return json({error:"invalid topic"},400);
+    await createTopic(env.db,{label:input.label,description:input.description});
+    return json({topics:await topicSettings(env.db),limit:TOPIC_LIMIT});
+  })},
+  {method:"PATCH",path:/^\/api\/ai\/topics\/([\w-]+)$/,handle:({env,request,params})=>guarded(async()=>{
+    const input = await body(request);
+    if (!input) return json({error:"invalid topic"},400);
+    await updateTopic(env.db,params[0]!,{enabled:input.enabled,description:input.description});
+    return json({topics:await topicSettings(env.db),limit:TOPIC_LIMIT});
+  })},
+  {method:"DELETE",path:/^\/api\/ai\/topics\/([\w-]+)$/,handle:({env,params})=>guarded(async()=>{
+    await deleteTopic(env.db,params[0]!);
+    return json({topics:await topicSettings(env.db),limit:TOPIC_LIMIT});
+  })},
+  {method:"POST",path:"/api/ai/retag",handle:async({env})=>json({queued:await requeueTagging(env.db)})},
+];
+
 const collectionRoutes: Route[] = [
   {method:"GET",path:"/api/collections",handle:async({env})=>json({collections:await listCollections(env.db)})},
   {method:"POST",path:"/api/collections",handle:async({env,request})=>{
@@ -741,7 +817,7 @@ export const ROUTES: Route[] = [
   }},
 	...(["/api/restore/start", "/api/restore/chunk", "/api/restore/finish", "/api/restore/abort"] as const).map((path): Route => ({ method: "POST", path, handle: ({ env, request }) => handleRestoreRequest(env, request) })),
 	{ method: "GET", path: "/api/restore", handle: ({ env, request }) => handleRestoreRequest(env, request) },
-	itemUpdateRoute, itemTagsRoute("POST"), itemTagsRoute("DELETE"), ...collectionRoutes,
+	itemUpdateRoute, itemTagsRoute("POST"), itemTagsRoute("DELETE"), ...shelfRoutes, ...topicRoutes, ...collectionRoutes,
 	mediaRoute,
 	itemsRoute,
 	itemRoute,

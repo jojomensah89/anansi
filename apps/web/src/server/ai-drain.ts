@@ -25,10 +25,10 @@ import {
 	retireStaleSemanticChunks,
 	searchableText,
 	stageSemanticChunksBulk,
-	topicDefinition,
 	unqueuedAiItems,
+	listTopics,
 } from "@anansi/db";
-import { AiProviderError, type AiBinding, type VectorizeBinding, createVectorIndex, embedBatch, generateTagsBatch } from "./ai.ts";
+import { AiProviderError, type AiBinding, type VectorizeBinding, createVectorIndex, embedBatch, generateTagsBatch, tagPassLimit } from "./ai.ts";
 import { classifyAiJobFailure } from "./ai-job-runner.ts";
 
 /**
@@ -41,7 +41,7 @@ import { classifyAiJobFailure } from "./ai-job-runner.ts";
  * costs a fixed number of queries however many saves it carries.
  */
 
-/** Forty saves are eight packed Clef requests. */
+/** At most forty saves a pass; fewer when the topic list is long (see tagPassLimit). */
 export const TAG_DRAIN_LIMIT = 40;
 export const EMBED_DRAIN_LIMIT = 12;
 /** Chunks one pass will embed; saves beyond it go back to the queue. */
@@ -117,9 +117,15 @@ const describe = (error: unknown) => (error instanceof Error ? error.message : S
 async function drainTagging(db: AnansiDb, ai: AiBinding, settings: Settings, limit: number): Promise<AiDrainResult> {
 	const token = crypto.randomUUID();
 	const model = settings.tagModel;
-	const entries = await claimBatch(db, "tagging", model, limit, token, searchableText);
+	// The owner's list: built-ins left on, with their descriptions, plus their own topics.
+	const allTopics = await listTopics(db);
+	const active = allTopics.filter((topic) => topic.enabled);
+	// A longer list packs fewer saves per Clef call, so the pass takes fewer
+	// saves and the number of calls stays inside the subrequest budget.
+	const entries = await claimBatch(db, "tagging", model, tagPassLimit(model, active.length, limit), token, searchableText);
 	if (entries.length === 0) return { kind: "tagging", processed: 0, claimed: 0 };
-	const answers = await generateTagsBatch(ai, model, entries.map(({ item }) => searchableText(item)), 3);
+	const byId = new Map(active.map((topic) => [topic.id, topic]));
+	const answers = await generateTagsBatch(ai, model, entries.map(({ item }) => searchableText(item)), 3, active);
 	const tagged: { entry: Entry; topics: string[] }[] = [];
 	const failures: { job: ClaimedAiJob; code: AiJobFailureCode }[] = [];
 	let error: string | undefined;
@@ -134,8 +140,8 @@ async function drainTagging(db: AnansiDb, ai: AiBinding, settings: Settings, lim
 	await publishAiTags(db, tagged.map(({ entry, topics }) => ({
 		jobId: entry.job.id,
 		itemId: entry.item.id,
-		topics: topics.flatMap((id) => { const topic = topicDefinition(id); return topic ? [topic] : []; }),
-	})), model, token);
+		topics: topics.flatMap((id) => { const topic = byId.get(id); return topic ? [{ id: topic.id, label: topic.label, color: topic.color }] : []; }),
+	})), model, token, undefined, allTopics.filter((topic) => !topic.enabled).map((topic) => topic.tagId));
 	const processed = await completeClaimedAiJobs(db, tagged.map(({ entry }) => entry.job.id), token);
 	await failByCode(db, failures, token);
 	return { kind: "tagging", processed, claimed: entries.length, error };

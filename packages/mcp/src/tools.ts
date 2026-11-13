@@ -5,9 +5,11 @@ import {
 	getItems,
 	libraryStats,
 	listItems,
+	listShelves,
 	listTags,
 	recentSaves,
 	searchItemsPage,
+	shelfScope,
 } from "@anansi/db";
 import {
 	VISIBLE_LIBRARY_SOURCES,
@@ -208,7 +210,21 @@ const typeList = z.union([
 	z.array(MCP_CONTENT_TYPES).min(1).max(6),
 ]);
 
+const shelfArg = z
+	.string()
+	.trim()
+	.min(1)
+	.max(200)
+	.describe("Only saves on this shelf. An id from list_shelves.");
+
+/** Resolve a shelf argument; undefined when none was given, null when it does not exist. */
+async function shelfOption(db: AnansiDb, id: string | undefined) {
+	if (!id) return undefined;
+	return (await shelfScope(db, id)) ?? null;
+}
+
 const browseSchema = {
+	shelf: shelfArg.optional(),
 	source: sourceList.optional(),
 	author: textList.optional(),
 	tag: textList.optional(),
@@ -280,6 +296,7 @@ export function registerTools(server: McpServer, db: AnansiDb, beforeSearch?: ()
 					.min(1)
 					.max(500)
 					.describe("Words to search for. A trailing * does prefix matching."),
+				shelf: shelfArg.optional(),
 				source: sourceList.optional(),
 				author: textList.optional(),
 				tag: textList.optional(),
@@ -300,6 +317,8 @@ export function registerTools(server: McpServer, db: AnansiDb, beforeSearch?: ()
 			},
 		},
 		async (args) => {
+			const shelf = await shelfOption(db, args.shelf);
+			if (shelf === null) return json({ error: `no shelf with id ${args.shelf}` });
 			// Freshness is extra: a sync request that fails must not fail the search.
 			const freshness = beforeSearch
 				? await beforeSearch().catch(() => ({ unavailable: true }))
@@ -307,6 +326,7 @@ export function registerTools(server: McpServer, db: AnansiDb, beforeSearch?: ()
 			const result = await (options.search ?? ((opts: SearchOptions) => searchItemsPage(db,opts)) )({
 				query: args.query,
 				...listOptions(args),
+				shelf,
 			});
 			return json({
 				query: args.query,
@@ -371,7 +391,9 @@ export function registerTools(server: McpServer, db: AnansiDb, beforeSearch?: ()
 			inputSchema: browseSchema,
 		},
 		async (args) => {
-			const result = await listItems(db, listOptions(args));
+			const shelf = await shelfOption(db, args.shelf);
+			if (shelf === null) return json({ error: `no shelf with id ${args.shelf}` });
+			const result = await listItems(db, { ...listOptions(args), shelf });
 			return json({
 				count: result.items.length,
 				next_cursor: result.nextCursor,
@@ -441,6 +463,20 @@ export function registerTools(server: McpServer, db: AnansiDb, beforeSearch?: ()
 			inputSchema: {},
 		},
 		async () => json(await libraryStats(db)),
+	);
+
+	server.registerTool(
+		MCP_TOOL_CATALOG[8].name,
+		{
+			title: "List shelves",
+			description:
+				"List the owner's shelves in their order, with how many saves each holds. Pass a shelf id to list_saved or search_saved to look inside one.",
+			inputSchema: {},
+		},
+		async () => {
+			const shelves = await listShelves(db);
+			return json({ shelves: shelves.map((shelf) => ({ id: shelf.id, name: shelf.name, count: shelf.count })) });
+		},
 	);
 }
 

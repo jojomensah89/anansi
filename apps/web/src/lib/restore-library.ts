@@ -2,7 +2,7 @@ import type { RestoreTable } from "@anansi/db";
 import { validateRestoreBackup } from "@anansi/db/restore-preflight";
 import { api } from "./api.ts";
 
-const TABLES = ["items", "tags", "itemTags", "itemTagOverrides", "itemSourceLinks", "highlights", "media", "collections"] as const satisfies readonly RestoreTable[];
+const TABLES = ["items", "tags", "itemTags", "itemTagOverrides", "itemSourceLinks", "highlights", "media", "collections", "shelfItems", "aiTopics"] as const satisfies readonly RestoreTable[];
 const MAX_FILE_BYTES = 100_000_000;
 const MAX_CHUNK_BYTES = 1_500_000;
 

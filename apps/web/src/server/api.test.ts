@@ -80,7 +80,7 @@ describe("handleApi", () => {
 		const fresh = openLocalDb(":memory:");
 		migrateLocalDb(fresh);
 		const empty = fresh as unknown as AnansiDb;
-		await startLibraryRestore(empty, "f".repeat(64), { items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 });
+		await startLibraryRestore(empty, "f".repeat(64), { items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0, shelfItems: 0, aiTopics: 0 });
 		const isolated = { ...env, db: empty };
 		const ingest = await dispatchApi(isolated, new Request("https://anansi.test/api/ingest", {
 			method: "POST", headers: { authorization: "Bearer test-token" }, body: "{}",

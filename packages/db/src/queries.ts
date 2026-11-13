@@ -438,7 +438,9 @@ export async function tagItems(db: AnansiDb, ids: string[], label: string): Prom
 	const clean = topic?.label ?? label.trim().toLowerCase();
 	if (ids.length === 0 || !clean) return 0;
 
-	const existing = await db.select({ id: tags.id, color: tags.color, kind: tags.kind }).from(tags).where(eq(tags.label, clean)).limit(1);
+	let existing = await db.select({ id: tags.id, color: tags.color, kind: tags.kind }).from(tags).where(eq(tags.label, clean)).limit(1);
+	// An owner topic keeps the capitals it was named with; tagging by name finds it.
+	if (!existing[0] && !topic) existing = await db.select({ id: tags.id, color: tags.color, kind: tags.kind }).from(tags).where(and(eq(tags.kind, "topic"), sql`lower(${tags.label}) = ${clean}`)).limit(1);
 	const tagId = existing[0]?.id ?? (topic ? `topic:${topic.id}` : crypto.randomUUID());
 	if (!existing[0]) {
 		await db.insert(tags).values({ id: tagId, label: clean, color: topic?.color ?? randomTagColor(), origin: "manual", kind: topic ? "topic" : "custom" }).onConflictDoNothing();

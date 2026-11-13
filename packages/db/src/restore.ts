@@ -1,11 +1,12 @@
 import { eq, getTableColumns, sql } from "drizzle-orm";
 import { atomicWrite } from "./atomic.ts";
 import type { LibraryExport } from "./organization.ts";
-import { collections, highlights, itemSourceLinks, itemTagOverrides, itemTags, items, media, restoreChunks, restoreRuns, tags } from "./schema.ts";
+import { aiTopics, collections, highlights, itemSourceLinks, itemTagOverrides, itemTags, items, media, restoreChunks, restoreRuns, shelfItems, tags } from "./schema.ts";
 import { TOPIC_TAGS } from "./topics.ts";
 import type { AnansiDb } from "./types.ts";
 
-export const RESTORE_TABLES = ["items", "tags", "itemTags", "itemTagOverrides", "itemSourceLinks", "highlights", "media", "collections"] as const;
+/** Shelves come before what is on them; older exports simply have no shelfItems. */
+export const RESTORE_TABLES = ["items", "tags", "itemTags", "itemTagOverrides", "itemSourceLinks", "highlights", "media", "collections", "shelfItems", "aiTopics"] as const;
 export type RestoreTable = (typeof RESTORE_TABLES)[number];
 export type RestoreCounts = Record<RestoreTable, number>;
 export const RESTORE_CHUNK_SIZE = 30;
@@ -16,9 +17,11 @@ export interface RestoreState {
   status: "active" | "complete";
 }
 
-const zeroCounts = (): RestoreCounts => ({ items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 });
+const zeroCounts = (): RestoreCounts => ({ items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0, shelfItems: 0, aiTopics: 0 });
+/** Tables an older export may leave out entirely. */
+export const OPTIONAL_RESTORE_TABLES: readonly RestoreTable[] = ["itemTagOverrides", "itemSourceLinks", "shelfItems", "aiTopics"];
 const knownTable = (value: string): value is RestoreTable => RESTORE_TABLES.includes(value as RestoreTable);
-const TABLE_SCHEMAS = { items, tags, itemTags, itemTagOverrides, itemSourceLinks, highlights, media, collections } as const;
+const TABLE_SCHEMAS = { items, tags, itemTags, itemTagOverrides, itemSourceLinks, highlights, media, collections, shelfItems, aiTopics } as const;
 
 function validRows(table: RestoreTable, rows: unknown[]): boolean {
   const columns = getTableColumns(TABLE_SCHEMAS[table]) as Record<string, { dataType: string; notNull: boolean; hasDefault: boolean }>;
@@ -47,7 +50,7 @@ export function restoreCounts(backup: LibraryExport): RestoreCounts {
   const counts = zeroCounts();
   for (const table of RESTORE_TABLES) {
     const rows = backup[table];
-    if ((table === "itemTagOverrides" || table === "itemSourceLinks") && rows === undefined) continue;
+    if (OPTIONAL_RESTORE_TABLES.includes(table) && rows === undefined) continue;
     if (!Array.isArray(rows)) throw new Error(`Invalid ${table} backup rows`);
     counts[table] = rows.length;
   }
@@ -139,6 +142,12 @@ export async function writeLibraryRestoreChunk(db: AnansiDb, input: { backupId: 
         // R2 objects are outside the JSON export. Never revive stale keys.
         case "media": return tx.insert(media).values({ ...(row as typeof media.$inferInsert), storedKey: null }).onConflictDoNothing({ target: [media.itemId, media.identity] });
         case "collections": return tx.insert(collections).values(row as typeof collections.$inferInsert);
+        case "shelfItems": return tx.insert(shelfItems).values(row as typeof shelfItems.$inferInsert);
+        // The backup's topic list replaces whatever this installation had.
+        case "aiTopics": {
+          const topic = row as typeof aiTopics.$inferInsert;
+          return tx.insert(aiTopics).values(topic).onConflictDoUpdate({ target: aiTopics.id, set: { builtIn: topic.builtIn ?? 0, label: topic.label ?? null, description: topic.description ?? null, color: topic.color ?? null, enabled: topic.enabled ?? 1, createdAt: topic.createdAt, updatedAt: topic.updatedAt } });
+        }
       }
     }),
     tx.update(restoreRuns).set({ progress: JSON.stringify(progress), updatedAt: now }).where(eq(restoreRuns.id, 1)),
@@ -163,11 +172,23 @@ export async function abortLibraryRestore(db: AnansiDb, backupId: string): Promi
       tx.delete(restoreRuns).where(eq(restoreRuns.id, 1)),
       ...TOPIC_TAGS.map((topic) => tx.insert(tags).values({ id: topic.tagId, label: topic.label, color: topic.color, origin: "ai", kind: "topic" })),
     ]);
+    await restoreCustomTopicTags(db);
   } catch (error) {
     const latest = await getLibraryRestore(db);
     if (latest && RESTORE_TABLES.some((table) => latest.progress[table] !== 0)) throw new Error("Restore has already received data; abort is unavailable");
     throw error;
   }
+}
+
+/**
+ * Starting a restore clears every topic tag, including the owner's own
+ * topics, which live outside the export. Put back any the backup did not.
+ */
+async function restoreCustomTopicTags(db: AnansiDb): Promise<void> {
+  await db.run(sql`
+    INSERT OR IGNORE INTO tags (id, label, color, origin, kind)
+    SELECT 'topic:' || id, label, coalesce(color, '#6b7280'), 'ai', 'topic' FROM ai_topics
+    WHERE built_in = 0 AND label IS NOT NULL`);
 }
 
 export async function finishLibraryRestore(db: AnansiDb, backupId: string): Promise<RestoreState> {
@@ -181,5 +202,6 @@ export async function finishLibraryRestore(db: AnansiDb, backupId: string): Prom
       tx.update(restoreRuns).set({ status: "complete", updatedAt: Math.floor(Date.now() / 1000) }).where(eq(restoreRuns.id, 1)),
     ]);
   } else await db.update(restoreRuns).set({ status: "complete", updatedAt: Math.floor(Date.now() / 1000) }).where(eq(restoreRuns.id, 1));
+  await restoreCustomTopicTags(db);
   return { ...state, status: "complete" };
 }

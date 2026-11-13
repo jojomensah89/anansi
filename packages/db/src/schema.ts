@@ -323,10 +323,50 @@ export const highlights = sqliteTable("highlights", {
   createdAt: integer("created_at").notNull(),
 }, (t) => [uniqueIndex("highlights_item_text").on(t.itemId, t.text)]);
 
+/**
+ * Shelves. The table kept its first name, from when these were only saved
+ * views, so existing deployments migrate in place.
+ */
 export const collections = sqliteTable("collections", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  /** The rule: library filters as JSON. `{}` means the shelf is filled by hand. */
   filters: text("filters").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+  /** A palette key (see SHELF_COLORS), never a hex value. */
+  color: text("color"),
+  /** A lucide icon name. */
+  icon: text("icon"),
+  position: integer("position").notNull().default(0),
+});
+
+/** Saves put on a shelf by hand, or taken off a ruled shelf by hand. */
+export const shelfItems = sqliteTable(
+  "shelf_items",
+  {
+    shelfId: text("shelf_id").notNull().references(() => collections.id, { onDelete: "cascade" }),
+    itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    /** 'include' | 'exclude' */
+    mode: text("mode").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.shelfId, t.itemId] }), index("shelf_items_item").on(t.itemId)],
+);
+
+export const shelfSuggestionDismissals = sqliteTable("shelf_suggestion_dismissals", {
+  topic: text("topic").primaryKey(),
+  dismissedAt: integer("dismissed_at").notNull(),
+});
+
+/** Owner edits to the AI topic list; see topic-settings.ts. */
+export const aiTopics = sqliteTable("ai_topics", {
+  id: text("id").primaryKey(),
+  builtIn: integer("built_in").notNull().default(0),
+  label: text("label"),
+  description: text("description"),
+  color: text("color"),
+  enabled: integer("enabled").notNull().default(1),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

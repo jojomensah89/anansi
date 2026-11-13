@@ -45,6 +45,11 @@ export const MCP_TOOL_CATALOG = [
 		title: "Library statistics",
 		summary: "Summarize visible saves by source, archive state, and media.",
 	},
+	{
+		name: "list_shelves",
+		title: "List shelves",
+		summary: "List the owner's shelves with how many saves each holds.",
+	},
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_CATALOG)[number]["name"];

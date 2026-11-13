@@ -91,6 +91,8 @@ export interface ItemQuery {
   removed?: "include" | "exclude" | "only";
   order?: "saved" | "posted";
   limit?: number;
+  /** Only saves on this shelf. */
+  shelf?: string;
 }
 
 export interface Page {
@@ -135,6 +137,61 @@ export interface Collection {
   filters: ItemQuery & { query?: string };
   createdAt: number;
   updatedAt: number;
+}
+
+/** The fixed shelf palette. Stored as keys; the UI maps each to its colours. */
+export const SHELF_COLORS = ["slate", "red", "orange", "amber", "green", "teal", "sky", "blue", "violet", "pink"] as const;
+export type ShelfColor = (typeof SHELF_COLORS)[number];
+
+export interface Shelf {
+  id: string;
+  name: string;
+  color: ShelfColor | null;
+  /** A lucide icon name, kebab-case. */
+  icon: string | null;
+  position: number;
+  /** The rule. Narrowing nothing (e.g. `{}`) means the shelf is filled by hand. */
+  filters: ItemQuery & { query?: string };
+  /** Visible, unarchived, safe-for-work saves on the shelf. */
+  count: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ShelfInput {
+  name?: string;
+  color?: ShelfColor | null;
+  icon?: string | null;
+  filters?: ItemQuery & { query?: string };
+}
+
+export interface ShelfSuggestion {
+  /** Topic id; pass back to dismiss. */
+  topic: string;
+  label: string;
+  count: number;
+  /** Ready to send as the new shelf's filters. */
+  filters: { tag: string[] };
+}
+
+export interface AiTopic {
+  id: string;
+  label: string;
+  description: string;
+  /** The shipped description, built-ins only. */
+  defaultDescription?: string;
+  color: string;
+  tagId: string;
+  builtIn: boolean;
+  enabled: boolean;
+  /** Visible saves carrying this topic's tag. */
+  count: number;
+}
+
+export interface AiTopicsResponse {
+  topics: AiTopic[];
+  /** Most topics that can be on at once. */
+  limit: number;
 }
 
 export interface Creator {
@@ -246,6 +303,7 @@ export const api = {
     if (opts.nsfw) q.set("nsfw", "1");
     if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
     if (opts.order === "posted") q.set("order", "posted");
+    if (opts.shelf) q.set("shelf", opts.shelf);
     q.set("limit", String(opts.limit ?? 60));
     return get<Page>(`/api/items?${q}`, signal);
   },
@@ -271,7 +329,7 @@ export const api = {
     return get<{ query: string; items: SearchHit[]; nextCursor: string | null; semantic: SemanticSearchStatus }>(`/api/search?${q}`, signal);
   },
 
-  item: (id: string, signal?: AbortSignal) => get<ItemDetail>(`/api/items/${id}`, signal),
+  item: (id: string, signal?: AbortSignal) => get<ItemDetail & { shelves?: string[] }>(`/api/items/${id}`, signal),
 
 	creators: (options: CreatorQuery | number = {}, signal?: AbortSignal): Promise<CreatorPage> => {
 		const opts = typeof options === "number" ? { limit: options } : options;
@@ -308,6 +366,28 @@ export const api = {
   deleteCollection: (id: string) =>
     send<{ deleted: true }>(`/api/collections/${encodeURIComponent(id)}`, "DELETE"),
 
+  shelves: (signal?: AbortSignal) => get<{ shelves: Shelf[] }>("/api/shelves", signal),
+  createShelf: (input: ShelfInput & { name: string }) => post<{ shelf: Shelf }>("/api/shelves", input),
+  updateShelf: (id: string, changes: ShelfInput) =>
+    send<{ shelf: Shelf }>(`/api/shelves/${encodeURIComponent(id)}`, "PATCH", changes),
+  deleteShelf: (id: string) => send<{ deleted: true }>(`/api/shelves/${encodeURIComponent(id)}`, "DELETE"),
+  /** Listed shelves take the first places; any left out keep their order after them. */
+  reorderShelves: (ids: string[]) => post<{ shelves: Shelf[] }>("/api/shelves/reorder", { ids }),
+  /** Up to 500 ids. Removing a save the rule still matches keeps it off the shelf. */
+  shelfItems: (id: string, itemIds: string[], action: "add" | "remove") =>
+    post<{ changed: number; shelf: Shelf }>(`/api/shelves/${encodeURIComponent(id)}/items`, { itemIds, action }),
+  shelfSuggestions: (signal?: AbortSignal) => get<{ suggestions: ShelfSuggestion[] }>("/api/shelves/suggestions", signal),
+  dismissShelfSuggestion: (topic: string) => post<{ dismissed: true }>("/api/shelves/suggestions/dismiss", { topic }),
+
+  aiTopics: (signal?: AbortSignal) => get<AiTopicsResponse>("/api/ai/topics", signal),
+  createAiTopic: (label: string, description = "") => post<AiTopicsResponse>("/api/ai/topics", { label, description }),
+  /** `description: null` puts a built-in's shipped description back. */
+  updateAiTopic: (id: string, changes: { enabled?: boolean; description?: string | null }) =>
+    send<AiTopicsResponse>(`/api/ai/topics/${encodeURIComponent(id)}`, "PATCH", changes),
+  deleteAiTopic: (id: string) => send<AiTopicsResponse>(`/api/ai/topics/${encodeURIComponent(id)}`, "DELETE"),
+  /** Ask about every save again with the current list. Returns how many jobs were reopened. */
+  retagAi: () => post<{ queued: number }>("/api/ai/retag", {}),
+
   exportLibrary: async (): Promise<Blob> => {
     const res = await fetch(`${BASE}/api/export`, { credentials: "include" });
     if (!res.ok) throw await responseError(res, "/api/export");
@@ -333,6 +413,7 @@ function itemParams(opts: ItemQuery): URLSearchParams {
   if (opts.nsfw) q.set("nsfw", "1");
   if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
   if (opts.order === "posted") q.set("order", "posted");
+  if (opts.shelf) q.set("shelf", opts.shelf);
   q.set("limit", String(opts.limit ?? 60));
   return q;
 }

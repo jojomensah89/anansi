@@ -24,7 +24,7 @@ export {
 
 export { setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary, restoreLibrary } from "./organization.ts";
 export type { Collection, CollectionFilters, LibraryExport } from "./organization.ts";
-export { RESTORE_CHUNK_SIZE, RESTORE_TABLES, restoreCounts, getLibraryRestore, startLibraryRestore, writeLibraryRestoreChunk, finishLibraryRestore, abortLibraryRestore } from "./restore.ts";
+export { OPTIONAL_RESTORE_TABLES, RESTORE_CHUNK_SIZE, RESTORE_TABLES, restoreCounts, getLibraryRestore, startLibraryRestore, writeLibraryRestoreChunk, finishLibraryRestore, abortLibraryRestore } from "./restore.ts";
 export type { RestoreCounts, RestoreState, RestoreTable } from "./restore.ts";
 export { claimMediaJobs, completeMediaJob, failMediaJob } from "./media-jobs.ts";
 export { aiEnrichmentJobs, aiSettings, itemEmbeddings, aiProgress, applyAiTags, claimAiJobs, completeAiJob, consumeSemanticCredits, contentHash, embeddingProjectionText, failAiJob, getAiSettings, loadAiJobItems, reconcileAiJobs, reclassifyAiTopics, requeueEmbeddingJobs, releaseAiJob, searchableText, semanticCreditsForText, semanticText, setAiSettings, upsertItemEmbedding, validateAiJobClaim } from "./ai-jobs.ts";
@@ -47,3 +47,11 @@ export * from "./passkeys.ts";
 export { aiProgressAll, claimDueAiJobs, completeClaimedAiJobs, deleteClaimedAiJobs, failClaimedAiJobs, insertClaimedAiJobs, itemsWithStaleSemanticRows, loadAiSourceItems, markSemanticChunksCompleteBulk, publishAiTags, releaseClaimedAiJobs, stageSemanticChunksBulk, unqueuedAiItems } from "./ai-bulk.ts";
 export type { AiSourceItem, AiTagResult, ClaimedAiJob, SemanticChunkDraft } from "./ai-bulk.ts";
 export { planSemanticChunks } from "./semantic-index.ts";
+
+export { shelfItems, shelfSuggestionDismissals, aiTopics, collections } from "./schema.ts";
+export { libraryFilterClause, shelfMembership } from "./search.ts";
+export type { LibraryFilter, ShelfScope } from "./search.ts";
+export { SHELF_COLORS, SHELF_ITEMS_MAX, SHELF_NAME_MAX, SHELF_WRITE_CHUNK, SUGGESTION_MIN_SAVES, ShelfError, changeShelfItems, createShelf, deleteShelf, dismissShelfSuggestion, getShelf, listShelves, reorderShelves, scopeOf, shelfRule, shelfScope, shelfSuggestions, shelvesForItem, updateShelf } from "./shelves.ts";
+export type { Shelf, ShelfColor, ShelfFilters, ShelfSuggestion, ShelfWithCount } from "./shelves.ts";
+export { TOPIC_DESCRIPTION_MAX, TOPIC_LABEL_MAX, TOPIC_LIMIT, TopicSettingsError, activeTopics, createTopic, deleteTopic, listTopics, requeueTagging, resolveTopicIds, topicSettings, updateTopic } from "./topic-settings.ts";
+export type { Topic } from "./topic-settings.ts";

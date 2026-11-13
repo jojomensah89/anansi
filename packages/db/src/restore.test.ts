@@ -54,7 +54,7 @@ describe("resumable library restore", () => {
 
   test("rejects nonempty target and out of order chunks", async () => {
     const db = openTestDb();
-    const counts = { items: 2, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 };
+    const counts = { items: 2, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0, shelfItems: 0, aiTopics: 0 };
     await startLibraryRestore(db, backupId, counts);
     const row = (id: string) => ({ id, source: "web", externalId: id, url: `https://example.com/${id}`, kind: "article", savedAt: 1, metrics: "{}", raw: "{}" });
     await expect(writeLibraryRestoreChunk(db, { backupId, table: "items", offset: 1, rows: [row("x")] })).rejects.toThrow("order");
@@ -81,7 +81,7 @@ describe("resumable library restore", () => {
 
   test("abort before first chunk restores seed tags and permits a corrected backup", async () => {
     const db = openTestDb();
-    const counts = { items: 1, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 };
+    const counts = { items: 1, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0, shelfItems: 0, aiTopics: 0 };
     const initialTags = await db.select().from(tags);
     await startLibraryRestore(db, backupId, counts);
     await abortLibraryRestore(db, backupId);
@@ -93,7 +93,7 @@ describe("resumable library restore", () => {
 
   test("abort rejects after any restore row commits", async () => {
     const db = openTestDb();
-    const counts = { items: 1, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 };
+    const counts = { items: 1, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0, shelfItems: 0, aiTopics: 0 };
     await startLibraryRestore(db, backupId, counts);
     await writeLibraryRestoreChunk(db, { backupId, table: "items", offset: 0, rows: [{ id: "saved", source: "web", externalId: "saved", url: "https://example.com", kind: "article", savedAt: 1, metrics: "{}", raw: "{}" }] });
     await expect(abortLibraryRestore(db, backupId)).rejects.toThrow("already received data");
