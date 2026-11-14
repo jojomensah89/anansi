@@ -51,6 +51,6 @@ Repeat with fresh saves for X, Reddit, GitHub and TikTok. Keep the desktop brows
 
 ## Agents and finish
 
-- [ ] Connect one OAuth app and one named API key through the MCP setup page. Read-only clients list eight tools and reject writes. Owner-granted writes list twelve tools; test tags, note set/clear and save_link on synthetic items. No delete tool exists. Revoke and verify access stops.
+- [ ] Connect one OAuth app and one named API key through the MCP setup page. Read-only clients list nine tools and reject writes. Owner-granted writes list thirteen tools; test tags, note set/clear and save_link on synthetic items. No delete tool exists. Revoke and verify access stops.
 - [ ] Search with AI off: keyword results remain available. Agent checks request Reddit/GitHub by default; X/TikTok need owner opt-in. Check freshness/offline metadata. Repeated requests within the 15-minute per-platform window should not repeat sync.
 - [ ] Record pass/fail per source and scenario, unresolved defects, artifacts with secrets removed, and the owner's acceptance decision. Tests/builds alone do not complete this checklist or authorize store submission.
