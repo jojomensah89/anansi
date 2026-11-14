@@ -1,6 +1,6 @@
 const BRAND: Record<string, string> = {
-	x: "#e6ebef",
-	github: "#e6ebef",
+	x: "var(--text)",
+	github: "var(--text)",
 	reddit: "#ff4500",
 	tiktok: "#25f4ee",
 	// Not a brand. A cool blue reads as "a website" beside four saturated logos.

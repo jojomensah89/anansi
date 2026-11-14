@@ -17,6 +17,11 @@ import {
   type PlatformSource,
 } from "../lib/messages.ts";
 import { createRelayHandshake } from "../lib/relay-handshake.ts";
+import { captureSourceFromUrl } from "../lib/platforms/registry.ts";
+import { createSaveToast, deliverWithConfirmation, rejectedSaveAction } from "../lib/save-toast.ts";
+import { importScreenCopy, parseImportScreenCommand } from "../lib/import-screen.ts";
+import { createImportOverlay } from "../lib/import-overlay.ts";
+import markSrc from "../public/icon/96.png?inline";
 
 export default defineContentScript({
   matches: [
@@ -39,6 +44,20 @@ export default defineContentScript({
       window.postMessage(message, window.location.origin));
     document.addEventListener("DOMContentLoaded", () => handshake.documentReady(), { once: true });
 
+    const saveToast = createSaveToast({
+      document,
+      viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+      schedule: (run, ms) => window.setTimeout(run, ms),
+      cancel: (id) => window.clearTimeout(id),
+    });
+    // Remember where the person clicked, so the confirmation appears beside
+    // the platform's own button. The event's target is never read.
+    window.addEventListener(
+      "pointerdown",
+      (event) => saveToast.notePointer(event.clientX, event.clientY),
+      { capture: true, passive: true },
+    );
+
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
       const parsed = parseExtensionMessage(event.data, {
@@ -46,28 +65,45 @@ export default defineContentScript({
         pageUrl: window.location.href,
         expectedNonce: nonce,
       });
-      if (!parsed.ok) return;
+      if (!parsed.ok) {
+        const rejected = rejectedSaveAction(event.data, nonce);
+        if (rejected) saveToast.show(rejected, "failed");
+        return;
+      }
       if (parsed.message.action === "bookmark") {
         // The trusted worker owns durable storage. It acknowledges only after
         // the handoff is persisted or has reached the durable native outbox.
         const message = { ...parsed.message, mutationId: parsed.message.mutationId ?? crypto.randomUUID() };
-        const forward = async () => {
-          try {
-            const result = await browser.runtime.sendMessage({
+        void deliverWithConfirmation({
+          send: () =>
+            browser.runtime.sendMessage({
               anansi: "native-handoff",
               action: "store",
               messageVersion: MESSAGE_PROTOCOL_VERSION,
               message,
-            });
-            if (result?.ok) return;
-          } catch { /* the worker may be restarting */ }
-          setTimeout(() => void forward(), 2_000);
-        };
-        void forward();
+            }),
+          notify: (outcome) => saveToast.show(message.bookmarkAction, outcome),
+          retryLater: (again) => void setTimeout(again, 2_000),
+        });
       } else void browser.runtime.sendMessage(parsed.message).catch(() => {});
     });
 
+    // Drawn only when the worker says this is a tab it opened for an import.
+    const importScreen = createImportOverlay({
+      document,
+      markSrc,
+      onClose: () =>
+        void browser.runtime
+          .sendMessage({ anansi: "import-screen", action: "close" })
+          .catch(() => {}),
+    });
+
     browser.runtime.onMessage.addListener((message: unknown) => {
+      const screen = parseImportScreenCommand(message);
+      if (screen) {
+        importScreen.render(importScreenCopy(screen));
+        return Promise.resolve(true);
+      }
       const incoming = message as {
         anansi?: unknown;
         action?: unknown;
@@ -99,12 +135,9 @@ export default defineContentScript({
     // The page script starts with no nonce or watched operations. Ask the
     // background for its current source config as soon as this relay loads;
     // an already-open SPA tab may never get another tabs.onUpdated event.
-    const host = window.location.hostname;
-    const source = host === "x.com" || host === "twitter.com" ? "x"
-      : host === "github.com" ? "github"
-      : host === "tiktok.com" || host === "www.tiktok.com" ? "tiktok"
-      : "reddit";
-    {
+    const source = captureSourceFromUrl(window.location.href);
+    if (!source) return;
+    const announce = () =>
       void browser.runtime.sendMessage({
         anansi: "page-event",
         messageVersion: MESSAGE_PROTOCOL_VERSION,
@@ -114,6 +147,10 @@ export default defineContentScript({
         queryId: null,
         relay: true,
       }).catch(() => {});
-    }
+    announce();
+    // A page restored from history resumes with this relay and its old nonce.
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) announce();
+    });
   },
 });

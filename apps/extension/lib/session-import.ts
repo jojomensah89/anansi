@@ -42,6 +42,7 @@ export interface SessionImportOptions {
 	cursor?: string;
 	pageLimit: number;
 	live: boolean;
+	knownIds?: readonly string[];
 	signal: AbortSignal;
 	/** False when paused, replaced, or disabled by the server. */
 	isCurrent(): Promise<boolean>;
@@ -203,6 +204,7 @@ async function redditPage(
 export async function runSessionImport(
 	options: SessionImportOptions,
 ): Promise<SessionImportResult> {
+	const known = new Set(options.knownIds ?? []);
 	let pages = 0;
 	let items = 0;
 	const current = async () =>
@@ -218,7 +220,7 @@ export async function runSessionImport(
 		options.source === "reddit" ? await redditHandle(options) : null;
 	const seen = new Set<string>();
 	const limit = options.live
-		? 1
+		? (options.knownIds ? Math.max(1, Math.min(10, options.pageLimit)) : 1)
 		: Math.max(1, Math.min(40, Math.floor(options.pageLimit) || 40));
 	for (;;) {
 		if (!(await current())) return cancelled();
@@ -236,7 +238,9 @@ export async function runSessionImport(
 		pages++;
 		items += page.items;
 		if (!(await current())) return cancelled();
-		if (!page.cursor || options.live)
+        const raw = page.raw as { repositories?: { identity: string }[]; data?: {children?: {data?: {name?: string}}[]} };
+        const ids = options.source === "github" ? raw.repositories?.map(repo => repo.identity) ?? [] : raw.data?.children?.map(child => child.data?.name ?? "") ?? [];
+		if (!page.cursor || (options.live && (!options.knownIds || ids.some(id => known.has(id)))))
 			return { state: "complete", pages, items };
 		if (pages >= limit) return { state: "limited", pages, items };
 		cursor = page.cursor;

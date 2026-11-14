@@ -315,3 +315,36 @@ describe("imports without platform tabs", () => {
 		});
 	});
 });
+
+describe("bounded multi-page sync", () => {
+  test("passes page one and stops on a known Reddit save on page two", async () => {
+    const s = setup("reddit", [Response.json({data: {name: "owner"}}), listing("t3_next"), listing("t3_more")]);
+    s.options.live = true; s.options.knownIds = ["t3_abc"]; s.options.pageLimit = 10;
+    // Make only the second page known.
+    const next = s.options.fetcher!; let calls = 0;
+    s.options.fetcher = (async (...args) => { const response = await next(...args); calls++;
+      if (calls === 2) return Response.json({kind:"Listing", data:{children:[{kind:"t3",data:{name:"t3_new"}}],after:"t3_next"}});
+      return response;
+    }) as typeof fetch;
+    expect(await runSessionImport(s.options)).toEqual({state:"complete", pages:2, items:2});
+    expect(s.requests).toHaveLength(3);
+  });
+  test("empty known set caps a first sync rather than walking history", async () => {
+    const s = setup("reddit", [Response.json({data:{name:"owner"}}), listing("t3_next"), listing("t3_more")]);
+    s.options.live = true; s.options.knownIds = []; s.options.pageLimit = 2;
+    expect(await runSessionImport(s.options)).toEqual({state:"limited",pages:2,items:2});
+    expect(s.requests).toHaveLength(3);
+  });
+  test("GitHub uses repository identities to stop on a known page", async () => {
+    const s = setup("github", [html(await fixture("stars-page.html"))]);
+    s.options.live = true; s.options.knownIds = ["vyom-26/personal-os"]; s.options.pageLimit = 10;
+    const page = await fixture("stars-page.html");
+    // Extract exactly the normalized identity from the same production parser.
+    const { extractGitHubStarsPage } = await import("./platforms/github.ts");
+    const { DOMParser } = await import("linkedom/worker");
+    const result = extractGitHubStarsPage(new DOMParser().parseFromString(page,"text/html") as unknown as Document,"https://github.com/stars");
+    if (!("page" in result)) throw new Error(result.kind);
+    s.options.knownIds = [result.page.repositories[0]!.identity];
+    expect((await runSessionImport(s.options)).pages).toBe(1);
+  });
+});

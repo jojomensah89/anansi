@@ -127,17 +127,8 @@ function trimBlock(value: unknown, max: number): string | undefined {
  * A page can put anything in `og:image`, including a `javascript:` URL, and
  * this value ends up in an `<img src>` in the library.
  */
-export function safeAsset(value: unknown, base: string): string | undefined {
-  if (typeof value !== "string" || value.length === 0) return undefined;
-  try {
-    const url = new URL(value, base);
-    if (!CAPTURABLE_PROTOCOLS.has(url.protocol)) return undefined;
-    if (url.username || url.password) return undefined;
-    return url.toString();
-  } catch {
-    return undefined;
-  }
-}
+export { safeAsset } from "@anansi/sources/link-preview";
+import { safeAsset } from "@anansi/sources/link-preview";
 
 /** A short, stable digest. Identity only — nothing here is a secret. */
 async function shortDigest(value: string): Promise<string> {

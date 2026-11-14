@@ -33,7 +33,9 @@ const fixture = (source: string, externalId: string, authorHandle: string): Inge
 
 describe("source visibility boundary", () => {
 	test("makes retained TikTok rows visible when archive import is available", async () => {
-		expect(HIDDEN_SOURCES).toEqual([]);
+		expect(HIDDEN_SOURCES).toEqual(["instagram"]);
+		expect(isHiddenSource("instagram")).toBe(true);
+		expect(isVisibleSource("instagram")).toBe(false);
 		expect(isHiddenSource("tiktok")).toBe(false);
 		expect(isVisibleSource("x")).toBe(true);
 		expect(isVisibleSource("tiktok")).toBe(true);

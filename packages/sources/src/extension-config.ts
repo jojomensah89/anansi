@@ -23,6 +23,7 @@ export interface ExtensionSourceConfig {
 	cursorPath?: string;
 	entryPrefix?: string;
 	pageLimit?: number;
+	knownIds?: string[];
 	watchOperations?: string[];
 	watchUrls?: string[];
 	mutationUrl?: string;
@@ -87,6 +88,7 @@ const SOURCE_KEYS = new Set([
 	"cursorPath",
 	"entryPrefix",
 	"pageLimit",
+	"knownIds",
 	"watchOperations",
 	"watchUrls",
 	"mutationUrl",
@@ -170,6 +172,7 @@ function validSourceConfig(value: unknown): value is ExtensionSourceConfig {
 			value.pageLimit <= 0)
 	)
 		return false;
+	if (value.knownIds !== undefined && (!stringArray(value.knownIds) || value.knownIds.length > 2000 || value.knownIds.some(id => id.length > 200))) return false;
 	if (value.watchOperations !== undefined && !stringArray(value.watchOperations))
 		return false;
 	if (value.watchUrls !== undefined && !stringArray(value.watchUrls)) return false;

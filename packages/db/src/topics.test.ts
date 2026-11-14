@@ -4,10 +4,11 @@ import { openTestDb } from "./test-db.ts";
 import { tags } from "./schema.ts";
 
 describe("canonical AI topics", () => {
-	test("exposes a stable v1 vocabulary", () => {
-		expect(TOPIC_TAXONOMY_VERSION).toBe("v1");
+	test("exposes a stable v2 vocabulary", () => {
+		expect(TOPIC_TAXONOMY_VERSION).toBe("v2");
 		expect(TOPIC_DEFINITIONS.map((topic) => topic.id)).toEqual([
 			"web-dev", "ai-ml", "marketing", "design", "startups", "product", "career", "devops", "security", "finance", "health",
+			"hardware", "entertainment", "gaming", "music", "food-travel", "science", "learning", "lifestyle",
 		]);
 	});
 
@@ -17,6 +18,9 @@ describe("canonical AI topics", () => {
 		expect(canonicalTopicId("강성지도")).toBeUndefined();
 		expect(canonicalTopicId("教育暗箱")).toBeUndefined();
 		expect(canonicalTopicId("random one-off phrase")).toBeUndefined();
+		// Broad words stay the owner's own tags rather than turning into topics.
+		expect(canonicalTopicId("research")).toBeUndefined();
+		expect(canonicalTopicId("anime")).toBe("entertainment");
 	});
 
 	test("deduplicates and caps topics", () => {

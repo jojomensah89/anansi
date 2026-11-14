@@ -1,17 +1,31 @@
-export const TOPIC_TAXONOMY_VERSION = "v1" as const;
+export const TOPIC_TAXONOMY_VERSION = "v2" as const;
 
+/**
+ * The fixed list Clef chooses from. v2 widens it past tech and business so
+ * the entertainment, food, gaming and hardware saves that fill a social
+ * library get a home. Descriptions go into Clef's question, so they say what
+ * belongs, not what the label already says.
+ */
 export const TOPIC_DEFINITIONS = [
-	{ id: "web-dev", label: "Web Dev", color: "#22c55e" },
-	{ id: "ai-ml", label: "AI / ML", color: "#3b82f6" },
-	{ id: "marketing", label: "Marketing", color: "#14b8a6" },
-	{ id: "design", label: "Design", color: "#eab308" },
-	{ id: "startups", label: "Startups", color: "#ec4899" },
-	{ id: "product", label: "Product", color: "#8b5cf6" },
-	{ id: "career", label: "Career", color: "#f97316" },
-	{ id: "devops", label: "DevOps", color: "#06b6d4" },
-	{ id: "security", label: "Security", color: "#ef4444" },
-	{ id: "finance", label: "Finance", color: "#84cc16" },
-	{ id: "health", label: "Health", color: "#6366f1" },
+	{ id: "web-dev", label: "Web Dev", color: "#22c55e", description: "Programming, software, apps, frameworks and developer tools." },
+	{ id: "ai-ml", label: "AI / ML", color: "#3b82f6", description: "AI models, chatbots, agents, machine learning and AI tools." },
+	{ id: "marketing", label: "Marketing", color: "#14b8a6", description: "Growth, ads, content, social media strategy and branding." },
+	{ id: "design", label: "Design", color: "#eab308", description: "UI, UX, graphic design, typography and visual work." },
+	{ id: "startups", label: "Startups", color: "#ec4899", description: "Founding, running or funding a business, side projects and SaaS." },
+	{ id: "product", label: "Product", color: "#8b5cf6", description: "Product management, product ideas, launches and user research." },
+	{ id: "career", label: "Career", color: "#f97316", description: "Jobs, interviews, resumes and professional growth." },
+	{ id: "devops", label: "DevOps", color: "#06b6d4", description: "Servers, cloud, self-hosting, deployment and infrastructure." },
+	{ id: "security", label: "Security", color: "#ef4444", description: "Cybersecurity, privacy, hacking and scams." },
+	{ id: "finance", label: "Finance", color: "#84cc16", description: "Money, investing, crypto, trading and personal finance." },
+	{ id: "health", label: "Health", color: "#6366f1", description: "Fitness, exercise, nutrition, medicine and mental health." },
+	{ id: "hardware", label: "Hardware & Networking", color: "#0ea5e9", description: "Computers, phones, gadgets, routers, WiFi, CCTV and home lab setups." },
+	{ id: "entertainment", label: "Entertainment & Anime", color: "#f43f5e", description: "Anime, films, series, webnovels, comics, celebrities and memes." },
+	{ id: "gaming", label: "Gaming", color: "#a855f7", description: "Video games, consoles, emulators and gaming setups." },
+	{ id: "music", label: "Music", color: "#d946ef", description: "Songs, artists, music production and instruments." },
+	{ id: "food-travel", label: "Food & Travel", color: "#f59e0b", description: "Cooking, recipes, restaurants, places and trips." },
+	{ id: "science", label: "Science", color: "#10b981", description: "Physics, space, biology, research and how things work." },
+	{ id: "learning", label: "Learning", color: "#64748b", description: "Courses, tutorials, study tips, books and free education." },
+	{ id: "lifestyle", label: "Lifestyle", color: "#fb7185", description: "Home, fashion, relationships, productivity habits and daily life." },
 ] as const;
 
 export type TopicId = (typeof TOPIC_DEFINITIONS)[number]["id"];
@@ -48,6 +62,15 @@ const aliases: Record<TopicId, string[]> = {
 	security: ["cybersecurity", "cyber security", "infosec", "privacy", "application security", "appsec"],
 	finance: ["personal finance", "investing", "investment", "stocks", "money", "economics", "fintech"],
 	health: ["wellness", "fitness", "medicine", "medical", "mental health", "nutrition"],
+	// Only names specific enough that a manual tag using them means the topic.
+	hardware: ["networking", "gadgets", "homelab", "home lab"],
+	entertainment: ["anime", "movies", "manga", "webnovel"],
+	gaming: ["video games", "esports"],
+	music: ["music production"],
+	"food-travel": ["cooking", "recipes"],
+	science: ["physics", "astronomy"],
+	learning: ["online courses", "tutorials"],
+	lifestyle: ["fashion"],
 };
 
 for (const topic of TOPIC_DEFINITIONS) {

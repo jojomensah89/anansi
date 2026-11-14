@@ -28,13 +28,21 @@ import {
 
 describe("source capability views", () => {
 	test("keeps retained, visible, extension, import, and toggle sets distinct", () => {
-		expect(SOURCE_IDS).toEqual(["x", "reddit", "web", "github", "tiktok"]);
+		expect(SOURCE_IDS).toEqual([
+			"x",
+			"reddit",
+			"web",
+			"github",
+			"tiktok",
+			"instagram",
+		]);
 		expect(RETAINED_PARSING_SOURCES).toEqual([
 			"x",
 			"reddit",
 			"web",
 			"github",
 			"tiktok",
+			"instagram",
 		]);
 		expect(VISIBLE_LIBRARY_SOURCES).toEqual(["x", "reddit", "web", "github", "tiktok"]);
 		expect(EXTENSION_PLATFORM_SOURCES).toEqual(["x", "reddit", "github", "tiktok"]);
@@ -50,6 +58,34 @@ describe("source capability views", () => {
 			"tiktok",
 			"web",
 		]);
+	});
+
+	test("retains Instagram's parser contract without shipping capture", () => {
+		expect(sourceCapability("instagram")).toMatchObject({
+			retainedParsing: true,
+			productVisible: false,
+			extensionPlatform: false,
+			importMode: null,
+			liveCapture: false,
+			manualCapture: false,
+			toggleable: false,
+			captureMethods: [],
+			retainedCaptureMethods: ["platform_event", "platform_import"],
+		});
+		expect(isRetainedParsingSource("instagram")).toBe(true);
+		expect(isExtensionPlatformSource("instagram")).toBe(false);
+		expect(isPageImportSource("instagram")).toBe(false);
+		expect(isSessionImportSource("instagram")).toBe(false);
+		expect(isToggleableSource("instagram")).toBe(false);
+		expect(captureMethodsForSource("instagram")).toEqual([]);
+		expect(retainedCaptureMethodsForSource("instagram")).toEqual([
+			"platform_event",
+			"platform_import",
+		]);
+		expect(supportsCaptureMethod("instagram", "platform_event")).toBe(false);
+		expect(supportsRetainedCaptureMethod("instagram", "platform_event")).toBe(
+			true,
+		);
 	});
 
 	test("ships TikTok page capture", () => {
@@ -90,12 +126,12 @@ describe("source capability views", () => {
 	});
 
 	test("rejects unknown identities and inconsistent capability facts", () => {
-		expect(isSource("instagram")).toBe(false);
-		expect(sourceCapability("instagram")).toBeNull();
+		expect(isSource("instagram")).toBe(true);
+		expect(sourceCapability("not-a-source")).toBeNull();
 		expect(validateSourceCapabilityFacts(SOURCE_CAPABILITIES)).toEqual({ ok: true });
 		expect(
 			validateSourceCapabilityFacts([
-				{ ...SOURCE_CAPABILITIES[0], source: "instagram" },
+				{ ...SOURCE_CAPABILITIES[0], source: "not-a-source" },
 			]),
 		).toMatchObject({ ok: false, error: { code: "invalid_shape" } });
 		expect(

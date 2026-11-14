@@ -14,14 +14,16 @@ import type { AnansiDb } from "./types.ts";
 export type SemanticChunkRow = typeof semanticChunks.$inferSelect;
 export type SemanticChunkVector = { id: string; contentHash: string; values: number[] };
 
-function boundedGroups<T>(values: readonly T[], size = 7): T[][] {
+// Six is the default because a semantic chunk row binds fifteen parameters and
+// D1 rejects statements with more than 100.
+function boundedGroups<T>(values: readonly T[], size = 6): T[][] {
 	const groups: T[][] = [];
 	for (let offset = 0; offset < values.length; offset += size) groups.push(values.slice(offset, offset + size));
 	return groups;
 }
 
 /** Prepare D1's authoritative chunk manifests before any vector is published. */
-async function planSemanticChunks(item: typeof items.$inferSelect, model: string, generation = 1) {
+export async function planSemanticChunks(item: Pick<typeof items.$inferSelect, "id" | "title" | "body" | "articleText">, model: string, generation = 1) {
 	const projection = semanticText(item);
 	const parentHash = await contentHash(projection);
 	const texts = chunkSemanticText(projection);
@@ -162,11 +164,12 @@ export async function retrySemanticVectorDeletions(db: AnansiDb, ids: string[], 
 
 export async function semanticIndexStats(db: AnansiDb, model: string, generation = 1) {
 	const [row] = await db.select({
-		indexed: sql<number>`sum(case when status = 'complete' then 1 else 0 end)`,
-		pending: sql<number>`sum(case when status != 'complete' then 1 else 0 end)`,
-		total: sql<number>`count(*)`,
-	}).from(semanticChunks).where(and(eq(semanticChunks.model, model), eq(semanticChunks.generation, generation)));
-	return { indexed: Number(row?.indexed ?? 0), pending: Number(row?.pending ?? 0), total: Number(row?.total ?? 0) };
+        total: sql<number>`count(*)`,
+        indexed: sql<number>`sum(case when exists (select 1 from semantic_chunks c where c.item_id = items.id and c.model = ${model} and c.generation = ${generation}) and not exists (select 1 from semantic_chunks c where c.item_id = items.id and c.model = ${model} and c.generation = ${generation} and c.status != 'complete') then 1 else 0 end)`,
+    }).from(items);
+    const total = Number(row?.total ?? 0);
+    const indexed = Number(row?.indexed ?? 0);
+    return { indexed, pending: total - indexed, total };
 }
 
 export async function estimateSemanticBackfill(db: AnansiDb, model: string) {

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "wxt";
 import {
 	connectionForWxtConfig,
+	licenceRequiredForMode,
 	resolveExtensionBuildMode,
 } from "./lib/connection.ts";
 
@@ -11,9 +12,12 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 // A private mode must be an explicit shell/package-script choice. Do not let a
 // repository .env file turn an otherwise public build into a private artifact.
 const requestedBuildMode = process.env.ANANSI_EXTENSION_BUILD_MODE;
-loadDotenv({ path: resolve(repoRoot, ".env"), quiet: true });
+if (process.env.ANANSI_EXTENSION_SKIP_DOTENV !== "1") {
+	loadDotenv({ path: resolve(repoRoot, ".env"), quiet: true });
+}
 
 const mode = resolveExtensionBuildMode(requestedBuildMode);
+const requireLicence = licenceRequiredForMode(mode);
 const connection = connectionForWxtConfig(
 	process.env.ANANSI_EXTENSION_ORIGIN,
 	process.env.ANANSI_EXTENSION_INGEST_TOKEN,
@@ -28,6 +32,8 @@ export default defineConfig({
 		define: {
 			__ANANSI_EXTENSION_ORIGIN__: JSON.stringify(connection?.origin ?? ""),
 			__ANANSI_EXTENSION_INGEST_TOKEN__: JSON.stringify(connection?.token ?? ""),
+			// A literal, so public and private bundles drop the licence code entirely.
+			__ANANSI_REQUIRE_LICENCE__: JSON.stringify(requireLicence),
 		},
 	}),
 	zip: {
@@ -72,6 +78,8 @@ export default defineConfig({
 			"https://www.tiktok.com/*",
 			"https://tiktok.com/*",
 			...(connection?.origin ? [`${connection.origin}/*`] : []),
+			// Store build only: the worker checks the licence key with Polar.
+			...(requireLicence ? ["https://api.polar.sh/*"] : []),
 		],
 		optional_host_permissions: [
 			"https://*/*",

@@ -1,3 +1,4 @@
+import { syncStopReason } from "../lib/sync-stop.ts";
 import { createNativeSnapshotCache } from "../lib/native-snapshot.ts";
 import { xhrResponseJson } from "../lib/xhr-response.ts";
 import type { NormalizedItem } from "@anansi/sources";
@@ -35,6 +36,7 @@ import {
   readHandle,
   readAccountInfo,
   readHandleFromProfileHref,
+  isEndOfFavourites,
   readItemList,
   readFavouriteMutation,
   isSuccessfulMutationResponse,
@@ -44,13 +46,15 @@ import {
 type Outbound =
   | { action: "observed"; operation: string; raw: unknown; items: number; runId: string }
   | { action: "identified"; handle: string; runId: string }
-  | { action: "scanned"; runId: string }
+  | { action: "scanned"; runId: string; stopReason?: "known" | "page_limit"; hasMore: boolean }
   | { action: "error"; errorCode: "capture_failed" | "not_signed_in"; runId: string }
   | { action: "saved" }
   | { action: "bookmark"; bookmarkAction: "save" | "unsave"; externalId: string; canonicalUrl: string; normalizedItem?: NormalizedItem; mutationId: string; observedAt: number };
 
 interface ScanConfig {
   source: string;
+  pageLimit?: number;
+  knownIds?: string[];
   watchUrls?: string[];
   mutationUrl?: string;
   idField?: string;
@@ -94,17 +98,37 @@ export default defineContentScript({
     let watched: string[] = [];
     let mutationConfig: ScanConfig = { source: "tiktok" };
     let scanning = false;
+    let syncConfig: ScanConfig | undefined;
+    let syncPages = 0;
+    let stopReason: "known" | "page_limit" | undefined;
+    let responseHasMore = false;
     let sawFavoritesResponse = false;
     /** Set by any observed Favourites page that said there is more. */
     let moreToLoad = true;
+    /** Counts every Favourites response, so a slow page is not a stalled one. */
+    let favouritesResponses = 0;
 
     /** Only pass on a Favourites payload that actually carries items. */
     const forward = (operation: string, raw: unknown) => {
+      if (isEndOfFavourites(raw)) {
+        sawFavoritesResponse = true;
+        moreToLoad = false;
+        responseHasMore = false;
+        favouritesResponses++;
+        return;
+      }
       if (!raw || typeof raw !== "object" ||
         (!Array.isArray((raw as { itemList?: unknown }).itemList) && !Array.isArray((raw as { items?: unknown }).items))) return;
       sawFavoritesResponse = true;
       const page = readItemList(raw);
       moreToLoad = page.hasMore;
+      responseHasMore = page.hasMore;
+      favouritesResponses++;
+      syncPages++;
+      if (syncConfig?.knownIds) {
+        stopReason = syncStopReason(page.ids, syncConfig.knownIds, syncPages, syncConfig.pageLimit) ?? undefined;
+        if (stopReason) moreToLoad = false;
+      }
       if (page.count === 0) return;
       if (activeRunId) send({ action: "observed", operation, raw, items: page.count, runId: activeRunId });
     };
@@ -515,14 +539,55 @@ export default defineContentScript({
      * response says there is no more — a real answer — and falls back to the
      * page having stopped growing, which is what "no more" looks like from out
      * here when nothing said so.
+     *
+     * TikTok answers a request it did not make itself with an empty body, even
+     * when its own code signed that request, so its list has to do the asking.
+     * The list only asks while the page renders. A hidden page is waited for
+     * rather than counted as stalled; the worker gives up if it stays hidden.
      */
+    /**
+     * The element that actually scrolls the list.
+     *
+     * TikTok's newer layouts scroll the profile inside a container, so the
+     * body never grows and scrolling the window does nothing. Walk up from the
+     * last video to the first ancestor that overflows.
+     */
+    const scrollerOf = (el: HTMLElement | undefined): HTMLElement | null => {
+      for (let node = el?.parentElement ?? null; node && node !== document.body; node = node.parentElement) {
+        const overflow = getComputedStyle(node).overflowY;
+        if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 4) return node;
+      }
+      return null;
+    };
+
     const scan = async () => {
       let stalled = 0;
-      for (let step = 0; step < 400 && stalled < 4 && moreToLoad; step++) {
-        const before = pageHeight();
-        window.scrollTo({ top: before, behavior: "auto" });
-        await new Promise((r) => setTimeout(r, 1_200));
-        stalled = pageHeight() > before ? 0 : stalled + 1;
+      // About 30 seconds without any sign of progress before giving up.
+      for (let step = 0; step < 2_000 && stalled < 20 && moreToLoad; step++) {
+        if (document.hidden) {
+          await new Promise((r) => setTimeout(r, 1_000));
+          continue;
+        }
+        const videos = document.querySelectorAll<HTMLElement>('a[href*="/video/"]');
+        const last = videos[videos.length - 1];
+        const scroller = scrollerOf(last);
+        const before = { page: pageHeight(), inner: scroller?.scrollHeight ?? 0, videos: videos.length, responses: favouritesResponses };
+        // A stalled list often needs to see its sentinel leave and re-enter view.
+        if (stalled > 0 && stalled % 4 === 0) {
+          scroller?.scrollBy({ top: -600, behavior: "auto" });
+          window.scrollBy({ top: -600, behavior: "auto" });
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        last?.scrollIntoView({ block: "end", behavior: "auto" });
+        if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: "auto" });
+        window.scrollTo({ top: pageHeight(), behavior: "auto" });
+        await new Promise((r) => setTimeout(r, 1_500));
+        const grew =
+          pageHeight() > before.page ||
+          (scroller?.scrollHeight ?? 0) > before.inner ||
+          document.querySelectorAll('a[href*="/video/"]').length > before.videos ||
+          favouritesResponses > before.responses;
+        stalled = grew ? 0 : stalled + 1;
       }
     };
 
@@ -568,6 +633,10 @@ export default defineContentScript({
         scanning = true;
         moreToLoad = true;
         sawFavoritesResponse = false;
+        syncConfig = msg.config;
+        syncPages = 0;
+        stopReason = undefined;
+        responseHasMore = false;
         void (async () => {
           /**
            * Whatever happens, say so and let the next run start.
@@ -587,8 +656,8 @@ export default defineContentScript({
               if (activeRunId) send({ action: "error", errorCode: "capture_failed", runId: activeRunId });
               return;
             }
-            await scan();
-            if (sawFavoritesResponse && !moreToLoad && activeRunId) send({ action: "scanned", runId: activeRunId });
+            if (moreToLoad) await scan();
+            if (sawFavoritesResponse && !moreToLoad && activeRunId) send({ action: "scanned", runId: activeRunId, stopReason, hasMore: responseHasMore });
             else if (activeRunId) send({ action: "error", errorCode: "capture_failed", runId: activeRunId });
           } catch {
             if (activeRunId) send({ action: "error", errorCode: "capture_failed", runId: activeRunId });

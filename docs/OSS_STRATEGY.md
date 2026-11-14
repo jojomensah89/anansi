@@ -1,5 +1,8 @@
 # Anansi as an open-source product
 
+> Historical plan/evidence: current product guidance is in [README](../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 Anansi should be presented as a real, self-hosted product with an open-source core. Its clearest promise is: **your personal web memory, in your own Cloudflare account, searchable by you and your coding agent.** That position supports a personal brand better than treating the repository as a code sample, because people can install it, inspect the tradeoffs, report problems, and watch the product improve.
 
 ## Product boundary
@@ -23,7 +26,7 @@ This is suitable for a personal library when usage stays within Cloudflare's cur
 The hosted release is ready only when all of these gates pass:
 
 1. D1 ingestion uses D1-compatible atomic batches; callback transactions used by local SQLite are not a valid hosted implementation.
-2. The web library is closed until `LIBRARY_TOKEN` is configured, while extension ingest uses its separate `INGEST_TOKEN`.
+2. Owner sign-in requires ANANSI_SECRET; pair capture-only browser keys and connect agents through OAuth or named keys. Shared role tokens are legacy migration access.
 3. Media downloads validate every destination and redirect, accept a small raster MIME allowlist, enforce a streaming byte limit, and retain retry state.
 4. A clean-account installation, migration, first capture, search, export, and restore are exercised against Cloudflare rather than inferred from local tests.
 5. The README states measured limits and known restrictions, including any media hosts that the Worker refuses.

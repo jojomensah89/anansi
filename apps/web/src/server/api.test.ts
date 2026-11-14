@@ -1,4 +1,7 @@
+import { TOPIC_TAXONOMY_VERSION } from "@anansi/db";
 import { beforeAll, describe, expect, test } from "bun:test";
+import { parseExtensionConfig } from "@anansi/sources";
+import { extensionClients } from "@anansi/db";
 import { aiEnrichmentJobs, applyAiTags, getAiSettings, itemTags, items, markSemanticChunksComplete, reconcileAiJobs, searchItemsPage, setAiSettings, stageSemanticChunks, startLibraryRestore, upsertItems, type AnansiDb } from "@anansi/db";
 import { migrateLocalDb, openLocalDb } from "@anansi/db/local";
 import { handleApi as dispatchApi, type ApiEnv } from "./api.ts";
@@ -77,7 +80,7 @@ describe("handleApi", () => {
 		const fresh = openLocalDb(":memory:");
 		migrateLocalDb(fresh);
 		const empty = fresh as unknown as AnansiDb;
-		await startLibraryRestore(empty, "f".repeat(64), { items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 });
+		await startLibraryRestore(empty, "f".repeat(64), { items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0, shelfItems: 0, aiTopics: 0 });
 		const isolated = { ...env, db: empty };
 		const ingest = await dispatchApi(isolated, new Request("https://anansi.test/api/ingest", {
 			method: "POST", headers: { authorization: "Bearer test-token" }, body: "{}",
@@ -176,7 +179,7 @@ describe("handleApi", () => {
 		const first = await readJson(response);
 		expect(response.status).toBe(200);
 		expect((await db.select().from(itemTags)).some((assignment) => assignment.itemId === item.id && assignment.provenance === "ai")).toBe(false);
-		expect(first.taxonomyVersion).toBe("v1");
+		expect(first.taxonomyVersion).toBe(TOPIC_TAXONOMY_VERSION);
 		expect(first.taggingProgress.pending).toBeGreaterThan(0);
 		const jobsAfterFirst = await db.select().from(aiEnrichmentJobs);
 		await applyAiTags(db, item.id, ["web-dev"], "test-model");
@@ -400,6 +403,8 @@ describe("handleApi", () => {
 
 	test("extension config accepts the ingest credential and names the ingest url", async () => {
 		const body = await readJson(get("/api/extension/config"));
+		// The extension refuses a config it can't parse, so this is what it must read.
+		expect(parseExtensionConfig(body).ok).toBe(true);
 		expect(body.version).toBe(1);
 		expect(body.enabled).toBe(true);
 		expect(body.ingest).toEndWith("/api/ingest");
@@ -428,6 +433,35 @@ describe("handleApi", () => {
 			host: "github.com",
 			url: "https://github.com/stars",
 		});
+	});
+
+	test("opening the library reaches the extension through its check-in", async () => {
+		const opened = await handleApi(env, new Request("https://anansi.test/api/sync", { method: "POST" }));
+		expect(opened.status).toBe(200);
+		const { requestedAt } = (await opened.json()) as { requestedAt: number };
+		const checkIn = await handleApi(
+			env,
+			new Request("https://anansi.test/api/extension/heartbeat", {
+				method: "POST",
+				headers: { "content-type": "application/json", authorization: "Bearer test-token" },
+				body: JSON.stringify({
+					schemaVersion: 1,
+					installationId: "123e4567-e89b-42d3-a456-426614174000",
+					extensionVersion: "0.1.0",
+					queue: { queued: 0, uploading: 0, retrying: 0, failed: 0 },
+					sources: {},
+				}),
+			}),
+		);
+		expect(((await checkIn.json()) as { syncRequestedAt: number }).syncRequestedAt).toBe(requestedAt);
+	});
+
+	test("a capture token cannot request a sync", async () => {
+		const response = await dispatchApi(env, new Request("https://anansi.test/api/sync", {
+			method: "POST",
+			headers: { authorization: "Bearer test-token" },
+		}));
+		expect(response.status).toBe(401);
 	});
 
 	test("extension heartbeat requires auth and updates connection health", async () => {
@@ -464,6 +498,14 @@ describe("handleApi", () => {
 			400,
 		);
 		expect((await send(heartbeat)).status).toBe(200);
+		expect((await send({ ...heartbeat, sources: { x: {
+			...heartbeat.sources.x, newerField: { enabled: true }, token: "must-never-be-stored",
+		} } })).status).toBe(200);
+		const stored = await db.select().from(extensionClients);
+		const client = stored.find(row => row.installationId === heartbeat.installationId);
+		expect(client).toBeDefined();
+		expect(JSON.parse(client!.sources)).toEqual(heartbeat.sources);
+		expect(JSON.stringify(client)).not.toContain("must-never-be-stored");
 
 		const sources = await readJson(get("/api/sources"));
 		expect(sources.extension).toMatchObject({
@@ -518,6 +560,43 @@ describe("handleApi", () => {
 			}),
 		);
 		expect(unknown.status).toBe(400);
+	});
+
+	test("the extension can switch a source off and on, and the config it reads follows", async () => {
+		const toggle = (source: string, enabled: boolean, authorization = "Bearer test-token") =>
+			dispatchApi(env, new Request(`https://anansi.test/api/extension/sources/${source}`, {
+				method: "POST",
+				headers: { "content-type": "application/json", authorization },
+				body: JSON.stringify({ enabled }),
+			}));
+		// Read the config the way the extension does, so a reply it can't parse fails here.
+		const configSources = async () => {
+			const parsed = parseExtensionConfig(await readJson(get("/api/extension/config")));
+			if (!parsed.ok) throw new Error(parsed.error.message);
+			return parsed.config.sources.map((source) => source.source);
+		};
+
+		const off = await toggle("reddit", false);
+		expect(off.status).toBe(200);
+		expect(await readJson(off)).toEqual({ source: "reddit", enabled: false });
+		expect(await configSources()).not.toContain("reddit");
+		const library = await readJson(get("/api/sources"));
+		expect(library.sources.find((s: { source: string }) => s.source === "reddit").enabled).toBe(false);
+
+		const on = await toggle("reddit", true);
+		expect(await readJson(on)).toEqual({ source: "reddit", enabled: true });
+		expect(await configSources()).toContain("reddit");
+
+		// Web is always on: there is nothing to switch.
+		expect((await toggle("web", false)).status).toBe(400);
+		expect((await toggle("unknown", false)).status).toBe(400);
+		// The owner's library token is not a capture credential, and no token is no access.
+		expect((await toggle("reddit", false, "Bearer library-test-token")).status).toBe(401);
+		const anonymous = await dispatchApi(env, new Request("https://anansi.test/api/extension/sources/reddit", {
+			method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }),
+		}));
+		expect(anonymous.status).toBe(401);
+		expect(await configSources()).toContain("reddit");
 	});
 
 	test("ingest parses a raw payload server-side", async () => {

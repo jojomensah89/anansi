@@ -100,7 +100,7 @@ export async function extensionHealth(
       lastSeenAt: latest.lastSeenAt,
       activeClients: 0,
       queue: { ...EMPTY_QUEUE },
-      sources: {},
+      sources: parseJson(latest.sources, {}),
     };
   }
 

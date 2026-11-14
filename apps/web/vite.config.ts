@@ -7,7 +7,8 @@ export const LOCAL_API_ORIGIN = "http://127.0.0.1:8788";
 
 export const localProxy = {
   "/api": { target: LOCAL_API_ORIGIN },
-  "/mcp": { target: LOCAL_API_ORIGIN },
+  "/mcp": { target: LOCAL_API_ORIGIN, bypass: (req: { headers: { accept?: string }; url?: string }) => req.headers.accept?.includes("text/html") ? req.url : undefined },
+  "/.well-known/oauth": { target: LOCAL_API_ORIGIN },
 } as const;
 
 export default defineConfig({

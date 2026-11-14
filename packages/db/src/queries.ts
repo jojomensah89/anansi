@@ -1,3 +1,4 @@
+import { authorAvatarProjection } from "./author-avatar.ts";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { highlights, itemTagOverrides, itemTags, items, media, sourceSettings, tags } from "./schema.ts";
 import type { AnansiDb, NewDbItem } from "./types.ts";
@@ -162,7 +163,7 @@ export async function prepareUpsertItems(
       savedAt,
       savedAtExact: item.savedAtIsExact || was?.savedAtExact === 1 ? 1 : 0,
       captureOrigin: options.captureOrigin ?? "legacy_unknown",
-      saveOrder: item.saveOrder ?? null,
+      saveOrder: item.saveOrder ?? was?.saveOrder ?? null,
       metrics: JSON.stringify({ ...objectJson(was?.metrics), ...item.metrics }),
       nsfw: item.nsfw ? 1 : was?.nsfw ?? 0,
       // links ride inside raw rather than earning a column: the spec's schema
@@ -231,7 +232,10 @@ export async function prepareUpsertItems(
     // An absent remote attachment is not a deletion request. Preserve existing IDs,
     // downloaded keys and job state; only add newly discovered attachments.
     for (let i = 0; i < mediaRows.length; i += CHUNK) {
-      pending.push(target.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoNothing());
+      pending.push(target.insert(media).values(mediaRows.slice(i, i + CHUNK)).onConflictDoUpdate({
+        target: [media.itemId, media.identity],
+        set: { originUrl: sql`CASE WHEN ${media.storedKey} IS NULL THEN excluded.origin_url ELSE ${media.originUrl} END` },
+      }));
     }
     for (let i = 0; i < highlightRows.length; i += CHUNK) {
       pending.push(target.insert(highlights).values(highlightRows.slice(i, i + CHUNK)).onConflictDoNothing());
@@ -367,7 +371,7 @@ export async function creatorPage(db: AnansiDb, options: CreatorPageOptions = {}
 			select source,
 			       author_handle as authorHandle,
 			       max(author_name) as authorName,
-			       max(author_avatar) as authorAvatar,
+			       ${authorAvatarProjection(sql`items`)} as authorAvatar,
 			       count(*) as saves,
 			       max(posted_at) as lastPosted
 			from items
@@ -434,7 +438,9 @@ export async function tagItems(db: AnansiDb, ids: string[], label: string): Prom
 	const clean = topic?.label ?? label.trim().toLowerCase();
 	if (ids.length === 0 || !clean) return 0;
 
-	const existing = await db.select({ id: tags.id, color: tags.color, kind: tags.kind }).from(tags).where(eq(tags.label, clean)).limit(1);
+	let existing = await db.select({ id: tags.id, color: tags.color, kind: tags.kind }).from(tags).where(eq(tags.label, clean)).limit(1);
+	// An owner topic keeps the capitals it was named with; tagging by name finds it.
+	if (!existing[0] && !topic) existing = await db.select({ id: tags.id, color: tags.color, kind: tags.kind }).from(tags).where(and(eq(tags.kind, "topic"), sql`lower(${tags.label}) = ${clean}`)).limit(1);
 	const tagId = existing[0]?.id ?? (topic ? `topic:${topic.id}` : crypto.randomUUID());
 	if (!existing[0]) {
 		await db.insert(tags).values({ id: tagId, label: clean, color: topic?.color ?? randomTagColor(), origin: "manual", kind: topic ? "topic" : "custom" }).onConflictDoNothing();

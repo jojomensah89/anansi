@@ -1,3 +1,4 @@
+import { authorAvatarProjection } from "./author-avatar.ts";
 import { sql, type SQL } from "drizzle-orm";
 import type { AnansiDb } from "./types.ts";
 import { visibleSourceClause } from "./visibility.ts";
@@ -77,6 +78,7 @@ export interface SearchHit {
   authorAvatar?: string | null;
   /** Primary repository language for GitHub list cards, when stored. */
   language?: string | null;
+  subreddit?: string | null;
   /** Repository visibility, when GitHub supplied it. */
   visibility?: "public" | "private" | null;
   mediaCount?: number;
@@ -145,11 +147,12 @@ function hasNsfwColumn(db: AnansiDb): boolean {
 function cardProjection(hasNsfw = true): SQL {
 	return sql`
       i.id, i.url, i.author_handle as author, i.author_name as authorName,
-      i.author_avatar as authorAvatar, i.title, i.posted_at as postedAt,
+      ${authorAvatarProjection(sql`i`)} as authorAvatar, i.title, i.posted_at as postedAt,
       i.saved_at as savedAt, i.saved_at_exact as savedAtExact, i.source,
       i.platform_saved as platformSaved, i.removed_from_source_at as removedFromSourceAt,
       i.favorite, ${hasNsfw ? sql`i.nsfw` : sql`0 as nsfw`}, i.metrics as metricsJson,
       json_extract(i.raw, '$.language') as language,
+      json_extract(i.raw, '$.subreddit') as subreddit,
       json_extract(i.raw, '$.visibility') as visibility,
       (select count(*) from media m where m.item_id=i.id) as mediaCount,
       (select json_group_array(json_object('key',m.stored_key,'kind',m.kind,'url',m.origin_url))
@@ -177,6 +180,7 @@ function hydrateCardRow(rawRow: CardProjectionRow): SearchHit {
 		authorName: rawRow.authorName,
 		authorAvatar: rawRow.authorAvatar,
 		language: rawRow.language,
+        subreddit: rawRow.subreddit,
 		visibility: rawRow.visibility,
 		title: rawRow.title,
 		postedAt: rawRow.postedAt,
@@ -239,7 +243,7 @@ export async function searchItemsPage(db: AnansiDb, opts: SearchOptions): Promis
   if (!match) return { items: [], nextCursor: null };
   const [open, close] = opts.mark ?? ["", ""];
   const limit = Math.min(Math.max(Math.floor(opts.limit ?? 30), 1), 100);
-  const key = JSON.stringify([match, opts.source, opts.author, opts.tag, opts.media, opts.contentType, opts.archived ?? false, opts.removed ?? "include", opts.favorite, opts.since]);
+  const key = JSON.stringify([match, opts.source, opts.author, opts.tag, opts.media, opts.contentType, opts.archived ?? false, opts.removed ?? "include", opts.favorite, opts.since, ...(opts.shelf ? [opts.shelf.id] : [])]);
   let afterScore = 0;
   let afterId = "";
   if (opts.cursor) {
@@ -259,11 +263,12 @@ export async function searchItemsPage(db: AnansiDb, opts: SearchOptions): Promis
       and ${visibleSourceClause(sql`i.source`)}
       ${anyOf(sql`i.source`, opts.source)}
       ${anyOf(sql`i.author_handle`, opts.author)}
-      ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+      ${tagClause(opts.tag)} ${archiveClause(opts.archived ?? opts.shelf?.rule?.archived)}
       ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
       ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
       ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
       and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
+      ${shelfClause(opts.shelf)}
       ${opts.cursor ? sql`and (bm25(items_fts,1.0,2.0,0.4,1.0,1.5) > ${afterScore} or (bm25(items_fts,1.0,2.0,0.4,1.0,1.5) = ${afterScore} and i.id > ${afterId}))` : sql``}
     order by score asc, i.id asc limit ${limit + 1}
   `);
@@ -300,11 +305,12 @@ export async function hydrateSearchItems(
       and ${visibleSourceClause(sql`i.source`)}
       ${anyOf(sql`i.source`, opts.source)}
       ${anyOf(sql`i.author_handle`, opts.author)}
-      ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+      ${tagClause(opts.tag)} ${archiveClause(opts.archived ?? opts.shelf?.rule?.archived)}
       ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
       ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
       ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
       and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
+      ${shelfClause(opts.shelf)}
   `);
   const byId = new Map(rows.map((row) => [row.id, row]));
   return uniqueIds.flatMap((id) => {
@@ -367,10 +373,11 @@ export async function hydrateSemanticChunkMatches(
 		  and ${visibleSourceClause(sql`i.source`)}
 		  ${anyOf(sql`i.source`, opts.source)}
 		  ${anyOf(sql`i.author_handle`, opts.author)}
-		  ${tagClause(opts.tag)} ${archiveClause(opts.archived)}
+		  ${tagClause(opts.tag)} ${archiveClause(opts.archived ?? opts.shelf?.rule?.archived)}
 		  ${removedClause(opts.removed)} ${mediaClause(opts.media)} ${typeClause(opts.contentType)}
 		  ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
 		  and (${opts.since ?? null} is null or i.posted_at >= ${opts.since ?? null})
+		  ${shelfClause(opts.shelf)}
 	`);
 	const scores = new Map(unique);
 	const bestByParent = new Map<string, { hit: SearchHit; score: number; chunkId: string }>();
@@ -423,6 +430,8 @@ export async function findByAuthor(db: AnansiDb, handle: string, limit = 20) {
 }
 
 export interface ItemDetail {
+  captureTrail?: { observedAt: number; receivedAt: number; outcome: string } | null;
+  taggingState?: { status: string; lastError: string | null } | null;
   id: string;
   url: string;
   source: string;
@@ -601,7 +610,7 @@ export async function getItems(
 
   const rows = await db.all<DetailRow>(sql`
     select id, url, source, author_handle as author, author_name as authorName,
-           author_avatar as authorAvatar, platform_saved as platformSaved,
+           ${authorAvatarProjection(sql`items`)} as authorAvatar, platform_saved as platformSaved,
            removed_from_source_at as removedFromSourceAt, title, body,
            posted_at as postedAt, saved_at as savedAt, saved_at_exact as savedAtExact,
            metrics, raw, article_text as articleText, article_format as articleFormat,
@@ -832,6 +841,62 @@ export interface ListOptions {
   /** Saved-time boundaries; since is inclusive and until is exclusive. */
   since?: number;
   until?: number;
+  /** Only saves on this shelf. Resolve one with `shelfScope`. */
+  shelf?: ShelfScope;
+}
+
+/** Library criteria without paging: what a shelf's rule stores. */
+export type LibraryFilter = Omit<ListOptions, "cursor" | "limit" | "order" | "shelf"> & {
+  /** Keyword match, the same FTS grammar search uses. */
+  query?: string;
+};
+
+/** A shelf as the query layer sees it. A null rule means filled by hand only. */
+export interface ShelfScope {
+  id: string;
+  rule: LibraryFilter | null;
+}
+
+function queryClause(query: string | undefined): SQL {
+  const match = query ? toFtsQuery(query) : "";
+  if (!match) return sql``;
+  return sql`and i.rowid in (select rowid from items_fts where items_fts match ${match})`;
+}
+
+/**
+ * The library's filter conditions over `items i`, minus paging.
+ *
+ * The grid and every shelf rule go through this one builder, so a shelf
+ * always holds exactly what the same filters show in the library.
+ */
+export function libraryFilterClause(opts: LibraryFilter & { shelf?: ShelfScope }, hasNsfw = true): SQL {
+  return sql`${anyOf(sql`i.source`, opts.source)}
+      ${anyOf(sql`i.author_handle`, opts.author)}
+      ${tagClause(opts.tag)}
+      ${archiveClause(opts.archived ?? opts.shelf?.rule?.archived)}
+      ${removedClause(opts.removed)}
+      ${mediaClause(opts.media)}
+      ${typeClause(opts.contentType)}
+      ${opts.since === undefined ? sql`` : sql`and i.saved_at >= ${opts.since}`}
+      ${opts.until === undefined ? sql`` : sql`and i.saved_at < ${opts.until}`}
+      ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
+      ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
+      ${queryClause(opts.query)}`;
+}
+
+/**
+ * Whether `items i` is on a shelf: picked by hand, or matching the rule and
+ * not taken off by hand. A shelf without a rule holds only what was picked.
+ */
+export function shelfMembership(shelf: ShelfScope, hasNsfw = true): SQL {
+  const included = sql`exists (select 1 from shelf_items si where si.shelf_id = ${shelf.id} and si.item_id = i.id and si.mode = 'include')`;
+  if (!shelf.rule) return sql`(${included})`;
+  return sql`(${included} or (1 = 1 ${libraryFilterClause(shelf.rule, hasNsfw)}
+      and not exists (select 1 from shelf_items sx where sx.shelf_id = ${shelf.id} and sx.item_id = i.id and sx.mode = 'exclude')))`;
+}
+
+function shelfClause(shelf: ShelfScope | undefined): SQL {
+  return shelf ? sql`and ${shelfMembership(shelf)}` : sql``;
 }
 
 /**
@@ -900,18 +965,9 @@ export async function listItems(db: AnansiDb, opts: ListOptions = {}) {
     from items i
     where 1 = 1
       and ${visibleSourceClause(sql`i.source`)}
-      ${anyOf(sql`i.source`, opts.source)}
-      ${anyOf(sql`i.author_handle`, opts.author)}
       ${keyset}
-      ${tagClause(opts.tag)}
-      ${archiveClause(opts.archived)}
-      ${removedClause(opts.removed)}
-      ${mediaClause(opts.media)}
-      ${typeClause(opts.contentType)}
-      ${opts.since === undefined ? sql`` : sql`and i.saved_at >= ${opts.since}`}
-      ${opts.until === undefined ? sql`` : sql`and i.saved_at < ${opts.until}`}
-      ${opts.favorite === undefined ? sql`` : sql`and i.favorite = ${opts.favorite ? 1 : 0}`}
-      ${hasNsfw && !opts.nsfw ? sql`and coalesce(i.nsfw, 0) = 0` : sql``}
+      ${libraryFilterClause(opts, hasNsfw)}
+      ${shelfClause(opts.shelf)}
     ${ordering}
     limit ${limit + 1}
   `);

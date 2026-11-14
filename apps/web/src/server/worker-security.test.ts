@@ -22,12 +22,23 @@ describe("public Worker request protection", () => {
     expect((await limitPublicRequest(request, {}))?.status).toBe(503);
     expect((await limitPublicRequest(request, { INGEST_RATE_LIMITER: { limit: async () => { throw new Error("outage"); } } }))?.status).toBe(503);
   });
-  test("reads, logout and normal navigation do not consume login budget", async () => {
-    for (const path of ["/", "/settings", "/api/items", "/api/auth/session", "/mcp"]) {
+  test("library reads and normal navigation do not consume login budget", async () => {
+    for (const path of ["/", "/settings", "/api/items", "/mcp"]) {
       expect(await limitPublicRequest(new Request(`https://library.example${path}`), {})).toBeNull();
     }
-    expect(await limitPublicRequest(new Request("https://library.example/api/auth/session", { method: "DELETE" }), {})).toBeNull();
     expect(await limitPublicRequest(new Request("https://library.example/mcp", { method: "HEAD" }), {})).toBeNull();
+  });
+  test("auth reads stay unthrottled so page loads never lock the owner out", async () => {
+    for (const path of ["session", "passkeys"]) {
+      expect(await limitPublicRequest(new Request(`https://library.example/api/auth/${path}`), {})).toBeNull();
+    }
+  });
+  test("every auth attempt shares the login limiter, logout included", async () => {
+    for (const [path, method] of [["session","POST"],["session","DELETE"],["passkey/login/options","POST"],["passkeys/id","PATCH"],["passkeys/id","DELETE"]]) {
+      const request = new Request(`https://library.example/api/auth/${path}`, {method});
+      expect((await limitPublicRequest(request, {}))?.status).toBe(503);
+      expect(await limitPublicRequest(request, {LOGIN_RATE_LIMITER:{limit:async()=>({success:true})}})).toBeNull();
+    }
   });
   test("headers apply to errors and immutable responses without dropping cookies", () => {
     const response = secureResponse(new Response("denied", { status: 401, headers: { "set-cookie": "anansi_session=value; HttpOnly" } }));

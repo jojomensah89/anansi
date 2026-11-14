@@ -1,3 +1,6 @@
+import type { RegistrationResponseJSON, AuthenticationResponseJSON, PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
+import type { PasskeyRow } from "@anansi/db";
+export type { PasskeyRow } from "@anansi/db";
 import type { CardMedia, ItemDetail, SearchHit, RestoreCounts, RestoreState, RestoreTable } from "@anansi/db";
 import type { ImportMode } from "@anansi/sources";
 
@@ -41,8 +44,10 @@ async function send<T>(path: string, method: "PATCH" | "DELETE", body?: unknown)
 async function responseError(res: Response, path: string): Promise<Error> {
   let detail = "";
   try {
-    const body = (await res.json()) as { error?: string; message?: string };
-    detail = body.error ?? body.message ?? "";
+    const body = (await res.json()) as { error?: string; message?: string; unhandled?: boolean };
+    // The framework answers an uncaught server error with the bare class name.
+    const hidden = body.unhandled === true || body.message === "HTTPError";
+    detail = body.error ?? (hidden ? "" : body.message) ?? "";
   } catch {
     // An empty or non-JSON error response still has useful HTTP status text.
   }
@@ -50,6 +55,7 @@ async function responseError(res: Response, path: string): Promise<Error> {
 }
 
 export interface ItemRow extends SearchHit {
+  previewAttempted?: boolean;
   saveOrder: number | null;
   metrics?: Record<string, number>;
   media?: CardMedia[];
@@ -85,6 +91,8 @@ export interface ItemQuery {
   removed?: "include" | "exclude" | "only";
   order?: "saved" | "posted";
   limit?: number;
+  /** Only saves on this shelf. */
+  shelf?: string;
 }
 
 export interface Page {
@@ -106,6 +114,7 @@ export interface SemanticSearchStatus {
 }
 
 export interface SessionState {
+  hasPasskey: boolean;
   configured: boolean;
   authenticated: boolean;
 }
@@ -128,6 +137,61 @@ export interface Collection {
   filters: ItemQuery & { query?: string };
   createdAt: number;
   updatedAt: number;
+}
+
+/** The fixed shelf palette. Stored as keys; the UI maps each to its colours. */
+export const SHELF_COLORS = ["slate", "red", "orange", "amber", "green", "teal", "sky", "blue", "violet", "pink"] as const;
+export type ShelfColor = (typeof SHELF_COLORS)[number];
+
+export interface Shelf {
+  id: string;
+  name: string;
+  color: ShelfColor | null;
+  /** A lucide icon name, kebab-case. */
+  icon: string | null;
+  position: number;
+  /** The rule. Narrowing nothing (e.g. `{}`) means the shelf is filled by hand. */
+  filters: ItemQuery & { query?: string };
+  /** Visible, unarchived, safe-for-work saves on the shelf. */
+  count: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ShelfInput {
+  name?: string;
+  color?: ShelfColor | null;
+  icon?: string | null;
+  filters?: ItemQuery & { query?: string };
+}
+
+export interface ShelfSuggestion {
+  /** Topic id; pass back to dismiss. */
+  topic: string;
+  label: string;
+  count: number;
+  /** Ready to send as the new shelf's filters. */
+  filters: { tag: string[] };
+}
+
+export interface AiTopic {
+  id: string;
+  label: string;
+  description: string;
+  /** The shipped description, built-ins only. */
+  defaultDescription?: string;
+  color: string;
+  tagId: string;
+  builtIn: boolean;
+  enabled: boolean;
+  /** Visible saves carrying this topic's tag. */
+  count: number;
+}
+
+export interface AiTopicsResponse {
+  topics: AiTopic[];
+  /** Most topics that can be on at once. */
+  limit: number;
 }
 
 export interface Creator {
@@ -192,6 +256,7 @@ export interface SourceRuntime extends QueueCounts {
   phase: "idle" | "running";
   paused?: boolean;
   lastErrorCode?: string;
+  lastCheckedAt?: number;
 }
 
 export interface ExtensionHealth {
@@ -213,6 +278,8 @@ export const api = {
 	semanticPreview: (signal?: AbortSignal) => get<{ estimate: { itemCount: number; totalChunks: number; newChunks: number; estimatedCredits: number }; credits: { used: number; limit: number; remaining: number; month: string }; runtime: "local" | "cloudflare" }>("/api/ai/semantic-preview", signal),
   updateAi: (body: { semanticSearchEnabled?: boolean; semanticIndexPaused?: boolean; semanticBudgetLimit?: number; confirmSemanticBackfill?: boolean; autoTaggingEnabled?: boolean }) => send<AiSettingsResponse>("/api/ai", "PATCH", body),
   reclassifyAiTags: () => post<{ taxonomyVersion: string; progress: AiSettingsResponse["progress"]; taggingProgress: AiSettingsResponse["taggingProgress"] }>("/api/ai/reclassify", {}),
+  /** One bounded pass over the AI backlog; call again until `done`. */
+  drainAi: () => post<AiSettingsResponse & { processed: number; pending: number; done: boolean; error?: string }>("/api/ai/drain", {}),
   stats: (signal?: AbortSignal) =>
     get<{
       items: number;
@@ -236,6 +303,7 @@ export const api = {
     if (opts.nsfw) q.set("nsfw", "1");
     if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
     if (opts.order === "posted") q.set("order", "posted");
+    if (opts.shelf) q.set("shelf", opts.shelf);
     q.set("limit", String(opts.limit ?? 60));
     return get<Page>(`/api/items?${q}`, signal);
   },
@@ -261,7 +329,7 @@ export const api = {
     return get<{ query: string; items: SearchHit[]; nextCursor: string | null; semantic: SemanticSearchStatus }>(`/api/search?${q}`, signal);
   },
 
-  item: (id: string, signal?: AbortSignal) => get<ItemDetail>(`/api/items/${id}`, signal),
+  item: (id: string, signal?: AbortSignal) => get<ItemDetail & { shelves?: string[] }>(`/api/items/${id}`, signal),
 
 	creators: (options: CreatorQuery | number = {}, signal?: AbortSignal): Promise<CreatorPage> => {
 		const opts = typeof options === "number" ? { limit: options } : options;
@@ -275,9 +343,18 @@ export const api = {
 
   sources: (signal?: AbortSignal) => get<SourcesResponse>("/api/sources", signal),
 
+  requestSync: (force = false, browserHandled = false) => post<{ requestedAt: number }>("/api/sync", {force, browserHandled}),
+
   toggleSource: (source: string, enabled: boolean) =>
     post<{ source: string; enabled: boolean }>(`/api/sources/${source}`, { enabled }),
 
+  passkeyRegisterOptions: (secret?: string) => post<PublicKeyCredentialCreationOptionsJSON>("/api/auth/passkey/register/options", {secret}),
+  passkeyRegisterVerify: (response: RegistrationResponseJSON, name?: string, secret?: string) => post<{passkey:PasskeyRow}>("/api/auth/passkey/register/verify", {response,name,secret}),
+  passkeyLoginOptions: () => post<PublicKeyCredentialRequestOptionsJSON>("/api/auth/passkey/login/options", {}),
+  passkeyLoginVerify: (response: AuthenticationResponseJSON) => post<SessionState>("/api/auth/passkey/login/verify", {response}),
+  listPasskeys: () => get<{passkeys:PasskeyRow[]}>("/api/auth/passkeys"),
+  renamePasskey: (id:string,name:string) => send<{passkey:PasskeyRow}>(`/api/auth/passkeys/${encodeURIComponent(id)}`, "PATCH", {name}),
+  deletePasskey: (id:string) => send<{deleted:true}>(`/api/auth/passkeys/${encodeURIComponent(id)}`, "DELETE"),
   session: (signal?: AbortSignal) => get<SessionState>("/api/auth/session", signal),
   connect: (token: string) => post<SessionState>("/api/auth/session", { token }),
   disconnect: () => send<SessionState>("/api/auth/session", "DELETE"),
@@ -288,6 +365,28 @@ export const api = {
     post<{ collection: Collection }>("/api/collections", { id, name, filters }),
   deleteCollection: (id: string) =>
     send<{ deleted: true }>(`/api/collections/${encodeURIComponent(id)}`, "DELETE"),
+
+  shelves: (signal?: AbortSignal) => get<{ shelves: Shelf[] }>("/api/shelves", signal),
+  createShelf: (input: ShelfInput & { name: string }) => post<{ shelf: Shelf }>("/api/shelves", input),
+  updateShelf: (id: string, changes: ShelfInput) =>
+    send<{ shelf: Shelf }>(`/api/shelves/${encodeURIComponent(id)}`, "PATCH", changes),
+  deleteShelf: (id: string) => send<{ deleted: true }>(`/api/shelves/${encodeURIComponent(id)}`, "DELETE"),
+  /** Listed shelves take the first places; any left out keep their order after them. */
+  reorderShelves: (ids: string[]) => post<{ shelves: Shelf[] }>("/api/shelves/reorder", { ids }),
+  /** Up to 500 ids. Removing a save the rule still matches keeps it off the shelf. */
+  shelfItems: (id: string, itemIds: string[], action: "add" | "remove") =>
+    post<{ changed: number; shelf: Shelf }>(`/api/shelves/${encodeURIComponent(id)}/items`, { itemIds, action }),
+  shelfSuggestions: (signal?: AbortSignal) => get<{ suggestions: ShelfSuggestion[] }>("/api/shelves/suggestions", signal),
+  dismissShelfSuggestion: (topic: string) => post<{ dismissed: true }>("/api/shelves/suggestions/dismiss", { topic }),
+
+  aiTopics: (signal?: AbortSignal) => get<AiTopicsResponse>("/api/ai/topics", signal),
+  createAiTopic: (label: string, description = "") => post<AiTopicsResponse>("/api/ai/topics", { label, description }),
+  /** `description: null` puts a built-in's shipped description back. */
+  updateAiTopic: (id: string, changes: { enabled?: boolean; description?: string | null }) =>
+    send<AiTopicsResponse>(`/api/ai/topics/${encodeURIComponent(id)}`, "PATCH", changes),
+  deleteAiTopic: (id: string) => send<AiTopicsResponse>(`/api/ai/topics/${encodeURIComponent(id)}`, "DELETE"),
+  /** Ask about every save again with the current list. Returns how many jobs were reopened. */
+  retagAi: () => post<{ queued: number }>("/api/ai/retag", {}),
 
   exportLibrary: async (): Promise<Blob> => {
     const res = await fetch(`${BASE}/api/export`, { credentials: "include" });
@@ -314,9 +413,13 @@ function itemParams(opts: ItemQuery): URLSearchParams {
   if (opts.nsfw) q.set("nsfw", "1");
   if (opts.removed && opts.removed !== "include") q.set("removed", opts.removed);
   if (opts.order === "posted") q.set("order", "posted");
+  if (opts.shelf) q.set("shelf", opts.shelf);
   q.set("limit", String(opts.limit ?? 60));
   return q;
 }
+
+/** Display order for every source the library shows. A test keeps it complete. */
+export const LIBRARY_SOURCES = ["x", "github", "reddit", "tiktok", "web"] as const;
 
 export function sourceLabel(source: string): string {
   return ({
@@ -332,10 +435,7 @@ export function sourceLabel(source: string): string {
 export function shortDate(unix: number | null): string {
   if (!unix) return "";
   const d = new Date(unix * 1000);
-  const now = Date.now();
-  const hours = (now - d.getTime()) / 3_600_000;
-  if (hours < 24) return `${Math.max(1, Math.round(hours))}h`;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return d.toLocaleDateString("en-GB", { timeZone: "UTC", day: "numeric", month: "short", ...(d.getUTCFullYear() !== new Date().getUTCFullYear() ? { year: "numeric" as const } : {}) });
 }
 
 export function compact(n: number | undefined): string {

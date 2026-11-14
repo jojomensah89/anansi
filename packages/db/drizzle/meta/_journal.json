@@ -134,6 +134,111 @@
       "when": 1790553600000,
       "tag": "0018_items_nsfw",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1794000000000,
+      "tag": "0019_sync_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1794090000000,
+      "tag": "0020_platform_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1794100000000,
+      "tag": "0021_connected_clients",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1794110000000,
+      "tag": "0022_media_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1794100000000,
+      "tag": "0023_oauth",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1794180000000,
+      "tag": "0024_link_previews",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1794260000000,
+      "tag": "0025_note_fts",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1794340000000,
+      "tag": "0026_author_avatars",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1794355200000,
+      "tag": "0027_tag_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1794441600000,
+      "tag": "0028_backlog_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794528000000,
+      "tag": "0029_page_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1794614400000,
+      "tag": "0030_passkeys",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1794700800000,
+      "tag": "0031_clef_tagging",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794787200000,
+      "tag": "0032_topics_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1794873600000,
+      "tag": "0033_shelves_and_topics",
+      "breakpoints": true
     }
   ]
 }

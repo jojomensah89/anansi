@@ -69,6 +69,7 @@ describe("MCP tool contract", () => {
 				"list_author_saves",
 				"list_tags",
 				"library_stats",
+				"list_shelves",
 			]);
 			const search = listed.tools.find((tool) => tool.name === "search_saved");
 			const sourceSchema = search

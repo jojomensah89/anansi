@@ -4,7 +4,6 @@ import {
   stringifySearchWith,
 } from "@tanstack/react-router";
 
-import Loader from "./components/loader";
 import { routeTree } from "./routeTree.gen";
 
 /**
@@ -49,7 +48,6 @@ export const getRouter = () => {
     context: {},
     parseSearch: parseSearchWith(decode),
     stringifySearch: stringifySearchWith(encode),
-    defaultPendingComponent: () => <Loader />,
     defaultNotFoundComponent: () => <div>Not Found</div>,
   });
 

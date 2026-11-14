@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { type CSSProperties, useCallback, useState } from "react";
 
 /**
  * A deterministic visual identity for sources that do not provide avatars.
@@ -54,58 +54,101 @@ export function storedAvatarSource(src?: string | null): string | null {
 	return null;
 }
 
+type AvatarStatus = "loading" | "loaded" | "failed";
+
+/**
+ * A provider avatar over the author's initial.
+ *
+ * TikTok and X avatar URLs are signed CDN links that expire, so a stored URL
+ * failing is routine rather than exceptional. The image stays invisible until
+ * it has actually decoded, and a failure swaps in the initial, so the
+ * browser's broken-image glyph can never show. A load that settled before
+ * hydration attached `onError` is caught by checking the element on mount.
+ */
 export function Avatar({
 	src,
 	size,
 	square,
 	seed,
+	name,
 }: {
 	src?: string | null;
 	size: number;
 	square?: boolean;
 	/** The handle or name used to keep the fallback stable across views. */
 	seed?: string | null;
+	/** The display name, when it differs from the seed: the initial comes from it. */
+	name?: string | null;
 }) {
 	const radius = square ? 4 : "50%";
 	const label = avatarLabelFor(seed);
+	const initial = (avatarLabelFor(name) || label).slice(0, 1);
 	const storedSrc = storedAvatarSource(src);
+	const [state, setState] = useState<{ src: string | null; status: AvatarStatus }>({
+		src: storedSrc,
+		status: "loading",
+	});
+	// A new URL starts over; derived during render so no stale frame shows.
+	const status: AvatarStatus = state.src === storedSrc ? state.status : "loading";
+	const settle = useCallback(
+		(next: AvatarStatus) => setState({ src: storedSrc, status: next }),
+		[storedSrc],
+	);
+	const checkSettled = useCallback(
+		(img: HTMLImageElement | null) => {
+			if (!img || !img.complete) return;
+			settle(img.naturalWidth > 0 ? "loaded" : "failed");
+		},
+		[settle],
+	);
 
-	if (!storedSrc) {
-		const style: CSSProperties = {
-			width: size,
-			height: size,
-			borderRadius: radius,
-			background: label ? avatarTintFor(label) : "var(--edge-strong)",
-			color: "#f4f7fa",
-			flexShrink: 0,
-			display: "flex",
-			alignItems: "center",
-			justifyContent: "center",
-			fontSize: Math.max(8, Math.round(size * 0.44)),
-			fontWeight: 600,
-			textTransform: "uppercase",
-		};
-
-		return (
-			<span aria-hidden="true" style={style}>
-				{label.slice(0, 1)}
-			</span>
-		);
-	}
+	const showImage = storedSrc !== null && status !== "failed";
+	const style: CSSProperties = {
+		position: "relative",
+		width: size,
+		height: size,
+		borderRadius: radius,
+		overflow: "hidden",
+		background:
+			showImage || !label ? "var(--edge-strong)" : avatarTintFor(label),
+		color: "#f4f7fa",
+		flexShrink: 0,
+		display: "inline-flex",
+		alignItems: "center",
+		justifyContent: "center",
+		fontSize: Math.max(8, Math.round(size * 0.44)),
+		fontWeight: 600,
+		lineHeight: 1,
+		textTransform: "uppercase",
+	};
 
 	return (
-		<img
-			src={storedSrc}
-			alt=""
-			width={size}
-			height={size}
-			loading="lazy"
-			style={{
-				borderRadius: radius,
-				flexShrink: 0,
-				objectFit: "cover",
-				background: "var(--edge-strong)",
-			}}
-		/>
+		<span aria-hidden="true" data-avatar={showImage ? status : "initial"} style={style}>
+			{showImage ? (
+				<img
+					key={storedSrc}
+					ref={checkSettled}
+					src={storedSrc}
+					alt=""
+					width={size}
+					height={size}
+					loading="lazy"
+					decoding="async"
+					onLoad={() => settle("loaded")}
+					onError={() => settle("failed")}
+					style={{
+						position: "absolute",
+						inset: 0,
+						width: "100%",
+						height: "100%",
+						objectFit: "cover",
+						opacity: status === "loaded" ? 1 : 0,
+						transition: "opacity 120ms var(--ease-ui)",
+					}}
+				/>
+			) : (
+				initial
+			)}
+		</span>
 	);
 }

@@ -1,6 +1,17 @@
+import { passkeyRoute, hasPasskeys } from "./passkeys.ts";
+import { sql as trailSql } from "drizzle-orm";
+import { coordinateSearch } from "./search-coordinator.ts";
+import { sql } from "drizzle-orm";
+import { runPreviewPass } from "./link-preview.ts";
+import { setClientWrite, retireSelf, authorizeClient, createClient, listClients, retired, retireLegacy, updateClient, redeemPairing } from "./clients.ts";
+import { checkPublicGithub } from "./public-github-sync.ts";
+import { decideRequest, describeRequest, exchangeToken, registerClient, type AuthorizationParams } from "./oauth.ts";
 import {
 	creatorPage,
 	extensionHealth,
+	knownSyncIds, getSyncSettings, setSyncSettings, pendingPlatformSync, requestPlatformSync,
+	latestLibrarySyncRequest,
+	requestLibrarySync,
 	findByAuthor,
 	getItem,
 	disabledSources,
@@ -13,27 +24,28 @@ import {
 	sourceHealth,
 	recentSaves,
 	recordExtensionHeartbeat,
-	searchItemsPage,
 	setItemNote, setFavorite, removeItemTag, listCollections, saveCollection, deleteCollection, exportLibrary,
 	InvalidListCursorError, InvalidSearchCursorError, InvalidCreatorCursorError,
 	getLibraryRestore,
-  getAiSettings, setAiSettings, aiProgress, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
-  clearSemanticIndex, consumeSemanticCredits, estimateSemanticBackfill, semanticIndexStats,
+  getAiSettings, setAiSettings, reconcileAiJobs, aiProgress, aiProgressAll, reclassifyAiTopics, TOPIC_TAXONOMY_VERSION,
+  clearSemanticIndex, estimateSemanticBackfill, semanticIndexStats,
+  ShelfError, changeShelfItems, createShelf, deleteShelf, dismissShelfSuggestion, listShelves, reorderShelves, shelfScope, shelfSuggestions, shelvesForItem, updateShelf,
+  TopicSettingsError, createTopic, deleteTopic, requeueTagging, topicSettings, updateTopic, TOPIC_LIMIT,
 } from "@anansi/db";
 import type { AnansiDb, SearchOptions } from "@anansi/db";
-import { authorizeLibrary, sessionRoute, sameSecret, type LibraryAuthEnv } from "./library-auth.ts";
+import { authorizeLibrary, sessionRoute, renewSession, type LibraryAuthEnv } from "./library-auth.ts";
 import {
 	EXTENSION_PLATFORM_SOURCES,
 	parseExtensionHeartbeat,
 	type ExtensionPlatformSource,
 	type ExtensionSourceConfig,
 } from "@anansi/sources";
-import { fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
+import { fetchPendingAvatars, fetchPendingMedia, readMedia, type MediaSource } from "./media.ts";
 import type { AiBinding, VectorizeBinding } from "./ai.ts";
-import { createEmbeddingProvider, createVectorIndex } from "./ai.ts";
-import { hybridSearch } from "./semantic-search.ts";
+import { createVectorIndex } from "./ai.ts";
 import { drainSemanticVectorDeletes } from "./semantic-vector-cleanup.ts";
 import { ingestCapture } from "./ingest.ts";
+import { drainAi } from "./ai-drain.ts";
 import { handleRestoreRequest } from "./restore.ts";
 import {
 	isToggleableSource,
@@ -102,14 +114,7 @@ interface Route {
 	handle: (ctx: Ctx) => Response | Promise<Response>;
 }
 
-function authorizeExtension(env: ApiEnv, request: Request): Response | null {
-	if (!env.ingestToken)
-		return json({ error: "extension access is not configured" }, 503);
-	const auth = request.headers.get("authorization") ?? "";
-	return sameSecret(auth, `Bearer ${env.ingestToken}`)
-		? null
-		: json({ error: "unauthorized" }, 401);
-}
+const authorizeExtension = authorizeClient;
 
 /* --------------------------------------------------------- handlers --- */
 
@@ -122,13 +127,30 @@ const mediaRoute: Route = {
 		readMedia(env.media ?? {}, decodeURIComponent(params[0] ?? "")),
 };
 
+async function previewState<T extends {items: {id:string;source:string}[]}>(db: AnansiDb, page: T) {
+  const ids = page.items.filter(item=>item.source === "web").map(item=>item.id);
+  const attempted = ids.length ? await db.all<{item_id:string}>(sql`SELECT item_id FROM link_preview_jobs WHERE attempts>0 AND item_id IN (${sql.join(ids.map(id=>sql`${id}`),sql`,` )})`) : [];
+  const seen = new Set(attempted.map(row=>row.item_id));
+  return {...page,items:page.items.map(item=>({...item,previewAttempted:seen.has(item.id)}))};
+}
 const itemsRoute: Route = {
 	method: "GET",
 	path: "/api/items",
 	handle: async ({ env, q }) => {
+    // First page only: scrolling must not repeat the background avatar pass.
+    if (env.media && !q.get("cursor")) {
+      const work = fetchPendingAvatars(env.db, env.media);
+      // Never hold the page for avatar downloads.
+      const quiet = work.catch(() => {});
+      if (env.waitUntil) env.waitUntil(quiet); else void quiet;
+    }
 		try {
+			const shelfId = q.get("shelf");
+			const shelf = shelfId ? await shelfScope(env.db, shelfId) : undefined;
+			if (shelfId && !shelf) return json({ error: "No such shelf" }, 404);
 			return json(
-				await listItems(env.db, {
+				await previewState(env.db, await listItems(env.db, {
+					shelf: shelf ?? undefined,
 					cursor: q.get("cursor") ?? undefined,
 					// Repeated params, so ?source=x&source=tiktok is "either of these".
 					// getAll returns [] for an absent param, which the query layer
@@ -146,7 +168,7 @@ const itemsRoute: Route = {
 					),
 					order: q.get("order") === "posted" ? "posted" : "saved",
 					limit: num(q.get("limit"), 50),
-				}),
+				})),
 			);
 		} catch (error) {
 			if (error instanceof InvalidListCursorError || error instanceof InvalidSearchCursorError)
@@ -161,7 +183,10 @@ const itemRoute: Route = {
 	path: /^\/api\/items\/([\w-]+)$/,
 	handle: async ({ env, params }) => {
 		const found = await getItem(env.db, params[0] ?? "");
-		return found ? json(found) : json({ error: "not found" }, 404);
+		if (!found) return json({ error: "not found" }, 404);
+    const events = await env.db.all<{ observedAt: number; receivedAt: number; outcome: string }>(trailSql`select observed_at as observedAt, received_at as receivedAt, outcome from capture_events where item_id = ${found.id} order by received_at desc limit 1`);
+    const jobs = await env.db.all<{ status: string; lastError: string | null }>(trailSql`select status, last_error as lastError from ai_enrichment_jobs where item_id = ${found.id} and kind = 'tagging' order by updated_at desc limit 1`);
+    return json({ ...found, captureTrail: events[0] ?? null, taggingState: jobs[0] ?? null, shelves: await shelvesForItem(env.db, found.id) });
 	},
 };
 
@@ -172,7 +197,11 @@ const searchRoute: Route = {
 		const query = q.get("q") ?? "";
 		if (!query.trim()) return json({ error: "q is required" }, 400);
         try {
+          const shelfId = q.get("shelf");
+          const shelf = shelfId ? await shelfScope(env.db, shelfId) : undefined;
+          if (shelfId && !shelf) return json({ error: "No such shelf" }, 404);
           const searchOptions: SearchOptions = {
+            shelf: shelf ?? undefined,
             query, source: q.getAll("source"), author: q.getAll("author"), tag: q.getAll("tag"),
             media: q.get("media") ?? undefined, contentType: q.getAll("type"),
             archived: q.get("archived") === "1", favorite: q.get("favorite") === "1" ? true : undefined,
@@ -181,22 +210,9 @@ const searchRoute: Route = {
             order: q.get("order") === "posted" ? "posted" : "saved", cursor: q.get("cursor") ?? undefined,
             limit: num(q.get("limit"), 50),
           };
-          const page = await searchItemsPage(env.db, searchOptions);
-          const aiSettings = await getAiSettings(env.db);
-          const runtime = (env.ai && env.vectorize) ? {
-            provider: createEmbeddingProvider(env.ai, aiSettings.embeddingModel, aiSettings.embeddingDimensions),
-            index: createVectorIndex(env.vectorize, aiSettings.embeddingDimensions),
-            charge: async (text: string) => (await consumeSemanticCredits(env.db, text)).allowed,
-          } : undefined;
-          const hybrid = await hybridSearch(
-            env.db,
-            query,
-            searchOptions,
-            page,
-            { enabled: aiSettings.semanticSearchEnabled === 1, dimensions: aiSettings.embeddingDimensions, generation: aiSettings.semanticGeneration },
-            runtime,
-          );
-          return json({ query, items: hybrid.items, results: hybrid.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
+          const hybrid = await coordinateSearch(env, searchOptions);
+          const enriched = await previewState(env.db, hybrid);
+          return json({ query, items: enriched.items, results: enriched.items, nextCursor: hybrid.nextCursor, semantic: hybrid.semantic });
         } catch (error) {
           if (error instanceof InvalidListCursorError || error instanceof InvalidSearchCursorError) return json({ error: error.message }, 400);
           throw error;
@@ -284,26 +300,39 @@ const sourcesRoute: Route = {
 	},
 };
 
+/**
+ * One switch, two doors: the library's Sources page and the extension popup
+ * both land here, so a source turned off in either place is off everywhere.
+ */
+const toggleSource = async ({ env, request, params }: Ctx) => {
+	const body = (await request.json().catch(() => ({}))) as {
+		enabled?: boolean;
+	};
+	const source = params[0] ?? "";
+	if (!isToggleableSource(source))
+		return json({ error: "source cannot be toggled" }, 400);
+	await setSourceEnabled(env.db, source, body.enabled !== false);
+	return json({ source, enabled: body.enabled !== false });
+};
+
 const toggleSourceRoute: Route = {
 	method: "POST",
 	path: /^\/api\/sources\/([\w-]+)$/,
-	handle: async ({ env, request, params }) => {
-		const body = (await request.json().catch(() => ({}))) as {
-			enabled?: boolean;
-		};
-		const source = params[0] ?? "";
-		if (!isToggleableSource(source))
-			return json({ error: "source cannot be toggled" }, 400);
-		await setSourceEnabled(env.db, source, body.enabled !== false);
-		return json({ source, enabled: body.enabled !== false });
-	},
+	handle: toggleSource,
+};
+
+/** The popup's switch. Extension-authenticated like every /api/extension/ path. */
+const extensionToggleSourceRoute: Route = {
+	method: "POST",
+	path: /^\/api\/extension\/sources\/([\w-]+)$/,
+	handle: toggleSource,
 };
 
 const extensionHeartbeatRoute: Route = {
 	method: "POST",
 	path: "/api/extension/heartbeat",
 	handle: async ({ env, request }) => {
-		const denied = authorizeExtension(env, request);
+		const denied = await authorizeExtension(env, request);
 		if (denied) return denied;
 		const parsed = parseExtensionHeartbeat(
 			await request.json().catch(() => null),
@@ -311,7 +340,28 @@ const extensionHeartbeatRoute: Route = {
 		if (!parsed.ok) return json({ error: parsed.error.message }, 400);
 		const receivedAt = Math.floor(Date.now() / 1000);
 		await recordExtensionHeartbeat(env.db, parsed.heartbeat, receivedAt);
-		return json({ ok: true, receivedAt });
+		return json({
+			ok: true,
+			receivedAt,
+			syncRequestedAt: await latestLibrarySyncRequest(env.db),
+      platformSync: await pendingPlatformSync(env.db),
+		});
+	},
+};
+
+/** A library page opened somewhere. The extension acts on this at check-in. */
+const librarySyncRoute: Route = {
+	method: "POST",
+	path: "/api/sync",
+	handle: async ({ env, request }) => {
+    const body = (request.body === null ? {} : await request.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object" || (body.force !== undefined && typeof body.force !== "boolean")) return json({error: "invalid sync request"}, 400);
+		const requestedAt = Math.floor(Date.now() / 1000);
+		await requestLibrarySync(env.db, requestedAt);
+    if (body.browserHandled !== true) await requestPlatformSync(env.db, requestedAt, body.force === true ? "force" : "library");
+    const github = checkPublicGithub(env.db, fetch, requestedAt, body.force === true);
+    if (env.waitUntil) env.waitUntil(github); else await github;
+		return json({ requestedAt });
 	},
 };
 
@@ -319,6 +369,13 @@ const creatorsRoute: Route = {
 	method: "GET",
 	path: "/api/creators",
 	handle: async ({ env, q }) => {
+    // First page only: scrolling must not repeat the background avatar pass.
+    if (env.media && !q.get("cursor")) {
+      const work = fetchPendingAvatars(env.db, env.media);
+      // Never hold the page for avatar downloads.
+      const quiet = work.catch(() => {});
+      if (env.waitUntil) env.waitUntil(quiet); else void quiet;
+    }
 		try {
 			return json(await creatorPage(env.db, {
 				query: q.get("q") ?? "",
@@ -342,32 +399,71 @@ const statsRoute: Route = {
 	method: "GET",
 	path: "/api/stats",
 	handle: async ({ env }) => {
-    if (env.media && env.waitUntil) env.waitUntil(fetchPendingMedia(env.db, env.media));
+    if (env.media && env.waitUntil) env.waitUntil(runPreviewPass(env.db, env.media));
     return json(await libraryStats(env.db));
   },
 };
 
+type AiSettings = Awaited<ReturnType<typeof getAiSettings>>;
+
+/** What the settings page shows, in three queries. */
+async function aiOverview(env: ApiEnv, settings: AiSettings) {
+  return {
+    settings,
+    taxonomyVersion: TOPIC_TAXONOMY_VERSION,
+    ...await aiProgressAll(env.db, settings),
+    semanticIndex: await semanticIndexStats(env.db, settings.embeddingModel, settings.semanticGeneration),
+    available: Boolean(env.ai),
+    capabilities: {
+      semanticSearch: Boolean(env.ai && env.vectorize),
+      autoTagging: Boolean(env.ai),
+    },
+    runtime: env.ai ? "cloudflare" : "none",
+  };
+}
+
 const aiSettingsRoute: Route = {
   method: "GET",
   path: "/api/ai",
+  handle: async ({ env }) => json(await aiOverview(env, await getAiSettings(env.db))),
+};
+
+/**
+ * Work through the backlog one bounded pass at a time. The settings page
+ * calls this back to back while it is open; each call is its own invocation
+ * with its own query budget.
+ */
+const aiDrainRoute: Route = {
+  method: "POST",
+  path: "/api/ai/drain",
   handle: async ({ env }) => {
-    const settings = await getAiSettings(env.db);
-    return json({
-      settings,
-      taxonomyVersion: TOPIC_TAXONOMY_VERSION,
-      progress: await aiProgress(env.db),
-      embeddingProgress: await aiProgress(env.db, "embedding", settings.embeddingModel),
-      taggingProgress: await aiProgress(env.db, "tagging", settings.tagModel),
-      semanticIndex: await semanticIndexStats(env.db, settings.embeddingModel, settings.semanticGeneration),
-      available: Boolean(env.ai),
-      capabilities: {
-        semanticSearch: Boolean(env.ai && env.vectorize),
-        autoTagging: Boolean(env.ai),
-      },
-      runtime: env.ai ? "cloudflare" : "none",
-    });
+    const before = await getAiSettings(env.db);
+    const pass = await drainAi(env.db, env, { settings: before });
+    // Indexing spends credits, so only that pass needs the settings re-read.
+    const overview = await aiOverview(env, pass.kind === "embedding" ? await getAiSettings(env.db) : before);
+    const tagging = before.autoTaggingEnabled === 1 && env.ai ? overview.taggingProgress.pending : 0;
+    const indexing = before.semanticSearchEnabled === 1 && before.semanticIndexPaused !== 1 && env.ai && env.vectorize ? overview.semanticIndex.pending : 0;
+    const pending = tagging + indexing;
+    // A pass that finishes nothing means the rest is waiting on a retry.
+    return json({ ...overview, processed: pass.processed, pending, done: pending === 0 || pass.processed === 0, error: pass.error });
   },
 };
+
+/** Tag (and index) what was just saved, after the reply, a few saves at a time. */
+async function enrichNewSaves(env: ApiEnv): Promise<void> {
+  try {
+    const settings = await getAiSettings(env.db);
+    if (settings.autoTaggingEnabled !== 1 && settings.semanticSearchEnabled !== 1) return;
+    const first = await drainAi(env.db, env, { settings, tagLimit: 5, embedLimit: 2 });
+    // A tagging pass leaves indexing for a second, equally small pass.
+    if (first.kind === "tagging" && settings.semanticSearchEnabled === 1) {
+      await drainAi(env.db, env, { settings: { ...settings, autoTaggingEnabled: 0 }, embedLimit: 2 });
+    }
+  } catch (error) {
+    // The save is stored; the settings page and the schedule pick this up.
+    console.error("AI enrichment after ingest failed", error);
+  }
+}
 
 const semanticPreviewRoute: Route = {
 	method: "GET",
@@ -427,6 +523,10 @@ const aiSettingsUpdateRoute: Route = {
       semanticBudgetLimit: body.semanticBudgetLimit as number | undefined,
       autoTaggingEnabled: body.autoTaggingEnabled as boolean | undefined,
     });
+    // Seed a bounded durable backfill immediately; cron continues larger libraries.
+    if (enablingSemantic || (body.autoTaggingEnabled === true && current.autoTaggingEnabled !== 1)) {
+      await reconcileAiJobs(env.db, 100);
+    }
     if (disablingSemantic) {
       await clearSemanticIndex(env.db);
       const index = env.vectorize ? createVectorIndex(env.vectorize, current.embeddingDimensions) : undefined;
@@ -573,7 +673,7 @@ const ingestRoute: Route = {
 	method: "POST",
 	path: "/api/ingest",
 	handle: async ({ env, request }) => {
-		const denied = authorizeExtension(env, request);
+		const denied = await authorizeExtension(env, request);
 		if (denied) return denied;
 
 		const result = await ingestCapture(env.db, request);
@@ -587,8 +687,12 @@ const ingestRoute: Route = {
 		 * an ingest must not block on image fetches, and a burst of saves
 		 * must not become an unbounded download.
 		 */
-		if (env.media && result.syncMedia) {
-			const work = fetchPendingMedia(env.db, env.media);
+		if (env.media && result.status < 300 && (result.syncMedia || env.waitUntil)) {
+			const work = runPreviewPass(env.db, env.media);
+			if (env.waitUntil) env.waitUntil(work); else await work;
+		}
+		if (env.ai && result.status < 300) {
+			const work = enrichNewSaves(env);
 			if (env.waitUntil) env.waitUntil(work); else await work;
 		}
 
@@ -620,6 +724,72 @@ const itemTagsRoute = (method: "POST" | "DELETE"): Route => ({
     return json({ok:true});
   }
 });
+/** Validation failures from the shelf and topic modules carry their own status. */
+async function guarded(work: () => Promise<Response>): Promise<Response> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof ShelfError || error instanceof TopicSettingsError) return json({ error: error.message }, error.status);
+    throw error;
+  }
+}
+const body = async (request: Request) => await request.json().catch(() => null) as Record<string, unknown> | null;
+
+/**
+ * Shelves. The older /api/collections routes below stay as aliases over the
+ * same rows, so a client mid-update keeps working.
+ */
+const shelfRoutes: Route[] = [
+  {method:"GET",path:"/api/shelves",handle:async({env})=>json({shelves:await listShelves(env.db)})},
+  {method:"POST",path:"/api/shelves",handle:({env,request})=>guarded(async()=>{
+    const input = await body(request);
+    if (!input) return json({error:"invalid shelf"},400);
+    return json({shelf:await createShelf(env.db,{name:input.name,color:input.color,icon:input.icon,filters:input.filters})});
+  })},
+  {method:"POST",path:"/api/shelves/reorder",handle:({env,request})=>guarded(async()=>{
+    const input = await body(request);
+    if (!Array.isArray(input?.ids) || input.ids.length > 500 || input.ids.some((id: unknown)=>typeof id !== "string")) return json({error:"expected { ids: [...] }"},400);
+    return json({shelves:await reorderShelves(env.db,input.ids as string[])});
+  })},
+  {method:"GET",path:"/api/shelves/suggestions",handle:async({env})=>json({suggestions:await shelfSuggestions(env.db)})},
+  {method:"POST",path:"/api/shelves/suggestions/dismiss",handle:({env,request})=>guarded(async()=>{
+    await dismissShelfSuggestion(env.db,(await body(request))?.topic);
+    return json({dismissed:true});
+  })},
+  {method:"PATCH",path:/^\/api\/shelves\/([\w-]+)$/,handle:({env,request,params})=>guarded(async()=>{
+    const input = await body(request);
+    if (!input) return json({error:"invalid shelf"},400);
+    return json({shelf:await updateShelf(env.db,params[0]!,{name:input.name,color:input.color,icon:input.icon,filters:input.filters})});
+  })},
+  {method:"DELETE",path:/^\/api\/shelves\/([\w-]+)$/,handle:async({env,params})=>await deleteShelf(env.db,params[0]!) ? json({deleted:true}) : json({error:"No such shelf"},404)},
+  {method:"POST",path:/^\/api\/shelves\/([\w-]+)\/items$/,handle:({env,request,params})=>guarded(async()=>{
+    const input = await body(request);
+    return json(await changeShelfItems(env.db,params[0]!,input?.itemIds,input?.action));
+  })},
+];
+
+/** The owner's topic list. Changing it never retags by itself; /api/ai/retag does. */
+const topicRoutes: Route[] = [
+  {method:"GET",path:"/api/ai/topics",handle:async({env})=>json({topics:await topicSettings(env.db),limit:TOPIC_LIMIT})},
+  {method:"POST",path:"/api/ai/topics",handle:({env,request})=>guarded(async()=>{
+    const input = await body(request);
+    if (!input) return json({error:"invalid topic"},400);
+    await createTopic(env.db,{label:input.label,description:input.description});
+    return json({topics:await topicSettings(env.db),limit:TOPIC_LIMIT});
+  })},
+  {method:"PATCH",path:/^\/api\/ai\/topics\/([\w-]+)$/,handle:({env,request,params})=>guarded(async()=>{
+    const input = await body(request);
+    if (!input) return json({error:"invalid topic"},400);
+    await updateTopic(env.db,params[0]!,{enabled:input.enabled,description:input.description});
+    return json({topics:await topicSettings(env.db),limit:TOPIC_LIMIT});
+  })},
+  {method:"DELETE",path:/^\/api\/ai\/topics\/([\w-]+)$/,handle:({env,params})=>guarded(async()=>{
+    await deleteTopic(env.db,params[0]!);
+    return json({topics:await topicSettings(env.db),limit:TOPIC_LIMIT});
+  })},
+  {method:"POST",path:"/api/ai/retag",handle:async({env})=>json({queued:await requeueTagging(env.db)})},
+];
+
 const collectionRoutes: Route[] = [
   {method:"GET",path:"/api/collections",handle:async({env})=>json({collections:await listCollections(env.db)})},
   {method:"POST",path:"/api/collections",handle:async({env,request})=>{
@@ -636,10 +806,18 @@ const collectionRoutes: Route[] = [
  * Matched in order. `/api/items` has to be tried before `/api/items/:id` only
  * because the second is a pattern; everything else is disjoint.
  */
-const ROUTES: Route[] = [
+export const ROUTES: Route[] = [
+  {method:"POST", path:"/api/link-previews/visible", handle:async({env,request})=>{
+    const body = await request.json().catch(()=>null) as {ids?: unknown} | null;
+    if (!Array.isArray(body?.ids) || body.ids.length > 12 || body.ids.some((id: unknown)=>typeof id !== "string" || id.length > 100)) return json({error:"expected up to 12 item ids"},400);
+    const ids = [...new Set<string>(body.ids)];
+    if (!ids.length) return json({subrequests:0});
+    if (!env.media) return json({error:"media is not configured"},503);
+    return json(await runPreviewPass(env.db,env.media,ids));
+  }},
 	...(["/api/restore/start", "/api/restore/chunk", "/api/restore/finish", "/api/restore/abort"] as const).map((path): Route => ({ method: "POST", path, handle: ({ env, request }) => handleRestoreRequest(env, request) })),
 	{ method: "GET", path: "/api/restore", handle: ({ env, request }) => handleRestoreRequest(env, request) },
-	itemUpdateRoute, itemTagsRoute("POST"), itemTagsRoute("DELETE"), ...collectionRoutes,
+	itemUpdateRoute, itemTagsRoute("POST"), itemTagsRoute("DELETE"), ...shelfRoutes, ...topicRoutes, ...collectionRoutes,
 	mediaRoute,
 	itemsRoute,
 	itemRoute,
@@ -651,11 +829,25 @@ const ROUTES: Route[] = [
 	tagRoute,
 	sourcesRoute,
 	toggleSourceRoute,
+	extensionToggleSourceRoute,
 	creatorsRoute,
 	statsRoute, extensionStatsRoute,
-	aiSettingsRoute, semanticPreviewRoute, aiSettingsUpdateRoute, aiReclassifyRoute,
+	aiSettingsRoute, semanticPreviewRoute, aiSettingsUpdateRoute, aiReclassifyRoute, aiDrainRoute,
 	extensionConfigRoute,
 	extensionHeartbeatRoute,
+	librarySyncRoute,
+  {method: "GET", path: "/api/sync/settings", handle: async ({env}) => json(await getSyncSettings(env.db))},
+  {method: "POST", path: "/api/sync/settings", handle: async ({env, request}) => {
+    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    if (!body || typeof body.agentTabs !== "boolean" || !(body.githubUsername === null || typeof body.githubUsername === "string")) return json({error: "invalid settings"},400);
+    try { await setSyncSettings(env.db, {agentTabs: body.agentTabs, githubUsername: body.githubUsername}); } catch { return json({error: "invalid GitHub username"},400); }
+    return json(await getSyncSettings(env.db));
+  }},
+  { method: "GET", path: "/api/extension/known-ids", handle: async ({env, q}) => {
+    const source = q.get("source");
+    if (!source || !["x", "reddit", "github", "tiktok"].includes(source)) return json({error: "invalid source"}, 400);
+    return json({ ids: await knownSyncIds(env.db, source) });
+  } },
 	ingestRoute,
 ];
 
@@ -666,16 +858,75 @@ function paramsFor(pattern: string | RegExp, path: string): string[] | null {
 	return match ? match.slice(1).map((value) => value ?? "") : null;
 }
 
-export async function handleApi(
+async function handleApiInner(
 	env: ApiEnv,
 	request: Request,
 ): Promise<Response> {
 	const url = new URL(request.url);
 	const path = url.pathname.replace(/\/+$/, "");
 
-  if (path === "/api/auth/session") return sessionRoute(env, request);
+  if (path === "/api/auth/session") return sessionRoute(env, request, await hasPasskeys(env.db));
+  if (path.startsWith("/api/auth/")) return passkeyRoute(env, request);
+  // Public by design: an app has no credential yet when it registers or trades a code.
+  if (path === "/api/oauth/register" && request.method === "POST") return registerClient(env.db, request);
+  if (path === "/api/oauth/token" && request.method === "POST") return exchangeToken(env.db, request);
+  if (path === "/api/oauth/authorize") {
+    // Approving an app needs the owner's signed-in browser session, never a bearer.
+    if (request.headers.has("authorization")) return json({error:"Use owner sign-in"},401);
+    const denied = authorizeLibrary(env, request);
+    if (denied) return denied;
+    if (request.method === "GET") return json(await describeRequest(env.db, url.origin, Object.fromEntries(url.searchParams) as AuthorizationParams));
+    if (request.method !== "POST") return json({error:"method not allowed"},405);
+    if (request.headers.get("origin") !== url.origin) return json({error:"origin is not allowed"},403);
+    const body = await request.json().catch(() => null) as {params?: AuthorizationParams; allow?: unknown} | null;
+    if (!body?.params || typeof body.allow !== "boolean") return json({error:"invalid request"},400);
+    return decideRequest(env.db, url.origin, body.params, body.allow);
+  }
+  if (path === "/api/connect/redeem" && request.method === "POST") {
+    // Browsers send the extension's own Origin on this POST. Web pages cannot claim that scheme.
+    const origin = request.headers.get("origin");
+    if (origin && !/^(chrome|moz)-extension:[/][/][a-z0-9-]+$/i.test(origin)) return json({error:"extension context required"},403);
+    const body = await request.json().catch(()=>null) as {code?: unknown} | null;
+    const result = typeof body?.code === "string" && body.code.length < 100 ? await redeemPairing(env.db,body.code) : null;
+    return Response.json(result ?? {error:"Invalid or expired code"},{status:result ? 200 : 401,headers:{"cache-control":"no-store"}});
+  }
+  if (path === "/api/extension/retire-self" && request.method === "POST") {
+    return await retireSelf(env.db,request) ? json({ok:true}) : json({error:"unauthorized"},401);
+  }
+  if (path === "/api/clients" || path.startsWith("/api/clients/")) {
+    if (path.endsWith("/permissions")) {
+      if (request.headers.has("authorization")) return json({error:"Use owner session"},401);
+      const denied = authorizeLibrary(env,request); if (denied) return denied;
+      if (request.headers.get("origin") !== url.origin) return json({error:"origin is not allowed"},403);
+      if (request.method !== "PATCH") return json({error:"method not allowed"},405);
+      const body = await request.json().catch(()=>null) as {write?:unknown}|null;
+      if (typeof body?.write !== "boolean") return json({error:"write must be boolean"},400);
+      const client = await setClientWrite(env.db,path.slice(13,-12),body.write);
+      return client ? json({client}) : json({error:"eligible client not found"},404);
+    }
+    if (request.headers.has("authorization") && await retired(env.db)) return json({error:"Use owner sign-in"},401);
+    const denied=authorizeLibrary(env,request); if (denied) return denied;
+    // Management always requires same-origin, even for explicit owner bearer requests.
+    if (request.method !== "GET" && request.headers.get("origin") !== url.origin) return json({error:"origin is not allowed"},403);
+    let result: unknown;
+    try {
+      if (request.method === "GET" && path === "/api/clients") result={clients:await listClients(env.db),legacyActive:!await retired(env.db)};
+      else if (request.method === "POST" && path === "/api/clients/retire-legacy") { await retireLegacy(env.db); result={ok:true}; }
+      else if (request.method === "POST" && path === "/api/clients") {
+        const body=await request.json() as {scopes?:unknown;kind: "api"|"extension"|"pairing";name:string};
+        if (body.scopes !== undefined || !["api","extension","pairing"].includes(body.kind)) return json({error:"Invalid permissions or kind"},400);
+        result=await createClient(env.db,body.name,body.kind);
+      } else if (["PATCH","DELETE"].includes(request.method) && path.startsWith("/api/clients/")) {
+        const name=request.method === "PATCH" ? (await request.json() as {name?:unknown}).name : undefined;
+        if (request.method === "PATCH" && typeof name !== "string") return json({error:"Invalid name"},400);
+        await updateClient(env.db,path.slice("/api/clients/".length),typeof name === "string" ? name : undefined); result={ok:true};
+      } else return json({error:"not found"},404);
+    } catch { return json({error:"Invalid client request"},400); }
+    return Response.json(result,{headers:{"cache-control":"no-store"}});
+  }
+  if (request.headers.has("authorization") && !path.startsWith("/api/extension/") && path !== "/api/ingest" && await retired(env.db)) return json({error:"Use owner sign-in"},401);
   const isExtension = path === "/api/ingest" || path.startsWith("/api/extension/");
-  const denied = isExtension ? authorizeExtension(env, request) : authorizeLibrary(env, request);
+  const denied = isExtension ? await authorizeExtension(env, request) : authorizeLibrary(env, request);
   if (denied) return denied;
 	if (request.method !== "GET" && !path.startsWith("/api/restore/")) {
 		const restore = await getLibraryRestore(env.db);
@@ -686,17 +937,30 @@ export async function handleApi(
 		if (route.method !== request.method) continue;
 		const params = paramsFor(route.path, path);
 		if (!params) continue;
-		const response = await route.handle({
-			env,
-			request,
-			url,
-			q: url.searchParams,
-			params,
-		});
+		let response: Response;
+		try {
+			response = await route.handle({
+				env,
+				request,
+				url,
+				q: url.searchParams,
+				params,
+			});
+		} catch (error) {
+			// Uncaught, the framework replies with a bare "HTTPError". The caller is
+			// already authorized here, so say what actually failed.
+			console.error(`${request.method} ${path} failed`, error);
+			const detail = error instanceof Error ? error.message : String(error);
+			response = json({ error: `Server error: ${detail.slice(0, 300)}` }, 500);
+		}
 		response.headers.set("cache-control", "private, no-store");
 		response.headers.set("x-content-type-options", "nosniff");
 		return response;
 	}
 
 	return json({ error: "not found" }, 404);
+}
+
+export async function handleApi(env: ApiEnv, request: Request): Promise<Response> {
+  return renewSession(env, request, await handleApiInner(env, request));
 }

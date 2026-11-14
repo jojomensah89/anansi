@@ -10,6 +10,7 @@
     "./reddit": "./src/reddit/parse.ts",
     "./tiktok": "./src/tiktok/parse.ts",
     "./capabilities": "./src/capabilities.ts",
-    "./extension-config": "./src/extension-config.ts"
+    "./extension-config": "./src/extension-config.ts",
+    "./link-preview": "./src/link-preview.ts"
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionHealth, SourceRow } from "./api.ts";
-import { extensionLabel, sourcePresentation } from "./source-state.ts";
+import { extensionLabel, extensionStatus, sourceAction, sourcePresentation } from "./source-state.ts";
 
 const extension = (
 	connection: ExtensionHealth["connection"] = "connected",
@@ -78,6 +78,17 @@ describe("sourcePresentation", () => {
 				extension(),
 			).state,
 		).toBe("failed");
+		const failure = (lastErrorCode: string | undefined, failed: number) =>
+			sourcePresentation(
+				row({
+					runtime: { phase: "idle", queued: 0, uploading: 0, retrying: 0, failed, ...(lastErrorCode ? { lastErrorCode } : {}) },
+				}),
+				extension(),
+			).text;
+		expect(failure("queue_full", 0)).toBe("Capture queue is full, delivery is catching up");
+		expect(failure("capture_failed", 0)).toBe("Last capture failed");
+		expect(failure("not_signed_in", 0)).toBe("Sign in to X, then try again");
+		expect(failure(undefined, 2)).toBe("2 captures failed");
 		expect(
 			sourcePresentation(
 				row({
@@ -124,7 +135,7 @@ describe("sourcePresentation", () => {
 
 	test("TikTok ready state points to the extension import", () => {
 		expect(sourcePresentation(row({ source: "tiktok", name: "TikTok favorites" }), extension())).toEqual({
-			state: "ready", text: "Ready to import through the extension", tone: "ok",
+			state: "ready", text: "Ready to import", tone: "ok",
 		});
 	});
 
@@ -133,5 +144,62 @@ describe("sourcePresentation", () => {
 		expect(extensionLabel(extension("never_connected"))).toBe(
 			"Extension never connected",
 		);
+	});
+});
+
+describe("extension status dot", () => {
+	test("one meaning per state: online green, syncing accent, lost amber, never grey", () => {
+		expect(extensionStatus(extension())).toMatchObject({ state: "online", tone: "ok", label: "Extension online" });
+		expect(extensionStatus(extension(), true)).toMatchObject({ state: "syncing", tone: "accent" });
+		const running = { ...extension(), sources: { x: { phase: "running", queued: 0, uploading: 0, retrying: 0, failed: 0 } } } as ExtensionHealth;
+		expect(extensionStatus(running).state).toBe("syncing");
+		expect(extensionStatus(extension("disconnected"))).toMatchObject({ state: "offline", tone: "warn", label: "Extension offline" });
+		expect(extensionStatus(extension("never_connected"))).toMatchObject({ state: "never", tone: "muted" });
+		// A lost connection never reads as syncing, even with a stale running phase.
+		expect(extensionStatus({ ...running, connection: "disconnected" }).state).toBe("offline");
+		expect(extensionStatus(null)).toMatchObject({ state: "unknown", tone: "muted" });
+	});
+});
+
+describe("limited sources and the row action", () => {
+	const act = (patch: Partial<SourceRow>, ext = extension()) => {
+		const source = row(patch);
+		return sourceAction(source, sourcePresentation(source, ext));
+	};
+
+	test("live saves without history read as limited and offer the import", () => {
+		const source = row({ source: "reddit", items: 186, live: 186 });
+		expect(sourcePresentation(source, extension())).toEqual({ state: "limited", text: "Live only · history not imported", tone: "faint" });
+		expect(act({ source: "reddit", items: 186, live: 186 })).toBe("import");
+	});
+
+	test("legacy-only or imported sources are not limited", () => {
+		expect(sourcePresentation(row({ items: 4, legacyUnknown: 4 }), extension()).state).toBe("ready");
+		expect(sourcePresentation(row({ items: 9, live: 3, imported: 6 }), extension()).state).toBe("ready");
+		expect(act({ items: 9, live: 3, imported: 6 })).toBe("view");
+	});
+
+	test("manual capture never offers an import", () => {
+		expect(sourcePresentation(row({ source: "web", mode: "manual", items: 5, live: 5 }), extension()).state).toBe("ready");
+		expect(act({ source: "web", mode: "manual", items: 0 })).toBeNull();
+		expect(act({ source: "web", mode: "manual", items: 5, toolbar: 5 })).toBe("view");
+	});
+
+	test("an empty importable source offers the import", () => {
+		expect(act({ source: "tiktok", mode: "session" })).toBe("import");
+	});
+
+	test("failures retry, pauses resume, turned-off sources offer nothing", () => {
+		const runtime = { phase: "idle" as const, queued: 0, uploading: 0, retrying: 0, failed: 0 };
+		expect(act({ items: 3, runtime: { ...runtime, lastErrorCode: "not_signed_in" } })).toBe("retry");
+		expect(act({ items: 3, runtime: { ...runtime, paused: true } })).toBe("resume");
+		expect(act({ items: 3, enabled: false })).toBeNull();
+		expect(act({ support: "coming_next" })).toBeNull();
+	});
+
+	test("an absent extension makes rows wait without a warning tone", () => {
+		const presentation = sourcePresentation(row({ items: 3, live: 3 }), extension("disconnected"));
+		expect(presentation).toMatchObject({ state: "disconnected", tone: "faint" });
+		expect(sourcePresentation(row(), extension("never_connected")).text).toBe("Waiting for the extension");
 	});
 });

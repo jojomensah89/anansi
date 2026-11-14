@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import {
+ describe, expect, test } from "bun:test";
 import appContext from "../../test/fixtures/tiktok/app-context.json" with {
 	type: "json",
 };
@@ -16,6 +17,7 @@ import {
 	readAccountInfo,
 	readHandleFromProfileHref,
 	readItemList,
+	isEndOfFavourites,
 } from "./tiktok.ts";
 
 const CONFIG = { watchUrls: ["/api/user/collect/item_list"] };
@@ -25,6 +27,16 @@ test("reads the signed-in TikTok account response without mistaking an unknown r
 	expect(readAccountInfo({ message: "error", data: { error_code: 13 } })).toEqual({ handle: null, signedOut: true });
 	expect(readAccountInfo({ message: "success", data: {} })).toEqual({ handle: null, signedOut: false });
 	expect(readAccountInfo({ message: "success", data: { username: "../other" } })).toEqual({ handle: null, signedOut: false });
+});
+
+describe("favourites paging", () => {
+	test("recognizes the empty response that ends a list", () => {
+		expect(isEndOfFavourites({ statusCode: 0, hasMore: false })).toBe(true);
+		expect(isEndOfFavourites({ statusCode: 0, hasMore: true })).toBe(false);
+		expect(isEndOfFavourites({ statusCode: 0, hasMore: false, itemList: [] })).toBe(false);
+		expect(isEndOfFavourites({ statusCode: 10201 })).toBe(false);
+		expect(isEndOfFavourites(null)).toBe(false);
+	});
 });
 
 describe("telling Favourites from Likes", () => {

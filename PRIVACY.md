@@ -1,8 +1,8 @@
 # Anansi privacy notice
 
-Effective date: 14 October 2026
+Effective date: 11 November 2026
 
-Anansi is an open-source, self-hosted personal library. The public Chrome
+Anansi is an open-source, self-hosted personal library on the owner's Cloudflare account. Local operation is for development and testing. The public Chrome
 extension connects to the Anansi server URL you choose. The project maintainer
 does not operate a central capture service in this edition.
 
@@ -33,7 +33,7 @@ deployment stores library records in D1 and accepted media copies in R2. Local
 runtime data is stored by the installation owner. The extension makes provider
 requests needed to capture/import supported saves from the browser session.
 
-Automatic tagging and semantic search are optional. When enabled, relevant saved
+Automatic tagging and semantic search are off by default. When enabled, relevant saved
 text is sent to Cloudflare Workers AI; semantic indexing stores text chunks in
 D1 and embeddings in Vectorize. Cloudflare operates those services under its
 own policies and the deployment owner's account. Hosting logs can include
@@ -43,6 +43,10 @@ Anansi's current source includes no third-party advertising or analytics SDK.
 Captured library content is not sent to the project maintainer by the extension.
 If you connect to another person's deployment, that operator can access the
 library data; choose a server you control or trust.
+
+The project does not sell captured data or transfer it to advertisers or data brokers. Capture delivery goes only to the owner's configured server. Connecting an MCP client lets that client receive the library content it requests; its operator's policies apply. OAuth and named API keys are revocable in Connected clients. Read-only is the default; optional writes cover tags, notes and saving links, never deletion.
+
+Sources are X bookmarks, Reddit saves, GitHub stars, TikTok favorites and web pages. The popup provides per-source switches; TikTok is opt-in. Optional AI processing uses the owner's Cloudflare services as described above.
 
 ## Your controls and retention
 

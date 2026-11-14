@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { api, type ItemQuery, type ItemRow, type Page } from "./api.ts";
 
@@ -10,9 +10,27 @@ export interface LibraryPageRequest {
 
 export type LibraryPageLoader = (request: LibraryPageRequest) => Promise<Page>;
 
-/** Poll active library data only while this browser tab is visible. */
-export function libraryPollInterval(visibilityState: DocumentVisibilityState | undefined) {
-  return visibilityState === "visible" ? 2_000 : false;
+/**
+ * How often to check for new saves, only while this tab is visible.
+ *
+ * Saves arrive in bursts: right after a sync is asked for, the extension is
+ * importing and the grid should fill in as it goes. The rest of the time
+ * nothing changes on its own, and a focus refetch covers coming back to the
+ * tab, so a slow check is enough.
+ */
+const FAST_POLL_MS = 3_000;
+const IDLE_POLL_MS = 60_000;
+const SYNC_WINDOW_MS = 2 * 60_000;
+let fastUntil = 0;
+
+/** Check for new saves quickly for a while, because a sync was just requested. */
+export function expectIncomingSaves(now = Date.now()) {
+  fastUntil = now + SYNC_WINDOW_MS;
+}
+
+export function libraryPollInterval(visibilityState: DocumentVisibilityState | undefined, now = Date.now()) {
+  if (visibilityState !== "visible") return false;
+  return now < fastUntil ? FAST_POLL_MS : IDLE_POLL_MS;
 }
 
 export const libraryFreshnessOptions = {
@@ -138,4 +156,20 @@ export function useLibraryQuery({
       return [...pages].reverse().find((page) => page.semantic)?.semantic;
     }, [result.data?.pages]),
   };
+}
+
+/**
+ * The library's counts: the rail, the top bar, the palette and the change
+ * probe all read this one query. The app shell keeps an observer mounted on
+ * every page, so the numbers are cached across navigation and a page never
+ * starts from blank counts.
+ */
+export function useLibraryStats() {
+  return useQuery({
+    queryKey: libraryKeys.stats(),
+    queryFn: ({ signal }) => api.stats(signal),
+    retry: 1,
+    staleTime: 15_000,
+    ...libraryFreshnessOptions,
+  });
 }

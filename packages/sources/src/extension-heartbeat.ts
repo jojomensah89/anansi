@@ -1,7 +1,11 @@
-import { isSource, SOURCE_IDS, type Source } from "./capabilities.ts";
+import {
+	SHIPPED_CAPTURE_SOURCES,
+	type ShippedCaptureSource,
+} from "./capabilities.ts";
 import type { CaptureQueueStatus } from "./capture.ts";
 
-type CaptureSource = Source;
+type CaptureSource = ShippedCaptureSource;
+const SHIPPED_CAPTURE_SOURCE_IDS = new Set<string>(SHIPPED_CAPTURE_SOURCES);
 
 export const HEARTBEAT_SCHEMA_VERSION = 1 as const;
 
@@ -9,6 +13,7 @@ export interface HeartbeatSourceState extends CaptureQueueStatus {
 	phase: "idle" | "running";
 	paused?: boolean;
 	lastErrorCode?: string;
+	lastCheckedAt?: number;
 }
 
 export interface ExtensionHeartbeat {
@@ -41,6 +46,7 @@ const ROOT_KEYS = new Set([
 ]);
 const QUEUE_KEYS = new Set(["queued", "uploading", "retrying", "failed"]);
 const SOURCE_KEYS = new Set([
+  "lastCheckedAt",
 	...QUEUE_KEYS,
 	"phase",
 	"paused",
@@ -80,13 +86,13 @@ function queue(value: unknown): value is CaptureQueueStatus {
 function sourceState(value: unknown): value is HeartbeatSourceState {
 	return (
 		record(value) &&
-		exactKeys(value, SOURCE_KEYS) &&
 		queue({
 			queued: value.queued,
 			uploading: value.uploading,
 			retrying: value.retrying,
 			failed: value.failed,
 		}) &&
+		(value.lastCheckedAt === undefined || (Number.isSafeInteger(value.lastCheckedAt) && (value.lastCheckedAt as number) >= 0)) &&
 		(value.phase === "idle" || value.phase === "running") &&
 		(value.paused === undefined || typeof value.paused === "boolean") &&
 		(value.lastErrorCode === undefined ||
@@ -102,7 +108,7 @@ function fail(
 	return { ok: false, error: { code, message } };
 }
 
-/** Strict, bounded validation. Errors never echo the supplied payload. */
+/** Strict envelope, forward-compatible source fields. Never return unknown data. */
 export function parseExtensionHeartbeat(value: unknown): HeartbeatParseResult {
 	if (!record(value) || !exactKeys(value, ROOT_KEYS)) {
 		return fail("invalid_heartbeat", "heartbeat shape is invalid");
@@ -128,14 +134,29 @@ export function parseExtensionHeartbeat(value: unknown): HeartbeatParseResult {
 	if (
 		!queue(value.queue) ||
 		!record(value.sources) ||
-		Object.keys(value.sources).length > SOURCE_IDS.length
+		Object.keys(value.sources).length > SHIPPED_CAPTURE_SOURCES.length
 	) {
 		return fail("invalid_heartbeat", "heartbeat state is invalid");
 	}
 	for (const [source, state] of Object.entries(value.sources)) {
-		if (!isSource(source) || !sourceState(state)) {
+		if (!SHIPPED_CAPTURE_SOURCE_IDS.has(source) || !sourceState(state)) {
 			return fail("invalid_heartbeat", "source heartbeat state is invalid");
 		}
 	}
-	return { ok: true, heartbeat: value as unknown as ExtensionHeartbeat };
+	const sources: ExtensionHeartbeat["sources"] = {};
+	for (const [source, state] of Object.entries(value.sources)) {
+		// Validation above covers known fields. Project rather than returning the
+		// input: future fields (including credential-shaped fields) never reach D1.
+		const clean = Object.fromEntries(
+			Object.entries(state as Record<string, unknown>).filter(([key]) => SOURCE_KEYS.has(key)),
+		) as unknown as HeartbeatSourceState;
+		sources[source as CaptureSource] = clean;
+	}
+	return { ok: true, heartbeat: {
+		schemaVersion: HEARTBEAT_SCHEMA_VERSION,
+		installationId: value.installationId,
+		extensionVersion: value.extensionVersion,
+		queue: { ...value.queue },
+		sources,
+	} };
 }

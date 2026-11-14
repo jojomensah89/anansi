@@ -5,7 +5,12 @@ export interface ExtensionConnection {
 	readonly token: string;
 }
 
-export type ExtensionBuildMode = "public" | "private";
+/**
+ * public: what anyone builds from source. private: the owner's build with a
+ * baked connection. store: the prebuilt Web Store package, a public build in
+ * every respect except that it asks for a licence key.
+ */
+export type ExtensionBuildMode = "public" | "private" | "store";
 
 const CONNECTION_KEY = "anansiConnection";
 const DISCONNECTED_KEY = "anansiConnectionExplicitlyDisconnected";
@@ -44,7 +49,19 @@ export function validateExtensionConnection(
 export function resolveExtensionBuildMode(value: unknown): ExtensionBuildMode {
 	if (value === undefined || value === "" || value === "public") return "public";
 	if (value === "private") return "private";
-	throw new Error("ANANSI_EXTENSION_BUILD_MODE must be public or private");
+	if (value === "store") return "store";
+	throw new Error("ANANSI_EXTENSION_BUILD_MODE must be public, private or store");
+}
+
+/**
+ * The extension is free for now, so no build asks for a licence key. The
+ * licence code stays in the repo, ready for a paid store build later: flip
+ * this to true and only the store build will ask again. Source builds never do.
+ */
+export const STORE_REQUIRES_LICENCE = false;
+
+export function licenceRequiredForMode(mode: ExtensionBuildMode, storeRequiresLicence = STORE_REQUIRES_LICENCE): boolean {
+	return storeRequiresLicence && mode === "store";
 }
 
 /**
@@ -60,7 +77,8 @@ export function connectionForWxtConfig(
 	modeValue: unknown = "public",
 ): ExtensionConnection | null {
 	const mode = resolveExtensionBuildMode(modeValue);
-	if (mode === "public") return null;
+	// The store package ships unconfigured, exactly like a public build.
+	if (mode === "public" || mode === "store") return null;
 
 	if (typeof command === "string" && command.toLowerCase() === "prepare") {
 		try {
@@ -177,7 +195,11 @@ export async function saveExtensionConnection(
 	if (!store) {
 		throw new Error("Extension storage is unavailable");
 	}
-	return store.save(originValue, tokenValue);
+	const previous = await store.get();
+    if (previous && (previous.token !== tokenValue || previous.origin !== originValue)) {
+      await browser.storage.local.set({ anansiPreviousConnection: previous });
+    }
+    return store.save(originValue, tokenValue);
 }
 
 export async function clearExtensionConnection(): Promise<void> {

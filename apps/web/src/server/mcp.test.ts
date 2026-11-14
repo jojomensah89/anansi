@@ -35,8 +35,8 @@ const request = (authorization?: string) => new Request("https://anansi.test/mcp
 
 describe("MCP HTTP authentication", () => {
   test("fails closed when no MCP credential is configured", async () => {
-    expect((await handleMcp({ db }, request())).status).toBe(503);
-    expect((await handleMcp({ db, token: "  " }, request())).status).toBe(503);
+    expect((await handleMcp({ db }, request())).status).toBe(401);
+    expect((await handleMcp({ db, token: "  " }, request())).status).toBe(401);
   });
 
   test("the ingest credential cannot authorize MCP when role credentials differ", async () => {

@@ -69,6 +69,26 @@ describe("readSaveMutation", () => {
 		});
 	});
 
+	test("reads comment saves and the UNSAVED state from the new interface", () => {
+		const url = "https://www.reddit.com/svc/shreddit/graphql";
+		const body = (operation: string, input: Record<string, string>) => JSON.stringify({ operation, variables: { input } });
+		expect(readSaveMutation(url, body("UpdateCommentSaveState", { commentId: "t1_abc123", saveState: "SAVED" }))).toEqual({
+			action: "save",
+			fullname: "t1_abc123",
+			kind: "comment",
+			transport: "shreddit-graphql",
+		});
+		expect(readSaveMutation(url, body("UpdateCommentSaveState", { commentId: "t1_abc123", saveState: "UNSAVED" }))?.action).toBe("unsave");
+		expect(readSaveMutation(url, body("UpdatePostSaveState", { postId: "t3_abc123", saveState: "UNSAVED" }))?.action).toBe("unsave");
+		// An id of the wrong kind for its operation is not a save.
+		expect(readSaveMutation(url, body("UpdateCommentSaveState", { commentId: "t3_abc123", saveState: "SAVED" }))).toBeNull();
+	});
+
+	test("accepts the response to a comment save", () => {
+		expect(isRedditGraphqlSaveResponseAccepted({ data: { updateCommentSaveState: { ok: true, errors: null } } })).toBe(true);
+		expect(isRedditGraphqlSaveResponseAccepted({ data: { updateCommentSaveState: { ok: false, errors: null } } })).toBe(false);
+	});
+
 	test("reads Shreddit JSON with a CSRF field without exposing that field", () => {
 		const { url } = fixtures.shredditGraphqlUnsaveRequest;
 		const body = JSON.stringify({

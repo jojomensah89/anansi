@@ -1,3 +1,4 @@
+import { nativeItemsFromPayload } from "./native-snapshot.ts";
 import { describe, expect, test } from "bun:test";
 import {
 	MESSAGE_PROTOCOL_VERSION,
@@ -130,6 +131,34 @@ describe("parseExtensionMessage", () => {
 		).toMatchObject({ ok: false, error: { code: "invalid_message" } });
 	});
 
+	test("a real parsed post is accepted even though optional fields are undefined", () => {
+		const tweet = {
+			rest_id: "1788390000000000123",
+			legacy: { full_text: "Complete post text", created_at: "Thu Nov 05 10:00:00 +0000 2026", entities: {} },
+			core: { user_results: { result: { rest_id: "42", legacy: { screen_name: "author", name: "Author" } } } },
+		};
+		const [item] = nativeItemsFromPayload("x", { data: { tweet } }, 1_793_874_000);
+		expect(item).toBeDefined();
+		// The parser leaves these as undefined, and postMessage preserves that.
+		expect("saveOrder" in item!).toBe(true);
+		expect(item!.saveOrder).toBeUndefined();
+		const message = {
+			...pageEvent("x", "bookmark"),
+			bookmarkAction: "save",
+			externalId: item!.externalId,
+			mutationId: "mutation-1",
+			observedAt: 1_793_874_000,
+			normalizedItem: item,
+			canonicalUrl: item!.url,
+		};
+		expect(parseExtensionMessage(message, pageContext("https://x.com/home"))).toMatchObject({ ok: true, source: "x" });
+	});
+
+	test("undefined inside an array is still invalid, because JSON would change it", () => {
+		const page = { ...pageEvent("x", "page"), runId: "run-1", page: 1, items: 0, raw: { list: [undefined] } };
+		expect(parseExtensionMessage(page, pageContext("https://x.com/i/bookmarks"))).toMatchObject({ ok: false });
+	});
+
 	test("TikTok Favorites observations require a run and a TikTok tab", () => {
 		const message = { ...pageEvent("tiktok", "observed"), runId: "tiktok-run-1", operation: "/api/user/collect/item_list", items: 1, raw: { itemList: [{ id: "7400000000000000001" }] } };
 		expect(parseExtensionMessage(message, pageContext("https://www.tiktok.com/@owner"))).toMatchObject({ ok: true, source: "tiktok" });
@@ -250,6 +279,11 @@ describe("parseExtensionMessage", () => {
 		});
 	});
 
+	test("accepts the popup's assign-pending-captures command", () => {
+		const adopt = { anansi: "popup-command", messageVersion: MESSAGE_PROTOCOL_VERSION, action: "adopt-legacy-queue" };
+		expect(parseExtensionMessage(adopt, extensionRuntimeContext)).toMatchObject({ ok: true });
+	});
+
 	test("accepts extension popup commands and rejects them from tabs", () => {
 		const popup = {
 			anansi: "popup-command",
@@ -282,6 +316,48 @@ describe("parseExtensionMessage", () => {
 				extensionRuntimeContext,
 			),
 		).toMatchObject({ ok: true, source: null });
+	});
+
+	test("licence commands come only from the popup, and activation carries only a key", () => {
+		for (const action of ["licence-status", "licence-check", "licence-deactivate"]) {
+			const command = { anansi: "popup-command", messageVersion: MESSAGE_PROTOCOL_VERSION, action };
+			expect(parseExtensionMessage(command, extensionRuntimeContext)).toMatchObject({ ok: true });
+			expect(
+				parseExtensionMessage(command, tabRuntimeContext("https://www.reddit.com/user/example/saved")),
+			).toMatchObject({ ok: false, error: { code: "direction_mismatch" } });
+		}
+		const activate = {
+			anansi: "popup-command",
+			messageVersion: MESSAGE_PROTOCOL_VERSION,
+			action: "licence-activate",
+			licenceKey: "ANANSI-1111-2222",
+		};
+		expect(parseExtensionMessage(activate, extensionRuntimeContext)).toMatchObject({ ok: true });
+		for (const bad of [
+			{ ...activate, licenceKey: 42 },
+			{ ...activate, licenceKey: undefined },
+			{ ...activate, licenceKey: "A".repeat(257) },
+			{ ...activate, source: "x" },
+		]) {
+			expect(parseExtensionMessage(bad, extensionRuntimeContext)).toMatchObject({ ok: false });
+		}
+	});
+
+	test("the popup's capture switch names one platform source and a boolean", () => {
+		const toggle = { anansi: "popup-command", messageVersion: MESSAGE_PROTOCOL_VERSION, action: "set-source", source: "tiktok", enabled: false };
+		expect(parseExtensionMessage(toggle, extensionRuntimeContext)).toMatchObject({ ok: true, source: "tiktok" });
+		for (const bad of [
+			{ ...toggle, enabled: "false" },
+			{ ...toggle, enabled: undefined },
+			{ ...toggle, source: "web" },
+			{ ...toggle, source: "instagram" },
+			{ ...toggle, token: "never-forward" },
+		]) {
+			expect(parseExtensionMessage(bad, extensionRuntimeContext)).toMatchObject({ ok: false });
+		}
+		expect(
+			parseExtensionMessage(toggle, tabRuntimeContext("https://www.tiktok.com/@example")),
+		).toMatchObject({ ok: false, error: { code: "direction_mismatch" } });
 	});
 
 	test("rejects page events presented as extension popup messages", () => {

@@ -9,129 +9,206 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as CreatorsRouteImport } from './routes/creators'
-import { Route as McpRouteImport } from './routes/mcp'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as SourcesRouteImport } from './routes/sources'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as DotwellKnownSplatRouteImport } from './routes/[.]well-known.$'
+import { Route as AppIndexRouteImport } from './routes/_app.index'
+import { Route as AppCreatorsRouteImport } from './routes/_app.creators'
+import { Route as AppMcpRouteImport } from './routes/_app.mcp'
+import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as AppSourcesRouteImport } from './routes/_app.sources'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
+import { Route as OauthAuthorizeRouteImport } from './routes/oauth.authorize'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app.settings.index'
+import { Route as AppSettingsSectionRouteImport } from './routes/_app.settings.$section'
 
-const IndexRoute = IndexRouteImport.update({
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DotwellKnownSplatRoute = DotwellKnownSplatRouteImport.update({
+  id: '/.well-known/$',
+  path: '/.well-known/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const CreatorsRoute = CreatorsRouteImport.update({
+const AppCreatorsRoute = AppCreatorsRouteImport.update({
   id: '/creators',
   path: '/creators',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const McpRoute = McpRouteImport.update({
+const AppMcpRoute = AppMcpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const SettingsRoute = SettingsRouteImport.update({
+const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const SourcesRoute = SourcesRouteImport.update({
+const AppSourcesRoute = AppSourcesRouteImport.update({
   id: '/sources',
   path: '/sources',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OauthAuthorizeRoute = OauthAuthorizeRouteImport.update({
+  id: '/oauth/authorize',
+  path: '/oauth/authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsSectionRoute = AppSettingsSectionRouteImport.update({
+  id: '/$section',
+  path: '/$section',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/creators': typeof CreatorsRoute
-  '/mcp': typeof McpRoute
-  '/settings': typeof SettingsRoute
-  '/sources': typeof SourcesRoute
+  '/': typeof AppIndexRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
+  '/creators': typeof AppCreatorsRoute
+  '/mcp': typeof AppMcpRoute
+  '/settings': typeof AppSettingsRouteWithChildren
+  '/sources': typeof AppSourcesRoute
   '/api/$': typeof ApiSplatRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/settings/$section': typeof AppSettingsSectionRoute
+  '/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/creators': typeof CreatorsRoute
-  '/mcp': typeof McpRoute
-  '/settings': typeof SettingsRoute
-  '/sources': typeof SourcesRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
+  '/creators': typeof AppCreatorsRoute
+  '/mcp': typeof AppMcpRoute
+  '/sources': typeof AppSourcesRoute
   '/api/$': typeof ApiSplatRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/': typeof AppIndexRoute
+  '/settings/$section': typeof AppSettingsSectionRoute
+  '/settings': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/creators': typeof CreatorsRoute
-  '/mcp': typeof McpRoute
-  '/settings': typeof SettingsRoute
-  '/sources': typeof SourcesRoute
+  '/_app': typeof AppRouteWithChildren
+  '/.well-known/$': typeof DotwellKnownSplatRoute
+  '/_app/creators': typeof AppCreatorsRoute
+  '/_app/mcp': typeof AppMcpRoute
+  '/_app/settings': typeof AppSettingsRouteWithChildren
+  '/_app/sources': typeof AppSourcesRoute
   '/api/$': typeof ApiSplatRoute
+  '/oauth/authorize': typeof OauthAuthorizeRoute
+  '/_app/': typeof AppIndexRoute
+  '/_app/settings/$section': typeof AppSettingsSectionRoute
+  '/_app/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/creators' | '/mcp' | '/settings' | '/sources' | '/api/$'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/creators' | '/mcp' | '/settings' | '/sources' | '/api/$'
-  id:
-    | '__root__'
+  fullPaths:
     | '/'
+    | '/.well-known/$'
     | '/creators'
     | '/mcp'
     | '/settings'
     | '/sources'
     | '/api/$'
+    | '/oauth/authorize'
+    | '/settings/$section'
+    | '/settings/'
+  fileRoutesByTo: FileRoutesByTo
+  to:
+    | '/.well-known/$'
+    | '/creators'
+    | '/mcp'
+    | '/sources'
+    | '/api/$'
+    | '/oauth/authorize'
+    | '/'
+    | '/settings/$section'
+    | '/settings'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/.well-known/$'
+    | '/_app/creators'
+    | '/_app/mcp'
+    | '/_app/settings'
+    | '/_app/sources'
+    | '/api/$'
+    | '/oauth/authorize'
+    | '/_app/'
+    | '/_app/settings/$section'
+    | '/_app/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  CreatorsRoute: typeof CreatorsRoute
-  McpRoute: typeof McpRoute
-  SettingsRoute: typeof SettingsRoute
-  SourcesRoute: typeof SourcesRoute
+  AppRoute: typeof AppRouteWithChildren
+  DotwellKnownSplatRoute: typeof DotwellKnownSplatRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  OauthAuthorizeRoute: typeof OauthAuthorizeRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/$': {
+      id: '/.well-known/$'
+      path: '/.well-known/$'
+      fullPath: '/.well-known/$'
+      preLoaderRoute: typeof DotwellKnownSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/': {
+      id: '/_app/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/creators': {
-      id: '/creators'
+    '/_app/creators': {
+      id: '/_app/creators'
       path: '/creators'
       fullPath: '/creators'
-      preLoaderRoute: typeof CreatorsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppCreatorsRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/mcp': {
-      id: '/mcp'
+    '/_app/mcp': {
+      id: '/_app/mcp'
       path: '/mcp'
       fullPath: '/mcp'
-      preLoaderRoute: typeof McpRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppMcpRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/settings': {
-      id: '/settings'
+    '/_app/settings': {
+      id: '/_app/settings'
       path: '/settings'
       fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/sources': {
-      id: '/sources'
+    '/_app/sources': {
+      id: '/_app/sources'
       path: '/sources'
       fullPath: '/sources'
-      preLoaderRoute: typeof SourcesRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppSourcesRouteImport
+      parentRoute: typeof AppRoute
     }
     '/api/$': {
       id: '/api/$'
@@ -140,16 +217,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/oauth/authorize': {
+      id: '/oauth/authorize'
+      path: '/oauth/authorize'
+      fullPath: '/oauth/authorize'
+      preLoaderRoute: typeof OauthAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/$section': {
+      id: '/_app/settings/$section'
+      path: '/$section'
+      fullPath: '/settings/$section'
+      preLoaderRoute: typeof AppSettingsSectionRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
   }
 }
 
+interface AppSettingsRouteChildren {
+  AppSettingsSectionRoute: typeof AppSettingsSectionRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+}
+
+const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsSectionRoute: AppSettingsSectionRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
+}
+
+const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
+  AppSettingsRouteChildren,
+)
+
+interface AppRouteChildren {
+  AppCreatorsRoute: typeof AppCreatorsRoute
+  AppMcpRoute: typeof AppMcpRoute
+  AppSettingsRoute: typeof AppSettingsRouteWithChildren
+  AppSourcesRoute: typeof AppSourcesRoute
+  AppIndexRoute: typeof AppIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppCreatorsRoute: AppCreatorsRoute,
+  AppMcpRoute: AppMcpRoute,
+  AppSettingsRoute: AppSettingsRouteWithChildren,
+  AppSourcesRoute: AppSourcesRoute,
+  AppIndexRoute: AppIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  CreatorsRoute: CreatorsRoute,
-  McpRoute: McpRoute,
-  SettingsRoute: SettingsRoute,
-  SourcesRoute: SourcesRoute,
+  AppRoute: AppRouteWithChildren,
+  DotwellKnownSplatRoute: DotwellKnownSplatRoute,
   ApiSplatRoute: ApiSplatRoute,
+  OauthAuthorizeRoute: OauthAuthorizeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

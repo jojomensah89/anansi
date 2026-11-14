@@ -43,8 +43,8 @@ const MANUAL_CAPTURE_METHODS = [
 ] as const satisfies readonly CaptureMethod[];
 
 /**
- * One row per source. The order is intentional: it preserves the current
- * visible catalogue order, with TikTok last.
+ * One row per source. The order preserves the current visible catalogue; new
+ * retained-only identities follow the shipped product entries.
  */
 export const SOURCE_CAPABILITIES = [
 	{
@@ -105,6 +105,21 @@ export const SOURCE_CAPABILITIES = [
 		manualCapture: false,
 		toggleable: true,
 		captureMethods: PLATFORM_CAPTURE_METHODS,
+		retainedCaptureMethods: PLATFORM_CAPTURE_METHODS,
+	},
+	{
+		// This identity and DTO parser are retained for contract development only.
+		// Instagram is not product-visible or an extension capture source until
+		// its authenticated live-save and saved-items flows pass acceptance.
+		source: "instagram",
+		retainedParsing: true,
+		productVisible: false,
+		extensionPlatform: false,
+		importMode: null,
+		liveCapture: false,
+		manualCapture: false,
+		toggleable: false,
+		captureMethods: [],
 		retainedCaptureMethods: PLATFORM_CAPTURE_METHODS,
 	},
 ] as const satisfies readonly SourceCapabilityRecord[];

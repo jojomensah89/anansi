@@ -20,31 +20,12 @@ record.
 | **Projection** | Derived state produced from a saved item, never a replacement for canonical item data. Current examples are AI tags (`itemTags`, applied through `applyAiTags`), canonical embedding metadata (`itemEmbeddings`, written through `upsertItemEmbedding`), remote Vectorize records, and local sidecar vectors. Search's shared card projection is a separate internal result-mapping concern. | `itemTags`, `itemEmbeddings`, `applyAiTags`, `upsertItemEmbedding`, `searchItemsPage`, `hydrateSearchItems` in [`packages/db/src/ai-jobs.ts`](packages/db/src/ai-jobs.ts) and [`packages/db/src/search.ts`](packages/db/src/search.ts) |
 | **Index generation** | A model-scoped version of the local semantic sidecar. The sidecar stores `model` and an active random `generation` in `semantic_meta`; vector rows are keyed by `(generation, item_id)`. A model change creates a new generation and warms it independently while the canonical database remains authoritative. | `LocalSemanticCache.model`, `LocalSemanticCache.generation`, `replaceGeneration`, `semantic_meta`, `semantic_vectors` in [`apps/web/src/server/local-semantic-cache.ts`](apps/web/src/server/local-semantic-cache.ts) |
 
-## Source-set shorthand
+## Current product boundary
 
-These views are intentionally not interchangeable even though they now derive
-from one canonical capability table. In the current code:
+Anansi is an open-source, self-hosted personal library on the owner's own Cloudflare account (Workers, D1 and R2). Local SQLite operation is for development and testing. Capture sources are X bookmarks, Reddit saves, GitHub stars, TikTok favorites and web pages/selections, with optional Chrome bookmark mirroring. The popup has per-source switches for X, Reddit, GitHub and TikTok; TikTok is opt-in. AI tagging and semantic search are off by default. Agents connect through OAuth or named, revocable API keys: eight read tools, plus four optional owner-granted write tools (add_tag, remove_tag, set_note, save_link). No agent tool deletes items. Signed-in platform and fresh-account deployment acceptance remain owner-run gates; code support alone is not proof.
 
-- retained parser/storage identities are `x`, `github`, `reddit`, `tiktok`,
-  and `web`;
-- the current web source catalogue is `x`, `reddit`, `web`, and `github`;
-- extension platform capture/import is `x`, `reddit`, and `github`; Web uses
-  toolbar, context-menu, or Chrome-bookmark capture;
-- page import is `x`; session import is `reddit` and `github`; live platform
-  capture is `x`, `reddit`, and `github`; manual capture is `web`;
-- MCP's optional source filter is the visible set `x`, `reddit`, `github`,
-  and `web`;
-- TikTok rows remain retained for repair but have no current capture methods,
-  are excluded by the database visibility predicate, and are omitted from
-  shipped product views.
-
-The source-capability and shared extension-config packet landed in `31975d7`.
-`parseExtensionConfig` is used by both the background host and popup, while
-`visibleSourceClause` derives hidden membership from the same canonical facts.
+Sources derive from `packages/sources/src/capabilities.ts`: X, Reddit, GitHub and TikTok have platform capture/import; Web has manual capture. Instagram is retained for parser development but hidden from the product. X and TikTok use page imports; Reddit and GitHub use session imports.
 
 ## Evidence boundary
 
-Local tests and builds establish contracts in this checkout. They do not prove
-an authenticated provider session, a real Chrome MV3 lifecycle, Cloudflare D1,
-Workers AI, Vectorize, or a running Ollama daemon. The release-readiness design
-and runbook keep those acceptance gates explicit.
+Tests and builds prove local contracts, not signed-in provider behavior or a fresh Cloudflare deployment. See release/side-by-side-test.md and docs/deploy-acceptance.md.

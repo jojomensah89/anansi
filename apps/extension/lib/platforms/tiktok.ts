@@ -104,6 +104,14 @@ export function readItemList(raw: unknown): ItemListPage {
 	};
 }
 
+/** TikTok ends a list with a success response that may carry no list at all. */
+export function isEndOfFavourites(raw: unknown): boolean {
+	const root = raw as Any | null;
+	if (!root || typeof root !== "object") return false;
+	const more = root.hasMore === true || root.hasMore === 1;
+	return !more && root.statusCode === 0 && !Array.isArray(root.itemList) && !Array.isArray(root.items);
+}
+
 // ---- who is signed in -----------------------------------------------------
 
 const HANDLE = /^[A-Za-z0-9_.]{1,24}$/;

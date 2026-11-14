@@ -1,13 +1,15 @@
-import type { AnansiDb, ItemDetail, ListOptions, SearchHit } from "@anansi/db";
+import type { AnansiDb, ItemDetail, ListOptions, SearchOptions, SearchHit } from "@anansi/db";
 import {
 	findByAuthor,
 	getItem,
 	getItems,
 	libraryStats,
 	listItems,
+	listShelves,
 	listTags,
 	recentSaves,
 	searchItemsPage,
+	shelfScope,
 } from "@anansi/db";
 import {
 	VISIBLE_LIBRARY_SOURCES,
@@ -15,7 +17,7 @@ import {
 } from "@anansi/sources";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { MCP_TOOL_CATALOG } from "./catalog.ts";
+import { MCP_TOOL_CATALOG, MCP_WRITE_TOOL_CATALOG } from "./catalog.ts";
 
 /** Excerpts, never full bodies: a shortlist should leave room for reasoning. */
 const EXCERPT_LIMIT = 300;
@@ -162,6 +164,7 @@ function detail(item: ItemDetail) {
 		platform_saved: item.platformSaved,
 		removed_from_source_at: iso(item.removedFromSourceAt),
 		metrics: item.metrics,
+		media_count: item.media.length,
 		media: item.media.map((media) => ({
 			kind: media.kind,
 			origin_url: media.originUrl,
@@ -207,7 +210,21 @@ const typeList = z.union([
 	z.array(MCP_CONTENT_TYPES).min(1).max(6),
 ]);
 
+const shelfArg = z
+	.string()
+	.trim()
+	.min(1)
+	.max(200)
+	.describe("Only saves on this shelf. An id from list_shelves.");
+
+/** Resolve a shelf argument; undefined when none was given, null when it does not exist. */
+async function shelfOption(db: AnansiDb, id: string | undefined) {
+	if (!id) return undefined;
+	return (await shelfScope(db, id)) ?? null;
+}
+
 const browseSchema = {
+	shelf: shelfArg.optional(),
 	source: sourceList.optional(),
 	author: textList.optional(),
 	tag: textList.optional(),
@@ -255,15 +272,23 @@ function listOptions(args: {
 	};
 }
 
-/** Register the same read-only surface for local stdio and a future D1 Worker. */
-export function registerTools(server: McpServer, db: AnansiDb): void {
+/** Register reads plus explicitly supplied server write capabilities. */
+export function registerTools(server: McpServer, db: AnansiDb, beforeSearch?: () => Promise<unknown>, options: ToolOptions = {}): void {
+ if (options.write) {
+  const write=options.write;
+  for (const name of [MCP_WRITE_TOOL_CATALOG[0].name,MCP_WRITE_TOOL_CATALOG[1].name])
+   server.registerTool(name,{description:"Change a saved item's tag",inputSchema:{id:z.string().min(1).max(200),tag:z.string().trim().min(1).max(200)}},async args=>json(await write(name,args)));
+  server.registerTool(MCP_WRITE_TOOL_CATALOG[2].name,{description:"Set or clear a saved item's note",inputSchema:{id:z.string().min(1).max(200),note:z.string().max(20000)}},async args=>json(await write("set_note",args)));
+  server.registerTool(MCP_WRITE_TOOL_CATALOG[3].name,{description:"Save a web link",inputSchema:{url:z.string().url().max(4000)}},async args=>json(await write("save_link",args)));
+ }
+
 	server.registerTool(
 		MCP_TOOL_CATALOG[0].name,
 		{
 			title: "Search saved posts",
 			description:
-			"Keyword search across visible saved items. Returns ranked excerpts and source URLs, with filters and a stable relevance cursor. " +
-			"Matching uses English stemming; a misspelling returns no result. Reuse the same query and filters to continue with next_cursor.",
+			"Search visible saved items by meaning when enabled, with keyword fallback. Returns ranked excerpts, source URLs and retrieval mode. " +
+			"Keyword fallback uses English stemming. Reuse the same query and filters to continue with next_cursor.",
 			inputSchema: {
 				query: z
 					.string()
@@ -271,6 +296,7 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 					.min(1)
 					.max(500)
 					.describe("Words to search for. A trailing * does prefix matching."),
+				shelf: shelfArg.optional(),
 				source: sourceList.optional(),
 				author: textList.optional(),
 				tag: textList.optional(),
@@ -291,12 +317,22 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 			},
 		},
 		async (args) => {
-			const result = await searchItemsPage(db, {
+			const shelf = await shelfOption(db, args.shelf);
+			if (shelf === null) return json({ error: `no shelf with id ${args.shelf}` });
+			// Freshness is extra: a sync request that fails must not fail the search.
+			const freshness = beforeSearch
+				? await beforeSearch().catch(() => ({ unavailable: true }))
+				: undefined;
+			const result = await (options.search ?? ((opts: SearchOptions) => searchItemsPage(db,opts)) )({
 				query: args.query,
 				...listOptions(args),
+				shelf,
 			});
 			return json({
 				query: args.query,
+        search_mode: "semantic" in result && (result.semantic as {applied:boolean}).applied ? "meaning" : "keyword",
+        fallback_reason: "semantic" in result && (result.semantic as {applied:boolean})?.applied ? null : "semantic" in result ? ((result.semantic as {enabled:boolean; degradedReason?:string}).degradedReason ?? ((result.semantic as {enabled:boolean}).enabled ? "no-index" : "ai-off")) : "ai-off",
+        ...(freshness ? {freshness} : {}),
 				count: result.items.length,
 				next_cursor: result.nextCursor,
 				results: result.items.map(hit),
@@ -355,11 +391,13 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 			inputSchema: browseSchema,
 		},
 		async (args) => {
-			const result = await listItems(db, listOptions(args));
+			const shelf = await shelfOption(db, args.shelf);
+			if (shelf === null) return json({ error: `no shelf with id ${args.shelf}` });
+			const result = await listItems(db, { ...listOptions(args), shelf });
 			return json({
 				count: result.items.length,
 				next_cursor: result.nextCursor,
-				results: result.items.map(listHit),
+				results: await Promise.all(result.items.map(async row => listHit(await withMedia(db,row)))),
 			});
 		},
 	);
@@ -376,7 +414,7 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 		},
 		async ({ source, limit }) => {
 			const rows = await recentSaves(db, source, limit);
-			return json({ count: rows.length, results: rows.map(hit) });
+			return json({ count: rows.length, results: await Promise.all(rows.map(async row => hit(await withMedia(db,row)))) });
 		},
 	);
 
@@ -401,7 +439,7 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 			return json({
 				handle: cleanHandle,
 				count: rows.length,
-				results: rows.map(hit),
+				results: await Promise.all(rows.map(async row => hit(await withMedia(db,row)))),
 			});
 		},
 	);
@@ -426,4 +464,27 @@ export function registerTools(server: McpServer, db: AnansiDb): void {
 		},
 		async () => json(await libraryStats(db)),
 	);
+
+	server.registerTool(
+		MCP_TOOL_CATALOG[8].name,
+		{
+			title: "List shelves",
+			description:
+				"List the owner's shelves in their order, with how many saves each holds. Pass a shelf id to list_saved or search_saved to look inside one.",
+			inputSchema: {},
+		},
+		async () => {
+			const shelves = await listShelves(db);
+			return json({ shelves: shelves.map((shelf) => ({ id: shelf.id, name: shelf.name, count: shelf.count })) });
+		},
+	);
+}
+
+export interface ToolOptions {
+ search?: (options: SearchOptions) => Promise<{items:SearchHit[];nextCursor:string|null;semantic?:{enabled:boolean;applied:boolean;degradedReason?:string}}>;
+ write?: (name:string,args:Record<string,unknown>) => Promise<unknown>;
+}
+async function withMedia<T extends SearchHit>(db: AnansiDb,row:T): Promise<T> {
+ const item=await getItem(db,row.id);
+ return {...row,mediaCount:item?.media.length ?? 0,media:item?.media.map(m=>({key:m.storedKey,kind:m.kind,url:m.originUrl})) ?? []} as T;
 }

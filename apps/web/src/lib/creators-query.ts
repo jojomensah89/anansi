@@ -1,5 +1,6 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useDebouncedValue } from "./use-debounced-value.ts";
 import {
 	api,
 	type Creator,
@@ -66,12 +67,35 @@ export function mergeUniqueCreators(
 	return [...unique.values()];
 }
 
-export function useCreatorsQuery(query: string, source: string[]) {
+/** How long the author filter waits for typing to stop before it asks. */
+export const CREATOR_SEARCH_DEBOUNCE_MS = 250;
+
+/**
+ * Authors matching `query`, asked for only once typing settles.
+ *
+ * Each settled query has its own key, so a slow answer for "an" can never
+ * land under "anansi"; the superseded request loses its observer and React
+ * Query aborts it through the `signal` the loader receives. The previous
+ * page stays on screen while the next one loads, instead of a skeleton per
+ * keystroke.
+ */
+export function useCreatorsQuery(
+	query: string,
+	source: string[],
+	{
+		debounceMs = CREATOR_SEARCH_DEBOUNCE_MS,
+		loader = defaultLoader,
+	}: { debounceMs?: number; loader?: CreatorPageLoader } = {},
+) {
+	const settledQuery = useDebouncedValue(query.trim(), debounceMs);
 	const options = useMemo(
-		() => creatorQueryOptions(query, source),
-		[query, source],
+		() => creatorQueryOptions(settledQuery, source, loader),
+		[settledQuery, source, loader],
 	);
-	const result = useInfiniteQuery(options);
+	const result = useInfiniteQuery({
+		...options,
+		placeholderData: keepPreviousData,
+	});
 	return {
 		...result,
 		creators: useMemo(

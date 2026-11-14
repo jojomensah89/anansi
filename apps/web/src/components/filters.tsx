@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, sourceLabel, type Creator, type ItemQuery } from "../lib/api.ts";
+import { Button } from "@anansi/ui/components/button";
+import { Checkbox } from "@anansi/ui/components/checkbox";
+import { Input } from "@anansi/ui/components/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@anansi/ui/components/popover";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, LIBRARY_SOURCES, sourceLabel, type Creator, type ItemQuery } from "../lib/api.ts";
+import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
-import { storedAvatarSource } from "./avatar.tsx";
+import { TagDot } from "./tag-chip.tsx";
+import { formatCount } from "../lib/format.ts";
 
 /**
  * The filter bar.
@@ -30,7 +36,7 @@ export type Filters = Pick<
   "source" | "author" | "media" | "type" | "tag" | "archived" | "favorite" | "removed" | "nsfw"
 >;
 
-interface Option {
+export interface FilterOption {
   value: string;
   label: string;
   count?: number;
@@ -38,15 +44,15 @@ interface Option {
   icon?: React.ReactNode;
 }
 
-type FieldKey = "source" | "type" | "media" | "author" | "tag" | "removed";
+export type FieldKey = "source" | "type" | "media" | "author" | "tag" | "removed";
 
-interface Field {
+export interface Field {
   key: FieldKey;
   label: string;
   /** Single-value fields read "is"; multi-value ones read "is any of". */
   multi: boolean;
   icon: React.ReactNode;
-  options: Option[];
+  options: FilterOption[];
   searchable?: string;
 }
 
@@ -57,14 +63,12 @@ interface Field {
  * ever return nothing is not worth a row in a menu — so this is the full set
  * and the count decides what appears.
  */
-const SOURCES: { value: string; label: string }[] = [
-  { value: "x", label: sourceLabel("x") },
-  { value: "github", label: sourceLabel("github") },
-  { value: "reddit", label: sourceLabel("reddit") },
-  { value: "web", label: sourceLabel("web") },
-];
+const SOURCES: { value: string; label: string }[] = LIBRARY_SOURCES.map((value) => ({
+  value,
+  label: sourceLabel(value),
+}));
 
-const MEDIA: Option[] = [
+const MEDIA: FilterOption[] = [
   { value: "any", label: "Has media" },
   { value: "image", label: "Image" },
   { value: "video", label: "Video" },
@@ -77,12 +81,12 @@ const MEDIA: Option[] = [
  * An unsave never deletes anything here, so "removed" is a state to filter on
  * rather than an absence — this is how you go and look at what has gone.
  */
-const REMOVED: Option[] = [
+const REMOVED: FilterOption[] = [
   { value: "exclude", label: "Still saved" },
   { value: "only", label: "Removed at source" },
 ];
 
-const TYPES_BY_SOURCE: Record<string, Option[]> = {
+const TYPES_BY_SOURCE: Record<string, FilterOption[]> = {
   x: [
     { value: "post", label: "Post" },
     { value: "video", label: "Video" },
@@ -98,7 +102,7 @@ const TYPES_BY_SOURCE: Record<string, Option[]> = {
   web: [{ value: "article", label: "Page" }],
 };
 
-function allTypes(sources: string[]): Option[] {
+function allTypes(sources: string[]): FilterOption[] {
   const seen = new Map<string, string>();
   for (const s of sources) for (const t of TYPES_BY_SOURCE[s] ?? []) seen.set(t.value, t.label);
   return [...seen].map(([value, label]) => ({ value, label }));
@@ -176,7 +180,7 @@ export function useFilterBar({
 }): FilterBar {
   const [openChip, setOpenChip] = useState<FieldKey | null>(null);
   const [picking, setPicking] = useState<"fields" | FieldKey | null>(null);
-  const [tags, setTags] = useState<{ label: string; color: string; count: number }[]>([]);
+  const [tags, setTags] = useState<{ label: string; color: string; count: number; kind?: "topic" | "custom" }[]>([]);
   const [creators, setCreators] = useState<Creator[]>([]);
 
   useEffect(() => {
@@ -215,7 +219,7 @@ export function useFilterBar({
             value: c.authorHandle as string,
             label: c.authorName ?? (c.authorHandle as string),
             count: c.saves,
-            icon: <Avatar creator={c} />,
+            icon: <Avatar src={c.authorAvatar} seed={c.authorHandle ?? c.authorName} name={c.authorName} size={16} />,
           })),
       },
       {
@@ -243,7 +247,8 @@ export function useFilterBar({
 			value: t.label,
 			label: t.label,
 			count: t.count,
-			icon: <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: t.color || "#6b7280" }} />,
+			// AI topics carry their dot here too; the owner's own tags stay plain.
+			icon: t.kind === "topic" ? <TagDot label={t.label} /> : undefined,
 		})),
       },
     ];
@@ -310,29 +315,6 @@ export function useFilterBar({
   };
 }
 
-/** Close on a click elsewhere, or Escape — what every other menu does. */
-function useDismiss(active: boolean, close: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!active) return;
-    const onDown = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) close();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [active, close]);
-
-  return ref;
-}
-
 /**
  * The Add-filter button, for the filter row.
  *
@@ -342,171 +324,125 @@ function useDismiss(active: boolean, close: () => void) {
  * failure this shape avoids.
  */
 export function FilterTrigger({ bar, align = "right" }: { bar: FilterBar; align?: "left" | "right" }) {
-	const close = useCallback(() => bar.setPicking(null), [bar]);
-	const ref = useDismiss(bar.picking !== null, close);
-	const field = bar.fields.find((f) => f.key === bar.picking);
-	const menuAlign = align === "left" ? { left: 0 } : { right: 0 };
+  const field = bar.fields.find((f) => f.key === bar.picking);
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        type="button"
-        onClick={() => {
-          bar.setOpenChip(null);
-          bar.setPicking(bar.picking ? null : "fields");
-        }}
-        aria-expanded={bar.picking !== null}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          height: 30,
-          padding: "0 11px",
-          borderRadius: 5,
-          border: `1px solid ${bar.picking ? "var(--accent)" : "var(--edge)"}`,
-          background: "var(--card)",
-          color: bar.picking ? "var(--accent-text)" : "var(--text-dim)",
-          fontSize: 12.5,
-          cursor: "pointer",
-          font: "inherit",
-        }}
-      >
+    <Popover
+      open={bar.picking !== null}
+      onOpenChange={(open) => {
+        bar.setOpenChip(null);
+        bar.setPicking(open ? "fields" : null);
+      }}
+    >
+      <PopoverTrigger render={<Button variant="outline" className="filter-trigger" />}>
         <Icon d="M4 5h16l-6.5 7.5V19l-3 2v-8.5z" />
-        Add filter
-      </button>
-
-      {bar.picking === "fields" && (
-        <Menu style={{ ...menuAlign, width: 214 }}>
-          {bar.unapplied.length === 0 ? (
-            <div className="mono" style={{ padding: "11px 12px", fontSize: 10.5, color: "var(--faint)" }}>
-              every filter is already on
-            </div>
-          ) : (
-            <div style={{ padding: 5, display: "flex", flexDirection: "column", gap: 1 }}>
-              {bar.unapplied.map((f) => (
-                <MenuRow key={f.key} onClick={() => bar.setPicking(f.key)}>
-                  <span style={{ color: "var(--faint)", display: "flex" }}>{f.icon}</span>
-                  <span style={{ fontSize: 12.5 }}>{f.label}</span>
-                  <span style={{ marginLeft: "auto", color: "var(--fainter)", display: "flex" }}>
-                    <Icon d="M9 6l6 6-6 6" />
-                  </span>
-                </MenuRow>
-              ))}
-            </div>
-          )}
-        </Menu>
-      )}
-
-      {field && (
-        <ValueMenu
-          field={field}
-          values={bar.valuesOf(field.key)}
-          onToggle={bar.toggleValue}
-          onClear={() => bar.setValues(field.key, [])}
-          onBack={() => bar.setPicking("fields")}
-			align={menuAlign}
-        />
-      )}
-    </div>
+        Filter
+      </PopoverTrigger>
+      <FilterMenuContent align={align === "left" ? "start" : "end"} searchable={Boolean(field?.searchable)}>
+        {field ? (
+          <ValueList
+            field={field}
+            values={bar.valuesOf(field.key)}
+            onToggle={bar.toggleValue}
+            onClear={() => bar.setValues(field.key, [])}
+            onBack={() => bar.setPicking("fields")}
+          />
+        ) : bar.unapplied.length === 0 ? (
+          <p className="filter-menu-empty">Every filter is already on</p>
+        ) : (
+          <div className="filter-menu-list" role="group" aria-label="Filter by">
+            {bar.unapplied.map((f) => (
+              <Button key={f.key} variant="ghost" className="filter-menu-field" onClick={() => bar.setPicking(f.key)}>
+                <span className="filter-menu-icon">{f.icon}</span>
+                <span>{f.label}</span>
+                <span className="filter-menu-chevron">
+                  <Icon d="M9 6l6 6-6 6" />
+                </span>
+              </Button>
+            ))}
+          </div>
+        )}
+      </FilterMenuContent>
+    </Popover>
   );
 }
 
 /**
  * The applied filters, on their own row.
  *
- * The trigger lives on this same row as the chips so filtering remains a
- * single, local gesture instead of a control stranded in the toolbar.
+ * Each chip owns its popover, so the value list opens under the chip that
+ * names it rather than at a fixed spot on the row.
  */
 export function FilterChips({ bar, matched }: { bar: FilterBar; matched: number | null }) {
-  const close = useCallback(() => bar.setOpenChip(null), [bar]);
-  const ref = useDismiss(bar.openChip !== null, close);
-  const open = bar.fields.find((f) => f.key === bar.openChip);
-
   return (
-    <div ref={ref} style={{ position: "relative", borderTop: "1px solid var(--line-soft)" }}>
+    <div style={{ position: "relative" }}>
       <div
         style={{
           minHeight: 40,
           display: "flex",
           alignItems: "center",
           flexWrap: "wrap",
-          gap: 7,
-          padding: "7px 20px",
+          gap: 8,
+          padding: "8px 20px",
         }}
       >
-			<FilterTrigger bar={bar} align="left" />
-
         {bar.applied.map((field) => (
-          <Chip
+          <Popover
             key={field.key}
-            field={field}
-            values={bar.valuesOf(field.key)}
             open={bar.openChip === field.key}
-            onOpen={() => {
+            onOpenChange={(open) => {
               bar.setPicking(null);
-              bar.setOpenChip(bar.openChip === field.key ? null : field.key);
+              bar.setOpenChip(open ? field.key : null);
             }}
-            onClear={() => {
-              bar.setValues(field.key, []);
-              bar.setOpenChip(null);
-            }}
-          />
+          >
+            <Chip
+              field={field}
+              values={bar.valuesOf(field.key)}
+              open={bar.openChip === field.key}
+              onClear={() => {
+                bar.setValues(field.key, []);
+                bar.setOpenChip(null);
+              }}
+            />
+            <FilterMenuContent searchable={Boolean(field.searchable)}>
+              <ValueList
+                field={field}
+                values={bar.valuesOf(field.key)}
+                onToggle={bar.toggleValue}
+                onClear={() => bar.setValues(field.key, [])}
+              />
+            </FilterMenuContent>
+          </Popover>
         ))}
 
         {bar.archived && (
-          <button
-            type="button"
-            onClick={bar.clearArchived}
-            style={{ ...chipShell, borderColor: "var(--edge-strong)" }}
-          >
+          <span style={{ ...chipShell, borderColor: "var(--edge-strong)" }}>
             <span style={{ ...chipField, color: "var(--muted)" }}>
               <Icon d="M4 7h16v13H4zM4 4h16v3H4zM10 12h4" />
               Archived
             </span>
-            <ChipX />
-          </button>
+            <Button variant="ghost" onClick={bar.clearArchived} aria-label="Clear Archived filter" className="filter-chip-clear">
+              <ChipX />
+            </Button>
+          </span>
         )}
 
         {bar.anyApplied && (
-          <button
-            type="button"
-            onClick={bar.clearAll}
-            className="mono"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              height: 26,
-              padding: "0 8px",
-              border: "none",
-              background: "transparent",
-              color: "var(--faint)",
-              fontSize: 10.5,
-              cursor: "pointer",
-              fontFamily: "var(--mono)",
-            }}
-          >
+          <Button variant="ghost" size="sm" onClick={bar.clearAll} className="filter-clear-all">
             <Icon d="M6 6l12 12M18 6 6 18" />
             Clear all
-          </button>
+          </Button>
         )}
 
-        {matched !== null && (
-          <span className="mono" style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--faintest)" }}>
-            {matched.toLocaleString()} match{matched === 1 ? "" : "es"}
+        {bar.anyApplied && matched !== null && (
+          <span
+            className="filter-match-count"
+            style={{ marginLeft: "auto", fontSize: "var(--text-meta)", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}
+          >
+            {formatCount(matched)} match{matched === 1 ? "" : "es"}
           </span>
         )}
       </div>
-
-      {open && (
-        <ValueMenu
-          field={open}
-          values={bar.valuesOf(open.key)}
-          onToggle={bar.toggleValue}
-          onClear={() => bar.setValues(open.key, [])}
-          align={{ left: 20 }}
-        />
-      )}
     </div>
   );
 }
@@ -516,7 +452,7 @@ export function FilterChips({ bar, matched }: { bar: FilterBar; matched: number 
  *
  * Creators filters by a single dimension, and giving it a second, differently
  * shaped control would mean the app spoke two filter languages. This is the
- * same chip the Library bar builds, with its own open state.
+ * same chip and the same menu the Library bar builds, with its own open state.
  */
 export function FieldFilter({
   label,
@@ -526,14 +462,15 @@ export function FieldFilter({
   searchable,
 }: {
   label: string;
-  options: Option[];
+  options: FilterOption[];
   values: string[];
   onChange: (values: string[]) => void;
   searchable?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useDismiss(open, close);
+  // The trigger swaps from a button to a chip on the first pick. Anchoring the
+  // menu to this wrapper keeps it in place instead of jumping to the corner.
+  const anchorRef = useRef<HTMLSpanElement>(null);
 
   const field: Field = {
     key: "source",
@@ -545,55 +482,36 @@ export function FieldFilter({
   };
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "flex", alignItems: "center" }}>
+    <Popover open={open} onOpenChange={setOpen}>
+      <span ref={anchorRef} style={{ display: "inline-flex" }}>
       {values.length > 0 ? (
         <Chip
           field={field}
           values={values}
           open={open}
-          onOpen={() => setOpen((o) => !o)}
           onClear={() => {
             onChange([]);
             setOpen(false);
           }}
         />
       ) : (
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            height: 26,
-            padding: "0 9px",
-            borderRadius: 5,
-            border: "1px dashed var(--edge-strong)",
-            background: "transparent",
-            color: open ? "var(--text)" : "var(--muted)",
-            fontSize: 11.5,
-            cursor: "pointer",
-            font: "inherit",
-          }}
-        >
+        <PopoverTrigger render={<Button variant="outline" className="filter-trigger" />}>
           {FIELD_ICONS.source}
           {label}
-        </button>
+        </PopoverTrigger>
       )}
-
-      {open && (
-        <ValueMenu
+      </span>
+      <FilterMenuContent searchable={Boolean(searchable)} anchor={anchorRef}>
+        <ValueList
           field={field}
           values={values}
           onToggle={(_f, value) =>
             onChange(values.includes(value) ? values.filter((v) => v !== value) : [...values, value])
           }
           onClear={() => onChange([])}
-          align={{ left: 0 }}
         />
-      )}
-    </div>
+      </FilterMenuContent>
+    </Popover>
   );
 }
 
@@ -602,14 +520,12 @@ export function FieldFilter({
 const chipShell: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  height: 26,
-  borderRadius: 5,
-  border: "1px solid #2e373f",
-  background: "#1e2329",
+  height: 32,
+  borderRadius: 6,
+  border: "1px solid var(--edge)",
+  background: "var(--raised)",
   overflow: "hidden",
   padding: 0,
-  cursor: "pointer",
-  font: "inherit",
   color: "var(--text)",
 };
 
@@ -618,7 +534,7 @@ const chipField: React.CSSProperties = {
   alignItems: "center",
   gap: 6,
   padding: "0 8px",
-  fontSize: 11.5,
+  fontSize: "var(--text-body)",
   color: "var(--muted)",
   height: "100%",
 };
@@ -630,10 +546,10 @@ function ChipX() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 22,
+        width: 28,
         alignSelf: "stretch",
-        borderLeft: "1px solid #2e373f",
-        color: "var(--faint)",
+        borderLeft: "1px solid var(--edge)",
+        color: "var(--muted)",
       }}
     >
       <Icon d="M6 6l12 12M18 6 6 18" />
@@ -641,64 +557,56 @@ function ChipX() {
   );
 }
 
+/** Must render inside a `Popover`: its main half is that popover's trigger. */
 function Chip({
   field,
   values,
   open,
-  onOpen,
   onClear,
 }: {
   field: Field;
   values: string[];
   open: boolean;
-  onOpen: () => void;
   onClear: () => void;
 }) {
   const valuesSet = new Set(values);
   const chosen = field.options.filter((o) => valuesSet.has(o.value));
   const icons = chosen.filter((o) => o.icon).slice(0, 3);
-  const label =
-    chosen.length === 1 ? (chosen[0]?.label ?? values[0]) : `${values.length} selected`;
+  const label = chosen.length === 1 ? (chosen[0]?.label ?? values[0]) : `${values.length} selected`;
 
   return (
-    <span style={{ ...chipShell, borderColor: open ? "var(--accent)" : "#2e373f" }}>
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-expanded={open}
-        style={{ display: "flex", alignItems: "center", height: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", font: "inherit", color: "inherit" }}
-      >
-        <span style={{ ...chipField, color: open ? "var(--accent-text)" : "var(--muted)" }}>
+    <span style={{ ...chipShell, borderColor: open ? "var(--accent)" : "var(--edge)" }}>
+      <PopoverTrigger render={<Button variant="ghost" className="filter-chip-open" />}>
+        <span style={{ ...chipField, color: open ? "var(--text)" : "var(--muted)" }}>
           {field.icon}
           {field.label}
         </span>
         <span
-          className="mono"
           style={{
-            padding: "0 7px",
-            fontSize: 10.5,
-            color: "var(--faint)",
-            borderLeft: "1px solid #2e373f",
-            borderRight: "1px solid #2e373f",
+            padding: "0 8px",
+            fontSize: "var(--text-meta)",
+            color: "var(--muted)",
+            borderLeft: "1px solid var(--edge)",
+            borderRight: "1px solid var(--edge)",
             height: "100%",
             display: "flex",
             alignItems: "center",
           }}
         >
-          {field.multi ? "is any of" : "is"}
+          {field.multi ? "any" : "is"}
         </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 8px", fontSize: 11.5 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 8px", fontSize: "var(--text-body)" }}>
           {icons.length > 0 && (
             <span style={{ display: "flex" }}>
               {icons.map((o, i) => (
                 <span
                   key={o.value}
                   style={{
-                    width: 15,
-                    height: 15,
+                    width: 16,
+                    height: 16,
                     borderRadius: "50%",
                     background: "var(--ink)",
-                    border: "1px solid #2e373f",
+                    border: "1px solid var(--edge)",
                     marginLeft: i === 0 ? 0 : -5,
                     display: "flex",
                     alignItems: "center",
@@ -714,257 +622,136 @@ function Chip({
           )}
           {label}
         </span>
-      </button>
-      <button
-        type="button"
-        onClick={onClear}
-        aria-label={`Clear ${field.label} filter`}
-        style={{ display: "flex", padding: 0, background: "none", border: "none", cursor: "pointer", alignSelf: "stretch", color: "inherit" }}
-      >
+      </PopoverTrigger>
+      <Button variant="ghost" onClick={onClear} aria-label={`Clear ${field.label} filter`} className="filter-chip-clear">
         <ChipX />
-      </button>
+      </Button>
     </span>
   );
 }
 
 /* -------------------------------------------------------------- menu --- */
 
-function Menu({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: "100%",
-        marginTop: 6,
-        background: "var(--card)",
-        border: "1px solid var(--edge-strong)",
-        borderRadius: 7,
-        boxShadow: "0 14px 34px #00000080, 0 2px 6px #0000004d",
-        zIndex: 60,
-        overflow: "hidden",
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function MenuRow({
+/**
+ * The menu surface, anchored under whatever trigger opened it.
+ *
+ * It is as wide as its longest row, so "Web pages & bookmarks" is never cut,
+ * and never narrower than its trigger or wider than the screen. Focus moves
+ * into it only for keyboard opens (or to a search field): a pointer open
+ * leaves the first row alone, so no ring appears that the pointer did not
+ * ask for.
+ */
+function FilterMenuContent({
   children,
-  onClick,
-  active,
+  align = "start",
+  searchable = false,
+  anchor,
 }: {
   children: React.ReactNode;
-  onClick: () => void;
-  active?: boolean;
+  align?: "start" | "end";
+  searchable?: boolean;
+  anchor?: React.RefObject<HTMLElement | null>;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 9,
-        width: "100%",
-        padding: "6px 7px",
-        borderRadius: 5,
-        border: "none",
-        background: active ? "var(--raised)" : "transparent",
-        color: "inherit",
-        font: "inherit",
-        textAlign: "left",
-        cursor: "pointer",
-      }}
+    <PopoverContent
+      align={align}
+      anchor={anchor}
+      sideOffset={6}
+      initialFocus={(type) => searchable || type === "keyboard"}
+      className="filter-menu"
     >
       {children}
-    </button>
+    </PopoverContent>
   );
 }
 
-function ValueMenu({
+/** The value rows of a filter menu; exported for tests. */
+export function ValueList({
   field,
   values,
   onToggle,
   onClear,
   onBack,
-  align,
 }: {
   field: Field;
   values: string[];
   onToggle: (field: Field, value: string) => void;
   onClear: () => void;
-  /** Present when this menu was opened from the field list. */
+  /** Present when this list was opened from the field list. */
   onBack?: () => void;
-  align: React.CSSProperties;
 }) {
   const [query, setQuery] = useState("");
-  useEffect(() => setQuery(""), [field.key]);
+  const [queryField, setQueryField] = useState(field.key);
+  if (queryField !== field.key) {
+    setQueryField(field.key);
+    setQuery("");
+  }
   const valuesSet = useMemo(() => new Set(values), [values]);
 
+  const needle = query.toLowerCase();
   const shown = field.options.filter(
-    (o) =>
-      query === "" ||
-      o.label.toLowerCase().includes(query.toLowerCase()) ||
-      o.value.toLowerCase().includes(query.toLowerCase()),
+    (o) => needle === "" || o.label.toLowerCase().includes(needle) || o.value.toLowerCase().includes(needle),
   );
+  const withIcons = field.options.some((o) => o.icon);
+  const withCounts = field.options.some((o) => o.count !== undefined);
 
   return (
-    <Menu style={{ ...align, width: field.searchable ? 268 : 236 }}>
+    <>
       {onBack && (
-        <button
-          type="button"
-          onClick={onBack}
-          className="mono"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            width: "100%",
-            padding: "8px 11px",
-            border: "none",
-            borderBottom: "1px solid var(--line)",
-            background: "transparent",
-            color: "var(--faint)",
-            fontSize: 10.5,
-            cursor: "pointer",
-            fontFamily: "var(--mono)",
-            textAlign: "left",
-          }}
-        >
+        <Button variant="ghost" onClick={onBack} className="filter-menu-back">
           <Icon d="M15 6l-6 6 6 6" />
           {field.label}
-        </button>
+        </Button>
       )}
 
       {field.searchable && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", borderBottom: "1px solid var(--line)" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--fainter)" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="6.5" />
-            <path d="m20 20-4.2-4.2" />
-          </svg>
-          <input
-            autoFocus
+        <div className="filter-menu-search">
+          <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={field.searchable}
-            style={{
-              flex: 1,
-              border: "none",
-              background: "transparent",
-              color: "var(--text)",
-              fontSize: 12,
-              fontFamily: "var(--sans)",
-              outline: "none",
-            }}
+            aria-label={field.searchable.replace(/…$/, "")}
           />
         </div>
       )}
 
-      <div className="scroll" style={{ maxHeight: 244, padding: 5, display: "flex", flexDirection: "column", gap: 1 }}>
-        {shown.length === 0 && (
-          <div className="mono" style={{ padding: "10px 7px", fontSize: 10.5, color: "var(--faint)" }}>
-            nothing matches
-          </div>
-        )}
+      <div
+        className="filter-menu-list scroll"
+        role="group"
+        aria-label={field.label}
+        data-icons={withIcons || undefined}
+        data-counts={withCounts || undefined}
+      >
+        {shown.length === 0 && <p className="filter-menu-empty">Nothing matches</p>}
         {shown.map((option) => {
           const on = valuesSet.has(option.value);
           return (
-            <MenuRow key={option.value} active={on} onClick={() => onToggle(field, option.value)}>
-              <span
-                style={{
-                  width: 14,
-                  height: 14,
-                  flexShrink: 0,
-                  borderRadius: field.multi ? 3 : "50%",
-                  border: on ? "none" : "1px solid var(--edge-strong)",
-                  background: on ? "var(--accent)" : "transparent",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {on && (
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M4 12l5 5L20 6" />
-                  </svg>
-                )}
-              </span>
-              {option.icon && (
-                <span style={{ display: "flex", alignItems: "center", flexShrink: 0, color: "var(--text-dim)" }}>
-                  {option.icon}
+            <label key={option.value} className="filter-option" data-checked={on || undefined}>
+              <Checkbox
+                checked={on}
+                onCheckedChange={() => onToggle(field, option.value)}
+                className={field.multi ? undefined : "rounded-full"}
+              />
+              {withIcons && <span className="filter-menu-icon">{option.icon}</span>}
+              <span className="filter-option-label">{option.label}</span>
+              {withCounts && (
+                <span className="filter-option-count">
+                  {option.count === undefined ? "" : formatCount(option.count)}
                 </span>
               )}
-              <span
-                style={{
-                  fontSize: 12.5,
-                  color: on ? "var(--text)" : "var(--text-dim)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {option.label}
-              </span>
-              {option.count !== undefined && (
-                <span className="mono" style={{ marginLeft: "auto", fontSize: 10, color: "var(--faint)" }}>
-                  {option.count.toLocaleString()}
-                </span>
-              )}
-            </MenuRow>
+            </label>
           );
         })}
       </div>
 
       {values.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", padding: "8px 11px", borderTop: "1px solid var(--line)" }}>
-          <span className="mono" style={{ fontSize: 10, color: "var(--faintest)" }}>
-            {values.length} selected
-          </span>
-          <button
-            type="button"
-            onClick={onClear}
-            className="mono"
-            style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--faint)", fontSize: 10, cursor: "pointer", fontFamily: "var(--mono)" }}
-          >
+        <div className="filter-menu-foot">
+          <span>{values.length} selected</span>
+          <Button variant="ghost" size="sm" onClick={onClear}>
             Clear
-          </button>
+          </Button>
         </div>
       )}
-    </Menu>
-  );
-}
-
-function Avatar({ creator }: { creator: Creator }) {
-  const storedSrc = storedAvatarSource(creator.authorAvatar);
-  if (storedSrc) {
-    return (
-      <img
-        src={storedSrc}
-        alt=""
-        width={16}
-        height={16}
-        loading="lazy"
-        style={{ borderRadius: "50%", objectFit: "cover", background: "var(--edge-strong)" }}
-      />
-    );
-  }
-  return (
-    <span
-      style={{
-        width: 16,
-        height: 16,
-        borderRadius: "50%",
-        background: "var(--edge-strong)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 8.5,
-        color: "var(--muted)",
-      }}
-    >
-      {(creator.authorName ?? creator.authorHandle ?? "?").slice(0, 1).toUpperCase()}
-    </span>
+    </>
   );
 }

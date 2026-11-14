@@ -1,5 +1,8 @@
 # Anansi architecture improvement guide
 
+> Historical plan/evidence: current product guidance is in [README](../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 Date: 2026-09-07
 Baseline: `25aed8d`
 Status: implementation proposals based on source inspection; no refactors implemented by this document.
@@ -10,7 +13,7 @@ This guide explores all four candidates from the validated architecture review a
 
 Anansi captures saved items into one private library. SQLite/D1 owns canonical content, identity, visibility, filters, and durable job state. The extension supplies browser sessions and durable capture delivery. Optional AI creates derived tags and vectors. HTTP, MCP, and CLI deliberately expose different experiences over shared library operations.
 
-There is no `CONTEXT.md` or `docs/adr/` at this baseline. Relevant decisions are in the README and `docs/superpowers/specs/`, particularly the Cloudflare AI, Ollama semantic search, Ollama tagging, canonical topics, and background capture designs. Preserve those decisions when implementing this guide.
+There is no `CONTEXT.md` or `docs/adr/` at this baseline. Relevant decisions are in the README, particularly the Cloudflare AI, semantic search, tagging, canonical topics, and background capture designs. Preserve those decisions when implementing this guide.
 
 ## Priority and implementation order
 

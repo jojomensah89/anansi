@@ -243,7 +243,11 @@ export function describeSource(
 			text:
 				snapshot.lastErrorCode === "rate_limited"
 					? "Platform rate limit — retry later"
-					: "Import failed — press Import to retry",
+					: snapshot.lastErrorCode === "capture_timeout"
+						? "Stalled — keep its window visible and retry"
+						: snapshot.lastErrorCode === "capture_failed"
+							? "Stopped before the end — press Import to retry"
+							: "Import failed — press Import to retry",
 			tone: "warn",
 			action: "import",
 			actionLabel: "Import",

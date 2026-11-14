@@ -1,3 +1,8 @@
+import { retirePreviousConnection, connectLibrary } from "../lib/library-connect.ts";
+import { isLibrarySyncCommand } from "../lib/messages.ts";
+import { startLibraryImport } from "../lib/library-import.ts";
+import { libraryBridgeScript } from "../lib/library-bridge-script.ts";
+import { requestSourceToggle } from "../lib/source-toggle.ts";
 /**
  * The background worker: the only part of the extension that knows a server
  * exists, and the only part that holds the token.
@@ -20,9 +25,6 @@ import {
 	EXTENSION_PLATFORM_SOURCES,
 	isExtensionPlatformSource,
 	parseExtensionConfig,
-	parseSavedListing,
-	parseStarredPage,
-	parseItemList,
 	SHIPPED_CAPTURE_SOURCES,
 } from "@anansi/sources";
 import { type CaptureQueue, createCaptureQueue } from "../lib/capture-queue.ts";
@@ -34,7 +36,15 @@ import {
 	toBookmarkCapture,
 } from "../lib/chrome-bookmarks.ts";
 import { cachedForServer, createPersistedConfigCache, type ServerCache } from "../lib/config-cache.ts";
-import { getExtensionConnection } from "../lib/connection.ts";
+import { saveExtensionConnection, getExtensionConnection } from "../lib/connection.ts";
+import {
+	activationLabel,
+	createLicence,
+	type Licence,
+	type LicenceError,
+	type LicenceGate,
+	licenceAllowsCapture,
+} from "../lib/licence.ts";
 import {
 	createHeartbeatClient,
 	type HeartbeatClient,
@@ -63,16 +73,19 @@ import {
 	UNSUPPORTED_MESSAGES,
 } from "../lib/page-capture.ts";
 import { createLiveCapture } from "../lib/live-capture.ts";
+import { captureAdapter, isSessionCaptureSource, platformCanonicalUrl, platformEntryUrl, platformTabPatterns, shouldRefreshTopOnResume } from "../lib/platforms/registry.ts";
+import { createDocumentNonces } from "../lib/document-nonces.ts";
+import { IMPORT_WINDOW_FOCUSED, importWindowBounds, importTabPresentation, needsFullWindowImport } from "../lib/import-window.ts";
+import { createRunDeadlines } from "../lib/run-deadline.ts";
+import { createImportScreens, importScreenEnding, isImportScreenCloseRequest } from "../lib/import-screen.ts";
+import { SAVE_CONFIRMATION_SETTING } from "../lib/save-toast.ts";
 import {
 	nativeHandoffStorageKey,
 	parseNativeHandoffStoreRequest,
 } from "../lib/native-handoff.ts";
-import { nativeItemsFromPayload } from "../lib/native-snapshot.ts";
-import { tweetUrl } from "../lib/platforms/x.ts";
-import { isProfileView, profileUrl } from "../lib/platforms/tiktok.ts";
+import { createLibrarySync, isLibraryPage } from "../lib/library-sync.ts";
 import {
 	SYNC_ALARM,
-	scheduleDailyCatchUp,
 	scheduleEarliestAlarm,
 	scheduleOutboxRetry,
 } from "../lib/schedule.ts";
@@ -92,7 +105,6 @@ import {
 	type CaptureSource,
 	captureDeliveryMode,
 	createSourceRuns,
-	isExpectedImportTab,
 	type SourceRuns,
 } from "../lib/source-runs.ts";
 
@@ -125,14 +137,28 @@ export interface SourceStatus {
 export type Status = Record<string, SourceStatus>;
 
 const CONFIG_TTL_MS = 60 * 60 * 1000;
-const ALARM = SYNC_ALARM;
 const OUTBOX_ALARM = "anansi-outbox";
 const HEARTBEAT_ALARM = "anansi-heartbeat";
 const SOURCE_RUN_RECOVERY_ALARM_PREFIX = "anansi-source-run-recovery:";
+/** Long enough to sit out TikTok's rate limit between two pages. */
+const OBSERVED_RUN_STALL_MS = 150_000;
+const PAGE_RUN_STALL_MS = 180_000;
+const runDeadlines = createRunDeadlines<ReturnType<typeof setTimeout>>({
+	schedule: (run, ms) => setTimeout(run, ms),
+	cancel: (timer) => clearTimeout(timer),
+});
 const CAPTURE_SOURCES = EXTENSION_PLATFORM_SOURCES;
 const HEARTBEAT_SOURCES = SHIPPED_CAPTURE_SOURCES;
-const tabNonces = new Map<number, string>();
-const identifiedTikTokRuns = new Map<string, string>();
+const documentNonces = createDocumentNonces();
+const identifiedPageRuns = new Map<string, string>();
+/** The quiet screen over tabs Anansi opened for a history import. */
+const importScreens = createImportScreens({
+	send: async (tabId, command) => {
+		await browser.tabs.sendMessage(tabId, command);
+		return true;
+	},
+	wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+});
 
 let cached: ServerCache<RemoteConfig> | null = null;
 let cachedToken: string | null = null;
@@ -171,7 +197,77 @@ function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
 	return persistent;
 }
 
+/* ------------------------------------------------------- licence --- */
+
+/**
+ * Store build only. Every use sits behind the build-time constant, so public
+ * and private bundles contain none of it and never check anything.
+ */
+const LICENCE_ALARM = "anansi-licence";
+let licenceClient: Licence | null = null;
+
+function licence(): Licence {
+	licenceClient ??= createLicence({
+		required: __ANANSI_REQUIRE_LICENCE__,
+		fetch: (url, init) => fetch(url, init),
+		now: Date.now,
+		storage: {
+			get: (key) => browser.storage.local.get(key),
+			set: (values) => browser.storage.local.set(values),
+			remove: (key) => browser.storage.local.remove(key),
+		},
+		label: () => activationLabel(navigator.userAgent, Date.now()),
+	});
+	return licenceClient;
+}
+
+/**
+ * True while the store build has no usable licence.
+ *
+ * Locked, the worker behaves as if it were not connected: nothing is
+ * captured, uploaded or synced, and nothing queued is touched, so it all
+ * resumes once a key is active again.
+ */
+async function licenceLocked(): Promise<boolean> {
+	if (!__ANANSI_REQUIRE_LICENCE__) return false;
+	try {
+		return !licenceAllowsCapture(await licence().licenceGate());
+	} catch {
+		return true;
+	}
+}
+
+/** Wake everything that waited while the licence was missing. */
+async function licenceUnlocked(): Promise<void> {
+	await wakeDurableQueue().catch(() => {});
+	requestHeartbeat();
+	void armLibraryTabs().catch(() => {});
+}
+
+/** Revalidate when due (or now, when forced) and resume work if that unlocked it. */
+async function refreshLicence(force = false): Promise<LicenceGate> {
+	if (!__ANANSI_REQUIRE_LICENCE__) return { state: "not-applicable" };
+	const wasLocked = await licenceLocked();
+	const gate = force ? await licence().revalidate() : await licence().revalidateIfDue();
+	if (wasLocked && licenceAllowsCapture(gate)) await licenceUnlocked();
+	return gate;
+}
+
+/** A daily look; revalidateIfDue only calls Polar once the 7 days are up. */
+async function armLicenceAlarm(): Promise<void> {
+	if (!__ANANSI_REQUIRE_LICENCE__) return;
+	// Recreating an alarm resets it, and the worker starts many times a day.
+	if (await browser.alarms.get(LICENCE_ALARM)) return;
+	browser.alarms.create(LICENCE_ALARM, { delayInMinutes: 1, periodInMinutes: 24 * 60 });
+}
+
+/**
+ * The connection the worker may use right now. In the store build without an
+ * active licence there is none, which is what stops capture, delivery,
+ * heartbeats and sync at the one place they all ask.
+ */
 async function settings(): Promise<Settings | null> {
+	if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) return null;
 	const conn = await getExtensionConnection();
 	if (!conn) return null;
 	return { server: conn.origin, token: conn.token };
@@ -321,6 +417,7 @@ function queue(): CaptureQueue {
 		},
 	});
 	durableQueue = {
+		hasImportRoom: () => underlying.hasImportRoom(),
 		async enqueue(capture) {
 			const admission = await destinationGuard!.beginEnqueue();
 			if (!admission.ok) throw new Error(admission.error);
@@ -386,6 +483,7 @@ function heartbeat(): HeartbeatClient {
 				const counts = snapshot.bySource[source] ?? EMPTY_COUNTS;
 				sources[source] = {
 					phase: run?.phase ?? "idle",
+          lastCheckedAt: Math.floor(Number(((await browser.storage.local.get("syncLastChecks")).syncLastChecks as Record<string, number> | undefined)?.[source] ?? 0) / 1000),
 					...(run?.paused ? { paused: true } : {}),
 					...(run?.lastErrorCode ? { lastErrorCode: run.lastErrorCode } : {}),
 					...counts,
@@ -408,9 +506,34 @@ function heartbeat(): HeartbeatClient {
 				},
 			);
 			if (!response.ok) throw new Error("heartbeat rejected");
+			const answer = (await response.json().catch(() => null)) as { syncRequestedAt?: unknown; platformSync?: unknown } | null;
+			void (answer?.platformSync ? librarySync().platformRequests(answer.platformSync) : librarySync().serverRequest(answer?.syncRequestedAt)).catch(() => {});
+			// The server answered, so captures waiting out an outage need not wait
+			// up to an hour for their next attempt.
+			void queue()
+				.getStatus()
+				.then((status) => (status.retrying > 0 ? queue().retry({ resetBackoff: true }) : undefined))
+				.catch(() => {});
 		},
 	});
 	return healthHeartbeat;
+}
+
+let syncRunner: ReturnType<typeof createLibrarySync> | null = null;
+function librarySync() {
+	syncRunner ??= createLibrarySync({
+		storage: {
+			get: async (key) => (await browser.storage.local.get(key))[key],
+			set: (values) => browser.storage.local.set(values),
+		},
+		now: Date.now,
+		enabledSources: async () => {
+			const config = await loadConfig();
+			return config?.enabled ? config.sources.map((entry) => entry.source) : [];
+		},
+		start: (source) => startCapture(source, true, true),
+	});
+	return syncRunner;
 }
 
 function requestHeartbeat(): void {
@@ -433,6 +556,11 @@ async function wakeDurableQueue(
 			? { includeFailed: true, ...(source ? { source } : {}) }
 			: undefined,
 	);
+	if (await queue().hasImportRoom()) {
+		await Promise.all(
+			CAPTURE_SOURCES.map((platform) => persistentState().runs.clearError(platform, "queue_full")),
+		);
+	}
 	requestHeartbeat();
 	return status;
 }
@@ -502,14 +630,14 @@ async function enqueueImportedPage(page: SourceImportPage): Promise<void> {
 		eventId: page.eventId,
 		source: page.source,
 		action: "snapshot",
-		observedAt: Math.floor(Date.now() / 1000),
+		observedAt: page.observedAt ?? Math.floor(Date.now() / 1000),
 		captureMethod: page.captureMethod,
 		runId: page.runId,
 		page: page.page,
 		...(page.cursor ? { cursor: page.cursor } : {}),
 		raw: page.raw,
 	};
-	await hydrateNativeCaptures(page.source, page.raw);
+	if (page.source !== "web") await hydrateNativeCaptures(page.source, page.raw);
 	await queue().enqueue(capture);
 	await wakeDurableQueue().catch(() => {});
 }
@@ -585,24 +713,13 @@ function liveCapture() {
 	return nativeCaptures;
 }
 
-function platformUrl(source: CaptureSource, externalId: string): string {
-	return source === "github" ? `https://github.com/${externalId}`
-		: source === "tiktok" ? `https://www.tiktok.com/video/${externalId}`
-		: source === "reddit" ? `https://www.reddit.com/comments/${externalId.replace(/^t[13]_/, "")}`
-		: tweetUrl(externalId);
+function platformUrl(source: PlatformSource, externalId: string): string {
+	return platformCanonicalUrl(source, externalId);
 }
 
-function contentFromPage(source: CaptureSource, raw: unknown): NormalizedItem[] {
-	const context = { importedAt: Math.floor(Date.now() / 1000) };
-	try {
-		switch (source) {
-			case "x": return nativeItemsFromPayload("x", raw, context.importedAt);
-			case "reddit": return parseSavedListing(raw, context);
-			case "github": return parseStarredPage(raw, context);
-			case "tiktok": return parseItemList(raw, context);
-			default: return [];
-		}
-	} catch { return []; }
+function contentFromPage(source: PlatformSource, raw: unknown): NormalizedItem[] {
+	try { return captureAdapter(source).parsePage(raw, Math.floor(Date.now() / 1000)); }
+	catch { return []; }
 }
 
 let recoveringHandoffs: Promise<void> | null = null;
@@ -629,7 +746,7 @@ async function recoverNativeHandoffs(): Promise<void> {
 	try { await recoveringHandoffs; } finally { recoveringHandoffs = null; }
 }
 
-async function reportNativePending(source: CaptureSource, state: { pending: number; needsContent: boolean }) {
+async function reportNativePending(source: PlatformSource, state: { pending: number; needsContent: boolean }) {
 	if (state.pending) {
 		await patchStatus(source, { message: state.needsContent
 			? "saved on the platform; fetching post content automatically"
@@ -640,7 +757,7 @@ async function reportNativePending(source: CaptureSource, state: { pending: numb
 }
 
 async function recordNativeMutation(
-	source: CaptureSource, action: "save" | "unsave", externalId: string,
+	source: PlatformSource, action: "save" | "unsave", externalId: string,
 	canonicalUrl?: string, raw?: unknown, normalizedItem?: NormalizedItem,
 	mutationId?: string, observedAt?: number,
 ) {
@@ -718,11 +835,12 @@ async function handleNativeHandoffStore(
 		await scheduleEarliestAlarm(browser.alarms, NATIVE_CAPTURE_ALARM, Date.now() + 30_000);
 	}
 	await wakeDurableQueue().catch(() => {});
-	return { ok: true };
+	const setting = await browser.storage.local.get(SAVE_CONFIRMATION_SETTING);
+	return { ok: true, confirm: setting[SAVE_CONFIRMATION_SETTING] === true };
 }
 
 /** Migrate old id-only pending saves once, then preserve their new identity. */
-async function migratePendingSaves(source: CaptureSource): Promise<void> {
+async function migratePendingSaves(source: PlatformSource): Promise<void> {
 	const runs = persistentState().runs;
 	const run = await runs.current(source);
 	for (const externalId of run.pendingSaves) {
@@ -733,12 +851,12 @@ async function migratePendingSaves(source: CaptureSource): Promise<void> {
 	}
 }
 
-async function hydrateNativeCaptures(source: CaptureSource, raw: unknown): Promise<void> {
+async function hydrateNativeCaptures(source: PlatformSource, raw: unknown): Promise<void> {
 	await migratePendingSaves(source);
 	await reportNativePending(source, await liveCapture().hydrate(source, contentFromPage(source, raw)));
 }
 
-async function flushPendingSaves(source: CaptureSource): Promise<void> {
+async function flushPendingSaves(source: PlatformSource): Promise<void> {
 	await migratePendingSaves(source);
 	await reportNativePending(source, await liveCapture().retry(source));
 }
@@ -758,6 +876,9 @@ async function capturePage(
 ): Promise<
 	{ ok: true; delivery: "queued" | "uploaded" } | { ok: false; error: string }
 > {
+	if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) {
+		return { ok: false, error: "activate your licence to keep saving" };
+	}
 	const tab = await browser.tabs.get(tabId).catch(() => null);
 	const supported = capturablePage(tab?.url);
 	if (!supported.ok) {
@@ -980,33 +1101,13 @@ const MENUS: MenuSpec[] = [
 	},
 ];
 
-/** Where to open a tab when there isn't one, per source. */
-const ENTRY_URLS: Record<string, string> = {
-	x: "https://x.com/i/bookmarks",
-	reddit: "https://www.reddit.com/user/me/saved/",
-	github: "https://github.com/stars",
-	tiktok: "https://www.tiktok.com/",
-};
-
-const HOST_PATTERNS: Record<string, string[]> = {
-	x: ["https://x.com/*", "https://twitter.com/*"],
-	reddit: [
-		"https://www.reddit.com/*",
-		"https://old.reddit.com/*",
-		"https://reddit.com/*",
-	],
-	github: ["https://github.com/*"],
-	tiktok: ["https://www.tiktok.com/*", "https://tiktok.com/*"],
-};
-
-async function findTab(source: CaptureSource, expectedUrl?: string) {
-	const patterns = HOST_PATTERNS[source];
-	if (!patterns) return undefined;
-	const tabs = await browser.tabs.query({ url: patterns });
+async function findTab(source: PlatformSource, expectedUrl?: string) {
+	const patterns = platformTabPatterns(source);
+	const tabs = await browser.tabs.query({ url: [...patterns] });
 	return tabs.find(
 		(tab) =>
 			tab.url &&
-			isExpectedImportTab(source, tab.url) &&
+			captureAdapter(source).isExpectedImportTab(tab.url) &&
 			(!expectedUrl || tab.url === expectedUrl),
 	);
 }
@@ -1017,14 +1118,33 @@ async function findTab(source: CaptureSource, expectedUrl?: string) {
  * Opened inactive, so an import does not yank you out of what you were doing,
  * and closed again afterwards if we were the ones who opened it.
  */
+/** Falls back to a tab, which still captures the first page of a list. */
+async function openImportWindow(url: string) {
+	try {
+		const anchor = await browser.windows.getLastFocused().catch(() => null);
+		const opened = await browser.windows.create({
+			url,
+			type: "popup",
+			// Opened unfocused it lands behind the browser, where it counts as hidden.
+			focused: IMPORT_WINDOW_FOCUSED,
+			...importWindowBounds(anchor),
+		});
+		return opened?.tabs?.[0] ?? null;
+	} catch {
+		return await browser.tabs.create({ url, active: false });
+	}
+}
+
 async function openTab(
-	source: CaptureSource,
+	source: PlatformSource,
 	preferredUrl?: string,
+	live = false,
 ): Promise<{ id: number; ours: boolean } | null> {
-	const url = preferredUrl ?? ENTRY_URLS[source];
-	if (!url) return null;
-	const tab = await browser.tabs.create({ url, active: false });
-	if (!tab.id) return null;
+	const url = preferredUrl ?? platformEntryUrl(source);
+	const tab = importTabPresentation(captureAdapter(source).ownsImportTab === true, live) === "window"
+		? await openImportWindow(url)
+		: await browser.tabs.create({ url, active: false });
+	if (!tab?.id) return null;
 
 	const id = tab.id;
 	await new Promise<void>((resolve) => {
@@ -1039,26 +1159,34 @@ async function openTab(
 			if (tabId === id && info.status === "complete") finish();
 		}
 		browser.tabs.onUpdated.addListener(onUpdated);
+		// A fast page can finish before the listener above was attached.
+		void browser.tabs
+			.get(id)
+			.then((current) => {
+				if (current.status === "complete" && current.url && current.url !== "about:blank") finish();
+			})
+			.catch(() => {});
 	});
 
 	return { id, ours: true };
 }
 
-async function waitForTikTokHandle(runId: string, timeoutMs = 12_000): Promise<string | null> {
+async function waitForPageIdentity(runId: string, timeoutMs = 12_000): Promise<string | null> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		const handle = identifiedTikTokRuns.get(runId);
-		if (handle) return handle;
+		const identity = identifiedPageRuns.get(runId);
+		if (identity) { identifiedPageRuns.delete(runId); return identity; }
 		await new Promise((resolve) => setTimeout(resolve, 250));
 	}
+	identifiedPageRuns.delete(runId);
 	return null;
 }
 
-async function navigateTikTokTab(tabId: number, url: string): Promise<boolean> {
+async function navigateTab(tabId: number, url: string): Promise<boolean> {
 	try {
 		await browser.tabs.update(tabId, { url });
 		await new Promise<void>((resolve, reject) => {
-			const timer = setTimeout(() => { browser.tabs.onUpdated.removeListener(onUpdated); reject(new Error("TikTok navigation timed out")); }, 25_000);
+			const timer = setTimeout(() => { browser.tabs.onUpdated.removeListener(onUpdated); reject(new Error("page navigation timed out")); }, 25_000);
 			function onUpdated(id: number, info: { status?: string }) {
 				if (id !== tabId || info.status !== "complete") return;
 				clearTimeout(timer);
@@ -1076,6 +1204,15 @@ async function closeOwnedTab(
 	runId: string,
 	expectedTabId?: number,
 ): Promise<void> {
+	if (expectedTabId !== undefined) {
+		// A finished import shows its count first; a failed one stays to say why.
+		const run = await persistentState().runs.current(source);
+		const settled =
+			run.runId === runId && run.phase === "idle"
+				? await importScreens.settle(expectedTabId, runId, importScreenEnding(run))
+				: (importScreens.forget(expectedTabId), "close" as const);
+		if (settled === "hold") return;
+	}
 	await persistentState().runs.closeOwnedTabForRun(
 		source,
 		runId,
@@ -1114,17 +1251,31 @@ async function expireOwnedRun(
 }
 
 /**
- * GitHub and Reddit use credentialed worker requests. X still uses a page
- * script and opens an inactive tab when it needs one.
+ * Session-import adapters use credentialed worker requests; page-import
+ * adapters open an inactive platform tab when they need one.
  */
+/** IDs are read before any page is queued, so this run cannot stop on itself. */
+async function syncKnownIds(source: string): Promise<string[]> {
+  const current = await settings();
+  if (!current) throw new Error("extension is not connected");
+  const response = await fetch(`${current.server}/api/extension/known-ids?source=${encodeURIComponent(source)}`, {
+    headers: { Authorization: `Bearer ${current.token}` }, redirect: "error", signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error("could not read sync stopping points");
+  const body = await response.json() as {ids?: unknown};
+  if (!Array.isArray(body.ids) || body.ids.length > 2000 || body.ids.some(id => typeof id !== "string" || id.length > 200)) throw new Error("invalid stopping points");
+  return body.ids as string[];
+}
+
 async function startCapture(
 	source: string,
 	quiet = false,
 	live = false,
 ): Promise<void> {
-	if (!isCaptureSource(source)) return;
+	if (!isExtensionPlatformSource(source)) return;
+	if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) return;
 	if (
-		(source === "github" || source === "reddit") &&
+		isSessionCaptureSource(source) &&
 		sessionImports.has(source)
 	)
 		return;
@@ -1156,7 +1307,17 @@ async function startCapture(
 		return;
 	}
 
-	const entry = config.sources.find((s) => s.source === source);
+	const configuredEntry = config.sources.find((s) => s.source === source);
+  let knownIds: string[] | undefined;
+  if (live && configuredEntry) {
+    try { knownIds = await syncKnownIds(source); }
+    catch {
+      await applyImportEffects((await sourceImportLifecycle().fail({source, runId, code: "platform_request_failed"})).effects);
+      await patchStatusForRun(source, runId, {message: "could not read sync stopping points"});
+      return;
+    }
+  }
+  const entry = configuredEntry && live ? { ...configuredEntry, pageLimit: source === "tiktok" ? 1 : 10, knownIds: source === "tiktok" ? knownIds ?? [] : knownIds } : configuredEntry;
 	if (!entry) {
 		if (!quiet)
 			await patchStatusForRun(source, runId, {
@@ -1168,7 +1329,7 @@ async function startCapture(
 		return;
 	}
 
-	if (source === "github" || source === "reddit") {
+	if (isSessionCaptureSource(source)) {
 		const controller = new AbortController();
 		const task = importWithoutTab(
 			source,
@@ -1188,11 +1349,13 @@ async function startCapture(
 	}
 
 	let target: { id: number; ours: boolean } | null = null;
-	const existing = await findTab(source);
+	// An import that navigates must not take over a tab the person is using, and
+	// only a tab it opened is one it may close afterward.
+	const existing = captureAdapter(source).ownsImportTab ? undefined : await findTab(source);
 	if (existing?.id) target = { id: existing.id, ours: false };
 	else {
 		await patchStatus(source, { message: `opening ${entry.host}…` });
-		target = await openTab(source);
+		target = await openTab(source, undefined, live);
 	}
 
 	if (!target) {
@@ -1237,6 +1400,7 @@ async function startCapture(
 	);
 	await applyImportEffects(bound.effects);
 	if (bound.kind === "ignored-stale") return;
+	await importScreens.open({ tabId: tab.id, source, runId, owned: target.ours, runMode: begun.run.runMode });
 
 	if (entry.mode === "observe") {
 		const configure = () =>
@@ -1267,24 +1431,24 @@ async function startCapture(
 			return;
 		}
 
-		if (source === "tiktok") {
-			await patchStatusForRun(source, runId, { message: "finding your favorites…" });
-			await talk(tab.id, { anansi: "page-command", messageVersion: MESSAGE_PROTOCOL_VERSION, source, runId, action: "identify", config: entry });
-			const handle = await waitForTikTokHandle(runId);
-			identifiedTikTokRuns.delete(runId);
-			const destination = handle && profileUrl(handle);
-			if (!destination) {
-				await applyImportEffects((await sourceImportLifecycle().fail({ source, runId, tabId: tab.id, code: "capture_failed" })).effects);
-				await patchStatusForRun(source, runId, { startedAt: null, message: "could not identify your TikTok account; reload TikTok and retry" });
+		const preparePageImport = captureAdapter(source).preparePageImport;
+		if (preparePageImport) {
+			const prepared = await preparePageImport({
+				setMessage: async (message) => {
+					await patchStatusForRun(source, runId, { message });
+				},
+				identify: async () => {
+					await talk(tab.id, { anansi: "page-command", messageVersion: MESSAGE_PROTOCOL_VERSION, source, runId, action: "identify", config: entry });
+				},
+				waitForIdentity: () => waitForPageIdentity(runId),
+				currentUrl: async () => (await browser.tabs.get(tab.id).catch(() => null))?.url ?? null,
+				navigate: (url) => navigateTab(tab.id, url),
+				configure,
+			});
+			if (!prepared.ready) {
+				await applyImportEffects((await sourceImportLifecycle().fail({ source, runId, tabId: tab.id, code: prepared.code })).effects);
+				await patchStatusForRun(source, runId, { startedAt: null, message: prepared.message });
 				return;
-			}
-			const current = await browser.tabs.get(tab.id).catch(() => null);
-			if (!current?.url || !isProfileView(current.url, handle)) {
-				if (!(await navigateTikTokTab(tab.id, destination)) || !(await configure())) {
-					await applyImportEffects((await sourceImportLifecycle().fail({ source, runId, tabId: tab.id, code: "platform_request_failed" })).effects);
-					await patchStatusForRun(source, runId, { startedAt: null, message: "could not open your TikTok Favorites page" });
-					return;
-				}
 			}
 		}
 
@@ -1304,6 +1468,7 @@ async function startCapture(
 			source,
 			runId,
 			action: "scan",
+			// Syncs use a bounded pre-run snapshot; imports may walk history.
 			config: entry,
 		});
 		if (!scanning) {
@@ -1324,20 +1489,17 @@ async function startCapture(
 			return;
 		}
 		if (target.ours) {
-			setTimeout(() => void expireOwnedRun(source, tab.id, runId), 90_000);
+			runDeadlines.start(runId, OBSERVED_RUN_STALL_MS, () => void expireOwnedRun(source, tab.id, runId));
 		}
 		return;
 	}
 
-	/**
-	 * A live sync is one small page, not a whole run. The thing you just saved
-	 * is at the top of the listing, so twenty items reaches it with room to
-	 * spare — and the upsert makes the nineteen you already have free.
-	 */
+	// A sync walks at most ten pages, stopping on a pre-run known ID.
+
 	const job = live
 		? {
 				...entry,
-				pageLimit: 1,
+				pageLimit: 10,
 				variables: { ...(entry.variables ?? {}), count: 20 },
 			}
 		: // A full run picks up where the last acknowledged page left off, so an
@@ -1345,7 +1507,7 @@ async function startCapture(
 			{
 				...entry,
 				...(begun.run.cursor ? { resumeCursor: begun.run.cursor } : {}),
-				...(source === "x" && begun.run.cursor ? { refreshTop: true } : {}),
+				...(shouldRefreshTopOnResume(source) && begun.run.cursor ? { refreshTop: true } : {}),
 			};
 	await patchStatusForRun(source, runId, {
 		startedAt: begun.run.startedAt,
@@ -1391,18 +1553,34 @@ async function startCapture(
 		return;
 	}
 
-	// Close a tab we opened once the run reports in, or after a ceiling.
+	// Close a tab we opened once the run reports in, or when it stops progressing.
 	if (target.ours) {
-		setTimeout(() => void expireOwnedRun(source, tab.id, runId), 180_000);
+		runDeadlines.start(runId, PAGE_RUN_STALL_MS, () => void expireOwnedRun(source, tab.id, runId));
 	}
 }
 
-/** Fan out the existing full-import path without creating an aggregate run. */
-async function startAllCaptures(): Promise<void> {
+/**
+ * Fan out the existing full-import path without creating an aggregate run.
+ *
+ * `skip` leaves named sources out of this batch. A fresh pairing skips TikTok:
+ * it is opt-in and its import opens a window, so it waits for the user.
+ */
+async function startAllCaptures(
+	options: { skip?: readonly string[] } = {},
+): Promise<BackgroundResult> {
+	if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) return { ok: false, error: "licence required" };
 	const config = await loadConfig(true);
-	const sources = await initialImportSources(config, (source) =>
-		persistentState().runs.initialImportDue(source),
-	);
+	if (!config?.enabled) {
+		return { ok: false, error: "capture disabled on server" };
+	}
+	const sources = (
+		await initialImportSources(config, (source) =>
+			persistentState().runs.initialImportDue(source),
+		)
+	).filter((source) => !options.skip?.includes(source));
+	if (sources.length === 0) {
+		return { ok: false, error: "no sources due for import" };
+	}
 	void runImportAll(sources, async (source) => {
 		try {
 			await startCapture(source, true);
@@ -1422,6 +1600,7 @@ async function startAllCaptures(): Promise<void> {
 			});
 		}
 	});
+	return { ok: true };
 }
 
 async function importWithoutTab(
@@ -1450,6 +1629,7 @@ async function importWithoutTab(
 			source,
 			cursor: run.cursor,
 			pageLimit: entry.pageLimit ?? 40,
+			knownIds: entry.knownIds,
 			live,
 			signal,
 			isCurrent: async () => {
@@ -1624,10 +1804,6 @@ async function talk(tabId: number, message: unknown): Promise<boolean> {
 	}
 }
 
-async function rescheduleAlarm(): Promise<void> {
-	await scheduleDailyCatchUp(browser.alarms);
-}
-
 async function rescheduleHeartbeat(): Promise<void> {
 	await browser.alarms.clear(HEARTBEAT_ALARM);
 	browser.alarms.create(HEARTBEAT_ALARM, {
@@ -1703,11 +1879,19 @@ type BackgroundResult =
 			snapshot?: Awaited<ReturnType<typeof durableSnapshot>>;
 			/** Whether Chrome bookmark mirroring is on and still permitted. */
 			mirroring?: boolean;
+			/** Whether the page should confirm this save to the person. */
+			confirm?: boolean;
+			/** A source's capture switch, as the library recorded it. */
+			enabled?: boolean;
+			/** Store build: where the licence stands after this command. */
+			licence?: LicenceGate;
 	  }
-	| { ok: false; error: string };
+	| { ok: false; error: string; licenceError?: LicenceError; licence?: LicenceGate };
 
 interface RuntimeMessageSender {
+  frameId?: number;
 	url?: string;
+	documentId?: string;
 	tab?: { id?: number; url?: string };
 }
 
@@ -1738,16 +1922,17 @@ function validateRuntimeMessage(
 		});
 	}
 
-	// On a service-worker restart the map is empty. The first event can seed it
-	// because only our isolated-world relay can call runtime.sendMessage; the
-	// page itself can only reach that relay, which already checked the nonce.
-	const expectedNonce = tabNonces.get(tabId as number) ?? claimedNonce(message);
+	// The first event from a document can seed its nonce because only our
+	// isolated-world relay can call runtime.sendMessage; the page itself can only
+	// reach that relay, which already checked the nonce.
+	const document = { tabId: tabId as number, ...(sender.documentId ? { documentId: sender.documentId } : {}) };
+	const expectedNonce = documentNonces.expected(document, message, claimedNonce(message));
 	const parsed = parseExtensionMessage(message, {
 		path: "runtime-to-background",
 		sender: { kind: "tab", url: senderUrl },
 		expectedNonce,
 	});
-	if (parsed.ok) tabNonces.set(tabId as number, expectedNonce);
+	if (parsed.ok) documentNonces.remember(document, expectedNonce);
 	return parsed;
 }
 
@@ -1775,11 +1960,7 @@ async function handlePopupCommand(
 		case "queue-status":
 			return { ok: true, snapshot: await durableSnapshot() };
 		case "import-all":
-			await startAllCaptures();
-			return { ok: true };
-		case "reschedule":
-			await rescheduleAlarm();
-			return { ok: true };
+			return await startAllCaptures();
 		case "retry-queue":
 			await wakeDurableQueue(true, msg.source);
 			return { ok: true, snapshot: await durableSnapshot() };
@@ -1799,7 +1980,37 @@ async function handlePopupCommand(
 			await wakeDurableQueue();
 			return { ok: true };
 		}
+		case "licence-status": {
+			if (!__ANANSI_REQUIRE_LICENCE__) return { ok: true, licence: { state: "not-applicable" } };
+			return { ok: true, licence: await refreshLicence() };
+		}
+		case "licence-check": {
+			if (!__ANANSI_REQUIRE_LICENCE__) return { ok: true, licence: { state: "not-applicable" } };
+			return { ok: true, licence: await refreshLicence(true) };
+		}
+		case "licence-activate": {
+			if (!__ANANSI_REQUIRE_LICENCE__) return { ok: true, licence: { state: "not-applicable" } };
+			const wasLocked = await licenceLocked();
+			const result = await licence().activateLicence(msg.licenceKey);
+			if (!result.ok) {
+				return { ok: false, error: result.error, licenceError: result.error, licence: result.gate };
+			}
+			await armLicenceAlarm();
+			if (wasLocked) await licenceUnlocked();
+			return { ok: true, licence: result.gate };
+		}
+		case "licence-deactivate": {
+			if (!__ANANSI_REQUIRE_LICENCE__) return { ok: true, licence: { state: "not-applicable" } };
+			const result = await licence().deactivate();
+			if (!result.ok) {
+				return { ok: false, error: result.error, licenceError: result.error, licence: result.gate };
+			}
+			return { ok: true, licence: result.gate };
+		}
 		case "connection-updated": {
+			// Locked, the worker cannot see the connection and would read this as a
+			// disconnect, handing back the library's host permission. Refuse instead.
+			if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) return { ok: false, error: "Activate your licence first" };
 			const originState = await browser.storage.local.get(["anansiConnectionPreviousOrigin", "anansiAuthorizedOrigin", "anansiConnectionAttemptOrigin"]);
 			const prior = typeof originState.anansiConnectionPreviousOrigin === "string"
 				? originState.anansiConnectionPreviousOrigin
@@ -1828,7 +2039,17 @@ async function handlePopupCommand(
 				await browser.storage.local.set({ anansiAuthorizedOrigin: current.server });
 				await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
 				await loadConfig(true);
-			} else {
+                const verified = await fetch(`${current.server}/api/extension/config`, {headers:{authorization:`Bearer ${current.token}`},redirect:"error",signal:AbortSignal.timeout(10000)});
+                if (verified.status !== 200) return {ok:false,error:"Connection verification failed"};
+                await heartbeat().send();
+                await wakeDurableQueue();
+                // A fresh pairing starts the first history import on its own; TikTok stays opt-in.
+                void startAllCaptures({ skip: ["tiktok"] }).catch(() => {});
+                await armLibraryTabs();
+                const previous = (await browser.storage.local.get("anansiPreviousConnection")).anansiPreviousConnection as {origin:string;token:string} | undefined;
+                await retirePreviousConnection({origin:current.server,token:current.token},previous);
+                await browser.storage.local.remove("anansiPreviousConnection");
+            } else {
 				await browser.alarms.clear(OUTBOX_ALARM);
 				await browser.alarms.clear(NATIVE_CAPTURE_ALARM);
 				await browser.storage.local.remove(["anansiConnectionPreviousOrigin", "anansiConnectionAttemptOrigin"]);
@@ -1848,21 +2069,43 @@ async function handlePopupCommand(
 			return { ok: true };
 		}
 		case "stop": {
-			if (msg.source === "github" || msg.source === "reddit") {
-				const importing = sessionImports.get(msg.source);
-				importing?.controller.abort();
-				await importing?.task;
-			}
-			const current = await persistentState().runs.current(msg.source);
-			if (current.runId) {
-				const stopped = await sourceImportLifecycle().stop(
-					msg.source,
-					current.runId,
-				);
-				await applyImportEffects(stopped.effects);
-			}
+			await stopSourceRun(msg.source);
 			return { ok: true };
 		}
+		case "set-source": {
+			const current = await settings();
+			if (!current) return { ok: false, error: "Not connected" };
+			const changed = await requestSourceToggle(current, msg.source, msg.enabled);
+			if (!changed.ok) return changed;
+			// Re-read now rather than at the hourly revalidation: every capture path
+			// (imports, live saves, library sync) asks this cache whether a source is on.
+			const config = await loadConfig(true);
+			if (!msg.enabled && cached && config?.sources.some((entry) => entry.source === msg.source)) {
+				// The library recorded "off" but the re-read fell back to an older copy.
+				// Drop the source from that copy rather than capture on it for an hour.
+				const value = { ...cached.value, sources: cached.value.sources.filter((entry) => entry.source !== msg.source) };
+				cached = { ...cached, value };
+				await persistedConfig.save(current.server, current.token, value, cached.at).catch(() => {});
+			}
+			// Off means off now, not after the run in flight finishes.
+			if (!msg.enabled) await stopSourceRun(msg.source);
+			requestHeartbeat();
+			return { ok: true, enabled: changed.enabled };
+		}
+	}
+}
+
+/** Ends the run in flight for a source. Progress and queued captures survive. */
+async function stopSourceRun(source: PlatformSource): Promise<void> {
+	if (isSessionCaptureSource(source)) {
+		const importing = sessionImports.get(source);
+		importing?.controller.abort();
+		await importing?.task;
+	}
+	const current = await persistentState().runs.current(source);
+	if (current.runId) {
+		const stopped = await sourceImportLifecycle().stop(source, current.runId);
+		await applyImportEffects(stopped.effects);
 	}
 }
 
@@ -1874,7 +2117,7 @@ async function handlePageEvent(
 	// Import results for these sources are owned by the worker. Old content
 	// scripts in already-open tabs must not advance or finish its run.
 	if (
-		(source === "github" || source === "reddit") &&
+		isSessionCaptureSource(source) &&
 		["page", "done", "error", "scanned"].includes(msg.action)
 	) {
 		return {
@@ -1896,6 +2139,8 @@ async function handlePageEvent(
 						config: entry,
 					}).catch(() => {});
 				}
+				// A reload or navigation of an import tab brings a fresh relay.
+				await importScreens.reattach(tabId);
 			}
 			return { ok: true };
 		case "page":
@@ -1921,11 +2166,13 @@ async function handlePageEvent(
 				}
 				if (accepted.kind === "ignored-stale" || accepted.kind === "disabled")
 					return { ok: true };
+				if (msg.runId) runDeadlines.progress(msg.runId);
 			}
 			await patchStatusForRun(source, msg.runId ?? "", {
 				pages: msg.page,
 				items: msg.items,
 			});
+			await importScreens.progress(tabId, msg.runId, msg.items);
 			return { ok: true };
 		case "saved":
 			await persistentState().runs.requestRefresh(source);
@@ -1948,12 +2195,14 @@ async function handlePageEvent(
 			await applyImportEffects(accepted.effects);
 			if (accepted.kind === "queue-failed") return { ok: false, error: accepted.errorCode ?? "capture queue rejected the page" };
 			if (accepted.kind !== "accepted-page") return { ok: true };
+			runDeadlines.progress(msg.runId);
 			const current = await readStatus(source);
 			await patchStatusForRun(source, msg.runId, {
 				lastRun: Date.now(),
 				pages: current.pages + 1,
 				items: current.items + msg.items,
 			});
+			await importScreens.progress(tabId, msg.runId, msg.items);
 			return { ok: true };
 		}
 		case "done":
@@ -1966,7 +2215,7 @@ async function handlePageEvent(
 					state: msg.state,
 					pages: msg.pages,
 					items: msg.items,
-					initialImport: true,
+					initialImport: (await persistentState().runs.current(source)).runMode !== "live",
 				});
 				await applyImportEffects(completed.effects);
 				if (completed.kind === "completed" && msg.items === 0) {
@@ -1978,7 +2227,7 @@ async function handlePageEvent(
 			return { ok: true };
 		case "identified":
 			if ((await persistentState().runs.current(source)).runId === msg.runId) {
-				identifiedTikTokRuns.set(msg.runId, msg.handle);
+				identifiedPageRuns.set(msg.runId, msg.handle);
 				await persistentState().runs.setHandle(source, msg.handle);
 			}
 			return { ok: true };
@@ -1990,10 +2239,15 @@ async function handlePageEvent(
 					source,
 					runId: msg.runId,
 					tabId,
-					initialImport: true,
+          state: needsFullWindowImport(run.runMode === "live", msg) || (run.runMode === "live" && currentStatus.pages >= 10) ? "limited" : "complete",
+					initialImport: run.runMode !== "live",
 				});
 				await applyImportEffects(completed.effects);
-				if (completed.kind === "completed" && currentStatus.items === 0) {
+				if (completed.kind === "completed" && needsFullWindowImport(run.runMode === "live", msg)) {
+					await patchStatusForRun(source, msg.runId, {
+						message: "more favorites may remain; use Import everything to finish in a window",
+					});
+				} else if (completed.kind === "completed" && currentStatus.items === 0) {
 					await patchStatusForRun(source, msg.runId, {
 						message: "no favorites were returned",
 					});
@@ -2024,11 +2278,77 @@ async function handlePageEvent(
 	}
 }
 
+async function injectLibraryBridge(tabId: number) {
+        await browser.scripting.executeScript({target: {tabId}, func: libraryBridgeScript}).catch(() => {});
+
+}
+async function armLibraryTabs() {
+ const current=await settings();
+ if (!current) return;
+ for (const tab of await browser.tabs.query({})) {
+   if (tab.id && isLibraryPage(tab.url,current.server)) await injectLibraryBridge(tab.id);
+ }
+}
 async function handleRuntimeMessage(
 	message: unknown,
 	sender: RuntimeMessageSender,
 ): Promise<BackgroundResult> {
-	const handoff = parseNativeHandoffStoreRequest(message);
+ if ((message as {anansi?:string})?.anansi === "library-connect") {
+  const current=await settings();
+  const result=await connectLibrary(message,{senderUrl:sender.tab?sender.url:undefined,origin:current?.server,frameId:sender.frameId},async(code)=>{
+   const admission=await queueDestination().canConnectTo(current!.server);
+   if(!admission.ok)throw new Error("Connection failed");
+   const response=await fetch(`${current!.server}/api/connect/redeem`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({code}),redirect:"error",signal:AbortSignal.timeout(10000)});
+   if(!response.ok)throw new Error("Connection failed");
+   const issued=await response.json() as {key:string};
+   const verified=await fetch(`${current!.server}/api/extension/config`,{headers:{authorization:`Bearer ${issued.key}`},redirect:"error",signal:AbortSignal.timeout(10000)});
+   if(verified.status !== 200)throw new Error("Connection failed");
+   await saveExtensionConnection(current!.server,issued.key);
+   const updated=await handlePopupCommand({anansi:"popup-command",messageVersion:1,action:"connection-updated"});
+   if(!updated.ok)throw new Error("Connection failed");
+  });
+  return result.ok?{ok:true}:{ok:false,error:"Connection failed"};
+ }
+	if ((message as {anansi?: string})?.anansi === "library-import") {
+		// The same full import the popup's "Import all" starts.
+		const started = await startLibraryImport(
+			message,
+			{ url: sender.url, frameId: sender.frameId, fromTab: Boolean(sender.tab) },
+			{
+				connectedOrigin: async () => (await settings())?.server,
+				enabledSources: async () => {
+					// The cached config answers inside the page's timeout; startCapture
+					// re-reads it fresh before the run does anything.
+					const config = await loadConfig();
+					return config?.enabled ? config.sources.map((entry) => entry.source) : null;
+				},
+				start: (source) => startCapture(source),
+			},
+		);
+		return started.ok ? { ok: true } : { ok: false, error: "import not allowed" };
+	}
+	if ((message as {anansi?: string})?.anansi === "library-sync-now") {
+    const current = await settings();
+    if (!isLibrarySyncCommand(message, sender.url, current?.server) || !sender.tab || sender.frameId !== 0) return {ok: false, error: "origin not allowed"};
+    void librarySync().syncNow().catch(() => {});
+    return {ok: true};
+  }
+	if (isImportScreenCloseRequest(message)) {
+		// Close on a failed import's screen; only a tab that screen is held open in.
+		const tabId = sender.frameId === 0 ? sender.tab?.id : undefined;
+		const held = importScreens.closeRequested(tabId);
+		if (held && tabId !== undefined) await closeOwnedTab(held.source, held.runId, tabId);
+		return { ok: true };
+	}
+  // Store build without a licence: pages may not hand over captures.
+  if (
+    __ANANSI_REQUIRE_LICENCE__ &&
+    (message as { anansi?: string })?.anansi !== "popup-command" &&
+    (await licenceLocked())
+  ) {
+    return { ok: false, error: "licence required" };
+  }
+  const handoff = parseNativeHandoffStoreRequest(message);
 	if (handoff) return handleNativeHandoffStore(handoff, sender);
 	const parsed = validateRuntimeMessage(message, sender);
 	if (!parsed.ok) return { ok: false, error: parsed.error.message };
@@ -2064,6 +2384,7 @@ export default defineBackground(() => {
 	 * every time — and a swallowed one is how a real error later gets missed.
 	 */
 	browser.runtime.onInstalled.addListener(() => {
+        void armLibraryTabs().catch(() => {});
 		browser.contextMenus.removeAll(() => {
 			for (const menu of MENUS) {
 				browser.contextMenus.create(menu);
@@ -2086,12 +2407,6 @@ export default defineBackground(() => {
 			handleRuntimeMessage(message, sender),
 	);
 
-	/**
-	 * Automatic sync. Incremental by nature rather than by flag: every capture
-	 * path stops at the first page it has already seen, and the ingest upsert is
-	 * idempotent on (source, external_id), so a repeated run costs a request and
-	 * changes nothing.
-	 */
 	browser.alarms.onAlarm.addListener((alarm) => {
 		void (async () => {
 			if (alarm.name.startsWith(SOURCE_RUN_RECOVERY_ALARM_PREFIX)) {
@@ -2104,6 +2419,10 @@ export default defineBackground(() => {
 				await startCapture(source, true, interrupted.runMode === "live");
 				return;
 			}
+			if (__ANANSI_REQUIRE_LICENCE__ && alarm.name === LICENCE_ALARM) {
+				await refreshLicence();
+				return;
+			}
 			if (alarm.name === HEARTBEAT_ALARM) {
 				requestHeartbeat();
 				return;
@@ -2113,26 +2432,28 @@ export default defineBackground(() => {
 				await processPendingRefreshes();
 				return;
 			}
-			if (alarm.name !== ALARM) return;
-			const config = await loadConfig();
-			for (const entry of config?.sources ?? []) {
-				if (entry.mode !== "page") continue;
-				await startCapture(entry.source, true);
-			}
 		})();
 	});
 
-	void rescheduleAlarm();
+	// Earlier versions kept a daily catch-up alarm. Sync now follows the library.
+	void browser.alarms.clear(SYNC_ALARM);
+	if (__ANANSI_REQUIRE_LICENCE__) {
+		void armLicenceAlarm();
+		void refreshLicence().catch(() => {});
+	}
+	void armLibraryTabs().catch(() => {});
 	void rescheduleHeartbeat();
 	void wakeDurableQueue().then(processPendingRefreshes);
 	requestHeartbeat();
 	// The worker restarts constantly; the listeners have to come back with it.
 	void startMirroring();
 	browser.runtime.onStartup.addListener(() => {
+        void armLibraryTabs().catch(() => {});
 		void wakeDurableQueue().then(processPendingRefreshes);
 		requestHeartbeat();
 	});
 	browser.runtime.onInstalled.addListener(() => {
+        void armLibraryTabs().catch(() => {});
 		void wakeDurableQueue().then(processPendingRefreshes);
 		void armOpenTabs();
 		requestHeartbeat();
@@ -2142,6 +2463,13 @@ export default defineBackground(() => {
 	// works without anyone opening the popup.
 	browser.tabs.onUpdated.addListener((tabId, info, tab) => {
 		if (info.status !== "complete" || !tab.url) return;
+		void settings().then(async (current) => {
+			if (isLibraryPage(tab.url, current?.server)) {
+        // The bridge only serves Sync now, so failing to add it must not stop this sync.
+        void injectLibraryBridge(tabId);
+        return librarySync().libraryOpened();
+      }
+		}).catch(() => {});
 		void loadConfig().then((config) => {
 			const entry = config?.sources.find((candidate) =>
 				tab.url?.includes(candidate.host.replace("www.", "")),

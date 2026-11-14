@@ -29,6 +29,7 @@ describe("preservation regressions", () => {
     db.$client.prepare("insert into items(id,source,external_id,url,kind,body,saved_at,raw) values (?,?,?,?,?,?,?,?)").run("legacy","web","legacy","https://example.com/legacy","article","Description",100,JSON.stringify({text:"legacyphraseunique\n    code();",selection:"legacy highlight"}));
     db.$client.exec(readFileSync(`${directory}/0010_preservation_organization.sql`, "utf8"));
     db.$client.exec(readFileSync(`${directory}/0012_tag_colors.sql`, "utf8"));
+    db.$client.exec(readFileSync(`${directory}/0026_author_avatars.sql`, "utf8"));
     expect((await getItem(db,"legacy"))?.fullText).toContain("legacyphraseunique");
     expect((await getItem(db,"legacy"))?.highlights[0]?.text).toBe("legacy highlight");
     expect((await searchItems(db,{query:"legacyphraseunique"}))[0]?.id).toBe("legacy");

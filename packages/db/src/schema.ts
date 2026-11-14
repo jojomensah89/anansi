@@ -1,3 +1,4 @@
+import { MEDIA_IDENTITY_SQL } from "./media-identity.ts";
 import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
@@ -88,6 +89,7 @@ export const items = sqliteTable(
     index("items_posted").on(t.postedAt),
     index("items_archived").on(t.archivedAt),
     index("items_author").on(t.authorHandle),
+    index("items_author_avatar_latest").on(t.source, t.authorHandle, t.savedAt, t.id).where(sql`author_avatar IS NOT NULL AND author_avatar <> ''`),
     index("items_nsfw").on(t.nsfw),
   ],
 );
@@ -155,12 +157,13 @@ export const media = sqliteTable(
     /** 'image' | 'video_poster' | 'card' */
     kind: text("kind").notNull(),
     originUrl: text("origin_url").notNull(),
+    identity: text("identity").generatedAlwaysAs(sql.raw(MEDIA_IDENTITY_SQL)),
     /** R2 object key, null until fetched */
     storedKey: text("stored_key"),
     width: integer("width"),
     height: integer("height"),
   },
-  (t) => [uniqueIndex("media_item_origin").on(t.itemId, t.originUrl)],
+  (t) => [uniqueIndex("media_item_identity").on(t.itemId, t.identity)],
 );
 
 export const tags = sqliteTable("tags", {
@@ -203,7 +206,7 @@ export const aiSettings = sqliteTable("ai_settings", {
   autoTaggingEnabled: integer("auto_tagging_enabled").notNull().default(0),
   embeddingModel: text("embedding_model").notNull().default("@cf/baai/bge-small-en-v1.5"),
   embeddingDimensions: integer("embedding_dimensions").notNull().default(384),
-  tagModel: text("tag_model").notNull().default("@cf/clef-flash-9b"),
+  tagModel: text("tag_model").notNull().default("@cf/cloudflare/clef-flash"),
   updatedAt: integer("updated_at").notNull().default(0),
   quotaPauseReason: text("quota_pause_reason"),
   lastRunAt: integer("last_run_at"),
@@ -320,10 +323,50 @@ export const highlights = sqliteTable("highlights", {
   createdAt: integer("created_at").notNull(),
 }, (t) => [uniqueIndex("highlights_item_text").on(t.itemId, t.text)]);
 
+/**
+ * Shelves. The table kept its first name, from when these were only saved
+ * views, so existing deployments migrate in place.
+ */
 export const collections = sqliteTable("collections", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  /** The rule: library filters as JSON. `{}` means the shelf is filled by hand. */
   filters: text("filters").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+  /** A palette key (see SHELF_COLORS), never a hex value. */
+  color: text("color"),
+  /** A lucide icon name. */
+  icon: text("icon"),
+  position: integer("position").notNull().default(0),
+});
+
+/** Saves put on a shelf by hand, or taken off a ruled shelf by hand. */
+export const shelfItems = sqliteTable(
+  "shelf_items",
+  {
+    shelfId: text("shelf_id").notNull().references(() => collections.id, { onDelete: "cascade" }),
+    itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    /** 'include' | 'exclude' */
+    mode: text("mode").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.shelfId, t.itemId] }), index("shelf_items_item").on(t.itemId)],
+);
+
+export const shelfSuggestionDismissals = sqliteTable("shelf_suggestion_dismissals", {
+  topic: text("topic").primaryKey(),
+  dismissedAt: integer("dismissed_at").notNull(),
+});
+
+/** Owner edits to the AI topic list; see topic-settings.ts. */
+export const aiTopics = sqliteTable("ai_topics", {
+  id: text("id").primaryKey(),
+  builtIn: integer("built_in").notNull().default(0),
+  label: text("label"),
+  description: text("description"),
+  color: text("color"),
+  enabled: integer("enabled").notNull().default(1),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
@@ -363,3 +406,59 @@ export const extensionClients = sqliteTable(
 );
 
 export { mediaJobs } from "./media-jobs-schema.ts";
+
+/** One row: the last time a library page asked for platforms to be checked. */
+export const syncRequests = sqliteTable("sync_requests", {
+  id: integer("id").primaryKey().default(1),
+  requestedAt: integer("requested_at").notNull(),
+});
+
+/** Per-platform pending requests and owner-controlled sync configuration. */
+export const platformSync = sqliteTable("platform_sync", {
+  source: text("source").primaryKey(),
+  requestedAt: integer("requested_at").notNull().default(0),
+  forced: integer("forced").notNull().default(0),
+  trigger: text("trigger").notNull().default("library"),
+  agentAt: integer("agent_at").notNull().default(0),
+});
+export const syncSettings = sqliteTable("sync_settings", {
+  id: integer("id").primaryKey().default(1),
+  agentTabs: integer("agent_tabs").notNull().default(0),
+  githubUsername: text("github_username"),
+  githubCheckedAt: integer("github_checked_at"),
+  githubError: text("github_error"),
+  githubRetryAt: integer("github_retry_at").notNull().default(0),
+});
+
+export const connectedClients = sqliteTable("connected_clients", {
+ id: text("id").primaryKey(), kind: text("kind").notNull(), name: text("name").notNull(),
+ scopes: text("scopes").notNull(), keyHash: text("key_hash").notNull().unique(),
+ createdAt: integer("created_at").notNull(), lastUse: integer("last_use"), revokedAt: integer("revoked_at"),
+});
+/** Apps that registered themselves. They reach nothing until the owner approves one. */
+export const oauthClients = sqliteTable("oauth_clients", {
+ id: text("id").primaryKey(), name: text("name").notNull(), redirectUris: text("redirect_uris").notNull(),
+ createdAt: integer("created_at").notNull(), connectedClientId: text("connected_client_id"),
+});
+export const oauthCodes = sqliteTable("oauth_codes", {
+ codeHash: text("code_hash").primaryKey(), clientId: text("client_id").notNull(), connectedClientId: text("connected_client_id").notNull(),
+ redirectUri: text("redirect_uri").notNull(), codeChallenge: text("code_challenge").notNull(), codeChallengeMethod: text("code_challenge_method").notNull(),
+ scope: text("scope").notNull(), expiresAt: integer("expires_at").notNull(),
+});
+export const oauthTokens = sqliteTable("oauth_tokens", {
+ accessHash: text("access_hash").primaryKey(), refreshHash: text("refresh_hash").notNull().unique(), clientId: text("client_id").notNull(),
+ connectedClientId: text("connected_client_id").notNull(), scope: text("scope").notNull(), resource: text("resource").notNull(),
+ accessExpiresAt: integer("access_expires_at").notNull(), refreshExpiresAt: integer("refresh_expires_at").notNull(),
+});
+export const clientSecurity = sqliteTable("client_security", {
+ id: integer("id").primaryKey(), retiredAt: integer("retired_at"),
+});
+
+/** Rebuildable avatar cache; exports retain original URLs and can refill it. */
+export const authorAvatars = sqliteTable("author_avatars", {
+  originUrl: text("origin_url").primaryKey(),
+  storedKey: text("stored_key"),
+  attempts: integer("attempts").notNull().default(0),
+  nextRunAt: integer("next_run_at").notNull().default(0),
+  claimToken: text("claim_token"),
+}, (table) => [index("author_avatars_pending").on(table.storedKey, table.nextRunAt)]);

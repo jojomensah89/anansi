@@ -25,45 +25,15 @@ private build mode may embed these. Never submit a private configured package.
 Record the final commit, extension version, ZIP filename, SHA-256, manifest and
 verification results with the candidate. Hash the ZIP after all changes finish.
 
-## Proposed listing
+## Listing and disclosures
 
-Name: Anansi
-
-Summary: Save bookmarks, stars and web pages to your own searchable Anansi library.
-
-Description: Anansi connects Chrome to a personal library hosted in your own
-Cloudflare account. Capture supported bookmarks and saved posts, GitHub stars,
-web pages and selections, and optionally mirror Chrome bookmarks. Search and
-organize the library in the web app, or connect a compatible MCP client. You
-must deploy an Anansi server and connect the extension to its URL and access key.
-Provider imports require signing in to the corresponding site in this browser.
-Enable automatic tags and semantic search only if you want to use Cloudflare AI.
-
-Before submission, reconcile supported-source claims with the final signed-in
-acceptance matrix. Do not promise instant, unlimited or universal capture.
-
-## Permissions and privacy
-
-- Storage: connection state, queued captures, import progress and recovery.
-- Alarms: retry scheduling, heartbeat and incremental catch-up.
-- Tabs: provider import tab lifecycle and opening the user's library.
-- activeTab and scripting: capture the page or selection after a user gesture.
-- Context menus: explicit Save page and Save selection commands.
-- Supported provider hosts: observe save events and import signed-in content.
-- Optional server host: contact only the deployment origin the user selects.
-- Optional bookmarks: mirror Chrome bookmarks only after enabling the feature.
-
-Data disclosures must reflect saved text, website content, URLs, author metadata,
-authentication information stored locally, and user-controlled server delivery.
-Self-hosting does not mean no data transmission. Publish PRIVACY.md at an
-accessible HTTPS URL before submission. No full docs site is required for that.
+Use [LISTING.md](LISTING.md) for the draft listing, every permission/host justification and data disclosures. Run [the side-by-side checklist](../side-by-side-test.md) before making source acceptance claims.
 
 ## Reviewer instructions
 
 Provide a dedicated isolated reviewer deployment and synthetic test content.
 Supply reviewer credentials privately through the developer dashboard, never in
-the ZIP, public listing, screenshots or repository. Provide both server URL and
-extension access key. If split keys are enabled, provide a separate library key.
+the ZIP, public listing, screenshots or repository. Provide the reviewer server URL and owner sign-in privately; pair through Connect extension with a single-use code and capture-only key.
 
 1. Install the public package and open the popup; it starts disconnected.
 2. Connect to the reviewer URL/key and grant that exact optional host permission.

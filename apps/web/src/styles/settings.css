@@ -1,0 +1,163 @@
+/* ---------------------------------------------------------------------------
+ * Settings.
+ *
+ * A column of areas on the left, the chosen area's panels on the right,
+ * centred in at most 960px. A panel is a header (title and one line) over
+ * rows split by hairlines; a row is its label and one line on the left, the
+ * control on the right. Graphite only: the accent is the switch that is on
+ * and the area you are in; the topic dots carry the only other colour.
+ *
+ * Loaded after frame.css (see routes/__root.tsx).
+ * ------------------------------------------------------------------------ */
+
+.settings-scroll{flex:1;min-height:0;height:100%}
+.settings-frame{display:grid;grid-template-columns:176px minmax(0,1fr);gap:40px;align-items:start;max-width:960px;margin:0 auto;padding:32px 24px 64px}
+
+/* ---------------------------------------------------------------- nav --- */
+
+.settings-nav{position:sticky;top:32px}
+.settings-nav ul{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.settings-nav-link{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:6px;color:var(--muted);font-size:14px;line-height:20px;white-space:nowrap;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),transform 150ms var(--ease-out)}
+.settings-nav-link svg{width:16px;height:16px;flex:none}
+.settings-nav-link[aria-current=page]{background:var(--raised);color:var(--text);font-weight:500}
+.settings-nav-link:active{transform:scale(.97)}
+.settings-nav-link:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+@media (hover:hover) and (pointer:fine){
+ .settings-nav-link:hover{background:var(--raised);color:var(--text)}
+}
+
+/* -------------------------------------------------------------- panels --- */
+
+.settings-content,.settings-section-page{display:flex;flex-direction:column;gap:24px;min-width:0}
+.settings-panel{container:settings-panel / inline-size;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:12px;font-size:14px;line-height:20px;color:var(--text)}
+.settings-panel-head{display:flex;align-items:center;gap:16px;min-height:72px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.settings-panel-copy{flex:1 1 240px;min-width:0}
+.settings-panel-head h2{margin:0;font-size:16px;line-height:24px;font-weight:500;color:var(--text)}
+.settings-panel-head p{margin:2px 0 0;font-size:14px;line-height:20px;color:var(--muted)}
+.settings-panel-action{flex:none;display:flex;align-items:center;gap:12px}
+.settings-count{font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* A row: label and its line, then the control, centred on each other. */
+.settings-panel .settings-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:24px;padding:16px 20px;font-size:14px;line-height:20px}
+.settings-panel .settings-row + .settings-row{border-top:1px solid var(--line-soft)}
+.settings-panel .settings-row-copy{grid-column:1;min-width:0}
+.settings-panel .settings-row-title{display:flex;align-items:center;gap:8px;font-weight:500;color:var(--text)}
+.settings-panel .settings-row-description{margin-top:2px;color:var(--muted);text-wrap:pretty}
+.settings-panel .settings-row-control{grid-column:2;margin-left:0;justify-self:end;display:flex;align-items:center;gap:8px;min-height:20px}
+.settings-panel .settings-row-sub{grid-column:1 / -1;margin-top:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.settings-panel .settings-row > .settings-notice,.settings-panel .settings-row > .passkey-rename,.settings-panel .settings-row > .passkey-rename-error{grid-column:1 / -1}
+.settings-panel .settings-notice{border-radius:8px}
+
+/* Wide controls (an address, a field) drop under the label when the panel is narrow. */
+@container settings-panel (max-width:560px){
+ .settings-panel .settings-row[data-wide],.settings-panel .settings-row:has(.settings-github){grid-template-columns:minmax(0,1fr);row-gap:12px}
+ .settings-panel .settings-row[data-wide] .settings-row-control,.settings-panel .settings-row:has(.settings-github) .settings-row-control{grid-column:1;justify-self:stretch}
+ .settings-panel .settings-github{width:100%}
+ .settings-panel .settings-index{grid-template-columns:minmax(0,1fr)}
+ .settings-panel .settings-index-action{grid-column:1;grid-row:3;justify-self:start;min-width:0}
+ .settings-panel .settings-cap-copy{flex-basis:100%}
+ .settings-panel .settings-cap{flex:1}
+ .settings-panel .settings-cap [data-slot=input]{flex:1;min-width:0;width:auto;text-align:left}
+}
+
+/* A link out of Settings, set like the buttons beside it. */
+.workspace-page .settings-goto{gap:6px;color:var(--text-dim)}
+.workspace-page .settings-goto svg{color:var(--muted)}
+
+/* --------------------------------------------------------- agents: MCP --- */
+
+.settings-panel .mcp-endpoint-field{width:360px;max-width:100%}
+.settings-panel .mcp-endpoint-field .connect-value{flex:1 1 auto;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.settings-panel .mcp-connect-body{padding:0;gap:12px}
+.settings-panel .mcp-signin{flex-wrap:wrap}
+.workspace-page .settings-panel .mcp-copy-setup{width:auto;align-self:flex-start;margin-top:0}
+
+.settings-select[data-slot=select-trigger]{height:32px;min-width:220px;gap:8px;padding:0 8px 0 10px;border:1px solid var(--edge);border-radius:6px;background:var(--card);color:var(--text);font-size:14px;line-height:20px;transition:border-color 150ms var(--ease-out),background-color 150ms var(--ease-out)}
+.settings-select[data-slot=select-trigger]:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);outline:none}
+.settings-select[data-slot=select-trigger] svg{color:var(--muted)}
+@media (hover:hover) and (pointer:fine){.settings-select[data-slot=select-trigger]:hover{background:var(--raised)}}
+[data-slot=select-content].settings-select-content{min-width:var(--anchor-width);padding:4px;border-radius:8px;border:1px solid var(--edge);background:var(--card);color:var(--text);box-shadow:0 12px 32px -16px rgb(0 0 0 / .45);transform-origin:var(--transform-origin)}
+[data-slot=select-content].settings-select-content [data-slot=select-item]{min-height:32px;padding:6px 32px 6px 8px;border-radius:4px;font-size:14px;line-height:20px;color:var(--text-dim)}
+[data-slot=select-content].settings-select-content [data-slot=select-item]:is(:focus,[data-highlighted]){background:var(--raised);color:var(--text)}
+[data-slot=select-content].settings-select-content [data-slot=select-item][data-selected]{color:var(--text);font-weight:500}
+
+/* Connected apps keep their table; on this page it is a panel like the rest. */
+.settings-content .clients-panel{border-radius:12px}
+.settings-content .clients-panel .mcp-panel-head{min-height:72px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.settings-content .clients-panel .mcp-panel-head h2{font-size:16px;line-height:24px;font-weight:500}
+.settings-content .clients-panel .mcp-count{font-size:14px;line-height:20px}
+.settings-content .clients-panel [data-slot=table-header] [data-slot=table-head]{height:36px}
+
+/* -------------------------------------------------------------- topics --- */
+
+.topics-list{margin:0;padding:0;list-style:none}
+.topic-row{display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;column-gap:16px;padding:12px 12px 12px 20px;min-height:64px}
+.topic-row + .topic-row{border-top:1px solid var(--line-soft)}
+.topic-row[data-editing]{align-items:start;background:var(--raised)}
+.topic-dot{align-self:start;width:8px;height:8px;margin-top:6px;border-radius:50%;transition:opacity 150ms var(--ease-out)}
+.topic-copy{min-width:0}
+.topic-line{display:flex;align-items:baseline;gap:8px;min-width:0}
+.topic-name{font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color 150ms var(--ease-out)}
+.topic-count{flex:none;font-size:12px;line-height:16px;color:var(--muted);font-variant-numeric:tabular-nums}
+.topic-description{margin:2px 0 0;max-width:60ch;color:var(--muted);text-wrap:pretty}
+.topic-empty{font-style:normal;color:var(--muted)}
+.topic-row[data-off] .topic-name{color:var(--muted)}
+.topic-row[data-off] .topic-dot{opacity:.35}
+.topic-actions{display:flex;align-items:center;gap:2px}
+.topic-actions [data-slot=switch]{margin-left:8px}
+.workspace-page .topic-icon{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted)}
+.workspace-page .topic-icon svg{width:16px;height:16px}
+.workspace-page .topic-reset{height:28px;padding:0 8px;border:0;background:transparent;color:var(--text-dim);font-weight:400}
+@media (hover:hover) and (pointer:fine){
+ .workspace-page .topic-icon:hover,.workspace-page .topic-reset:hover{background:var(--raised);color:var(--text)}
+ .topic-row[data-editing] .topic-icon:hover{background:var(--card)}
+}
+
+/* Editing a description in place: the field, its count, two buttons. */
+.topic-form{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.topic-textarea[data-slot=textarea]{min-height:64px;padding:8px 10px;border:1px solid var(--edge);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:14px;line-height:20px;resize:vertical;field-sizing:content}
+.topic-textarea[data-slot=textarea]:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);outline:none}
+.topic-textarea[data-slot=textarea]::placeholder{color:var(--muted)}
+.topic-form-foot{display:flex;align-items:center;gap:8px}
+.workspace-page .topic-delete{order:-1;gap:6px;padding:0 8px;border:0;background:transparent;color:var(--danger);font-weight:400}
+.workspace-page .topic-delete svg{width:14px;height:14px}
+@media (hover:hover) and (pointer:fine){.workspace-page .topic-delete:hover{background:var(--card);color:var(--danger)}}
+.topic-form-count{margin-right:auto;font-size:12px;line-height:16px;color:var(--muted);font-variant-numeric:tabular-nums}
+.topic-field-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.topic-field-head .topic-form-count{margin-right:0}
+
+/* After a change: one quiet line and the one thing to do about it. */
+.topics-banner{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line-soft);background:var(--raised);transition:opacity 200ms var(--ease-out),transform 200ms var(--ease-out)}
+@starting-style{.topics-banner{opacity:0;transform:translateY(-4px)}}
+.topics-banner-copy{flex:1;min-width:0;display:flex;flex-direction:column}
+.topics-banner-title{font-weight:500;color:var(--text)}
+.topics-banner-note{font-size:12px;line-height:16px;color:var(--muted)}
+
+/* ---------------------------------------------------------------- phone --- */
+
+@media (max-width:720px){
+ .settings-frame{grid-template-columns:minmax(0,1fr);gap:16px;padding:0 16px 48px}
+ /* The areas become one row of tabs that stays under the top bar. */
+ .settings-nav{position:sticky;top:0;z-index:5;margin:0 -16px;padding:8px 16px;background:var(--ink);border-bottom:1px solid var(--line)}
+ .settings-nav ul{flex-direction:row;gap:4px;overflow-x:auto;scrollbar-width:none}
+ .settings-nav ul::-webkit-scrollbar{display:none}
+ .settings-nav-link{padding:0 12px}
+ .settings-content,.settings-section-page{gap:16px}
+ .settings-panel-head{min-height:0;padding:14px 16px;flex-wrap:wrap;row-gap:12px}
+ .settings-panel .settings-row{padding:14px 16px;column-gap:16px}
+ .topic-row{padding:12px 8px 12px 16px;column-gap:12px}
+ .topics-banner{padding:12px 16px;flex-wrap:wrap}
+ .settings-content .clients-panel .mcp-panel-head{min-height:0;padding:14px 16px}
+ .settings-select[data-slot=select-trigger]{min-width:0;flex:1}
+}
+
+@media (prefers-reduced-motion:reduce){
+ .settings-nav-link:active{transform:none}
+ .topics-banner{transition:none}
+}
+
+/* The MCP page: its address leads the content, now the top bar carries the title. */
+.mcp-address-bar{display:flex;align-items:center;justify-content:flex-end;gap:12px;min-width:0}
+.mcp-address-bar .mcp-endpoint-field{width:min(480px,100%)}
+.mcp-address-bar .mcp-endpoint-field .connect-value{flex:1 1 auto;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:640px){.mcp-address-bar .mcp-endpoint-field{width:100%}}

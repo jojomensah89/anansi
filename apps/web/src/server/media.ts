@@ -1,3 +1,5 @@
+import { FetchBudget } from "./fetch-budget.ts";
+import { sql } from "drizzle-orm";
 import { join } from "node:path";
 import { claimMediaJobs, completeMediaJob, failMediaJob } from "@anansi/db";
 import type { AnansiDb } from "@anansi/db";
@@ -5,13 +7,14 @@ import type { AnansiDb } from "@anansi/db";
 export interface MediaSource {
   bucket?: {
     get(key: string): Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null>;
+    delete?(key: string): Promise<unknown>;
     put?(key: string, bytes: ArrayBuffer, options?: { httpMetadata: { contentType: string } }): Promise<unknown>;
   };
   dir?: string;
   put?: (key: string, bytes: ArrayBuffer, contentType?: string) => Promise<void>;
   runtime?: "worker" | "local";
 }
-const TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif" };
+const TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif", "image/x-icon": "ico", "image/vnd.microsoft.icon": "ico" };
 const EXT_TYPES = Object.fromEntries(Object.entries(TYPES).map(([type, ext]) => [ext, type]));
 const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 15_000;
@@ -44,7 +47,7 @@ export function isFetchableMediaUrl(value: string): boolean {
     if (!["https:","http:"].includes(url.protocol) || url.username || url.password) return false;
     const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
     if (host.includes(":") || /^[\d.]+$/.test(host)) return isPublicAddress(host);
-    return host.includes(".") && !host.endsWith(".") && !["localhost","local","internal","home","lan"].some(s => host===s || host.endsWith(`.${s}`));
+    return host.includes(".") && !host.endsWith(".") && !["localhost","local","internal","home","lan","corp","intranet","home.arpa","onion","invalid","test"].some(s => host===s || host.endsWith(`.${s}`));
   } catch { return false; }
 }
 
@@ -57,7 +60,7 @@ async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T
   });
 }
 /** DNS validation and the connection share the same address, closing rebinding. */
-async function localFetch(url: URL, signal: AbortSignal): Promise<Response> {
+export async function localFetch(url: URL, signal: AbortSignal): Promise<Response> {
   const [{ lookup }, http, https, { Readable }, { isIP }] = await Promise.all([
     import("node:dns/promises"), import("node:http"), import("node:https"), import("node:stream"), import("node:net"),
   ]);
@@ -91,7 +94,7 @@ export function pinnedRequest(
       family:address.family,
       port:url.port || undefined,
       path:`${url.pathname}${url.search}`,
-      headers:{host:url.host},
+      headers:{host:url.host,"User-Agent":"Anansi-LinkPreview/1.0"},
       ...(url.protocol === "https:" ? {servername:url.hostname} : {}),
     }, response => {
       const headers = new Headers();
@@ -131,19 +134,21 @@ export async function readBoundedImage(response: Response): Promise<{bytes:Array
     : contentType === "image/png" ? bytes[0]===137 && ascii(1,4)==="PNG" && bytes[4]===13 && bytes[5]===10 && bytes[6]===26 && bytes[7]===10
     : contentType === "image/gif" ? ["GIF87a","GIF89a"].includes(ascii(0,6))
     : contentType === "image/webp" ? ascii(0,4)==="RIFF" && ascii(8,12)==="WEBP"
+    : contentType.includes("icon") ? bytes[0]===0 && bytes[1]===0 && bytes[2]===1 && bytes[3]===0
     : ascii(4,8)==="ftyp" && ["avif","avis"].includes(ascii(8,12));
   if (!valid) throw new Error("image signature does not match content type");
   return {bytes:bytes.buffer,contentType};
 }
-export async function fetchThumbnail(target: string, runtime: "local" | "worker" = "local"): Promise<{bytes:ArrayBuffer;contentType:string}> {
+export async function fetchThumbnail(target: string, runtime: "local" | "worker" = "local", publicWeb = false, budget?: FetchBudget): Promise<{bytes:ArrayBuffer;contentType:string}> {
   const controller = new AbortController();
-  const timeout = setTimeout(()=>controller.abort(), TIMEOUT_MS);
+  const timeout = setTimeout(()=>controller.abort(), Math.min(TIMEOUT_MS, budget?.remainingMs ?? TIMEOUT_MS));
   try {
     let url = new URL(target);
     for (let redirects=0;redirects<=3;redirects++) {
       if (!isFetchableMediaUrl(url.href)) throw new Error("refused media url");
-      if (runtime === "worker" && !workerMediaHostAllowed(url.href)) throw new Error("Worker media host is not in the trusted CDN list; use local media sync");
-      const response = runtime === "worker" ? await fetch(url,{redirect:"manual",signal:controller.signal}) : await localFetch(url,controller.signal);
+      if (runtime === "worker" && !publicWeb && !workerMediaHostAllowed(url.href)) throw new Error("Worker media host is not in the trusted CDN list; use local media sync");
+      if (budget && !(runtime === "worker" && publicWeb)) budget.consume(runtime === "worker" ? 1 : 3);
+      const response = runtime === "worker" ? publicWeb ? await (await import("./public-fetch.ts")).publicFetch(url,controller.signal,"worker",fetch,budget) : await fetch(url,{redirect:"manual",signal:controller.signal}) : await localFetch(url,controller.signal);
       if (response.status >=300 && response.status<400) {
         const location=response.headers.get("location");
         await response.body?.cancel();
@@ -156,7 +161,7 @@ export async function fetchThumbnail(target: string, runtime: "local" | "worker"
 }
 export async function readMedia(source: MediaSource, key: string): Promise<Response> {
   // Only generated object keys are accepted; no drive paths, traversal or alternate separators.
-  if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif)$/.test(key)) return new Response("bad key",{status:400});
+  if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif|ico)$/.test(key)) return new Response("bad key",{status:400});
   const inferred = EXT_TYPES[key.split(".").at(-1)!] ?? "image/jpeg";
   const headers = {"content-type":inferred,"cache-control":"private, no-store","x-content-type-options":"nosniff"};
   if (source.bucket) {
@@ -172,24 +177,18 @@ export async function readMedia(source: MediaSource, key: string): Promise<Respo
   }
   return new Response("media is not configured",{status:503});
 }
-export async function fetchPendingMedia(db: AnansiDb, source: MediaSource, limit=4): Promise<{stored:number;failed:number}> {
+export async function fetchPendingMedia(db: AnansiDb, source: MediaSource, limit=4, budget?: FetchBudget, itemId?: string): Promise<{stored:number;failed:number}> {
   if (!source.put && !source.bucket?.put && !source.dir) return {stored:0,failed:0};
-  const rows=await claimMediaJobs(db,limit);
+  if (budget && !budget.canStart()) return {stored:0,failed:0};
+  if (!budget) await cleanupOrphanedMedia(db, source);
+  const rows=await claimMediaJobs(db,limit,undefined,itemId);
   let stored=0,failed=0;
   await Promise.all(rows.map(async row=>{
     try {
-      const {bytes,contentType}=await fetchThumbnail(variant(row.originUrl),source.runtime ?? (source.bucket ? "worker":"local"));
+      const {bytes,contentType}=await fetchThumbnail(variant(row.originUrl),source.runtime ?? (source.bucket ? "worker":"local"), row.kind === "card" || row.kind === "favicon", budget);
       const flat=row.id.replace(/-/g,"");
       const key=`${flat.slice(0,2)}/${flat.slice(2,4)}/${flat}-${row.token.replace(/-/g, "")}.${TYPES[contentType]}`;
-      if (source.put) await source.put(key,bytes,contentType);
-      else if (source.bucket?.put) await source.bucket.put(key,bytes,{httpMetadata:{contentType}});
-      else if (source.dir) {
-        const {mkdir}=await import("node:fs/promises");
-        const {dirname}=await import("node:path");
-        const path=join(source.dir,key);
-        await mkdir(dirname(path),{recursive:true});
-        await Bun.write(path,bytes);
-      }
+      await storeImage(source,key,bytes,contentType);
       await completeMediaJob(db,row.id,row.token,key);
       stored++;
     } catch (error) {
@@ -207,4 +206,131 @@ function variant(originUrl: string): string {
     url.searchParams.set("format","webp");url.searchParams.set("name","small");
     return url.href;
   } catch { return originUrl; }
+}
+
+/** Only migration-recorded obsolete keys are eligible; no bucket scan or live uploads. */
+export async function cleanupOrphanedMedia(db: AnansiDb, source: MediaSource, limit = 10): Promise<number> {
+  if (!source.bucket?.delete && !source.dir) return 0;
+  const rows = await db.all<{ stored_key: string }>(sql`SELECT stored_key FROM media_orphan_objects ORDER BY stored_key LIMIT ${Math.min(20, Math.max(1, limit))}`);
+  let removed = 0;
+  for (const { stored_key: key } of rows) {
+    if (!/^[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]{2}\/[a-zA-Z0-9_-]+\.(?:webp|jpg|jpeg|png|gif|avif|ico)$/.test(key)) continue;
+    const refs = await db.all(sql`SELECT id FROM media WHERE stored_key = ${key} LIMIT 1`);
+    if (!refs.length) {
+      try {
+        if (source.bucket?.delete) await source.bucket.delete(key);
+        else if (source.dir) {
+          const { unlink } = await import("node:fs/promises");
+          await unlink(join(source.dir, key)).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
+        }
+      } catch { continue; } // Retain the queue entry for the next bounded attempt.
+      removed++;
+    }
+    await db.run(sql`DELETE FROM media_orphan_objects WHERE stored_key = ${key}`);
+  }
+  return removed;
+}
+
+async function storeImage(source: MediaSource, key: string, bytes: ArrayBuffer, contentType: string) {
+  if (source.put) await source.put(key,bytes,contentType);
+  else if (source.bucket?.put) await source.bucket.put(key,bytes,{httpMetadata:{contentType}});
+  else if (source.dir) {
+    const {mkdir}=await import("node:fs/promises");
+    const {dirname}=await import("node:path");
+    const path=join(source.dir,key);
+    await mkdir(dirname(path),{recursive:true});
+    await Bun.write(path,bytes);
+  }
+}
+
+/**
+ * The avatar URLs the library actually shows: each author's latest one (see
+ * authorAvatarProjection) plus the own avatar of saves without a handle. An
+ * author's superseded pictures are neither fetched nor kept.
+ */
+const shownAvatarUrls = sql`
+  SELECT (SELECT l.author_avatar FROM items l
+          WHERE l.source = h.source AND l.author_handle = h.author_handle
+            AND l.author_avatar IS NOT NULL AND l.author_avatar <> ''
+          ORDER BY l.saved_at DESC, l.id DESC LIMIT 1) AS url
+  FROM (SELECT DISTINCT source, author_handle FROM items
+        WHERE author_handle IS NOT NULL AND author_handle <> ''
+          AND author_avatar IS NOT NULL AND author_avatar <> '') h
+  UNION
+  SELECT author_avatar FROM items
+  WHERE (author_handle IS NULL OR author_handle = '')
+    AND author_avatar IS NOT NULL AND author_avatar <> ''`;
+
+/** Bounded cache GC. Keep the row on failed deletion so the next pass retries. */
+export async function cleanupOrphanedAvatars(db: AnansiDb, source: MediaSource, limit = 4): Promise<number> {
+  const count = Math.min(4, Math.max(0, Math.floor(limit)));
+  const now = Math.floor(Date.now() / 1000);
+  const rows = await db.all<{ origin_url: string; stored_key: string | null }>(sql`
+    SELECT origin_url, stored_key FROM author_avatars a
+    WHERE origin_url NOT IN (${shownAvatarUrls})
+      AND (claim_token IS NULL OR next_run_at <= ${now})
+    ORDER BY origin_url LIMIT ${count}`);
+  let removed = 0;
+  for (const row of rows) {
+    const key = row.stored_key;
+    if (key) {
+      const refs = await db.all(sql`SELECT origin_url FROM author_avatars
+        WHERE stored_key = ${key} AND origin_url <> ${row.origin_url} LIMIT 1`);
+      const mediaRefs = await db.all(sql`SELECT id FROM media WHERE stored_key = ${key} LIMIT 1`);
+      if (!refs.length && !mediaRefs.length) {
+        if (!/^[a-f0-9]{2}\/[a-f0-9]{2}\/[a-f0-9]{64}\.(?:webp|jpg|jpeg|png|gif|avif|ico)$/.test(key)) continue;
+        if (!source.bucket?.delete && !source.dir) continue;
+        try {
+          if (source.bucket?.delete) await source.bucket.delete(key);
+          else if (source.dir) {
+            const { unlink } = await import("node:fs/promises");
+            await unlink(join(source.dir, key)).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== "ENOENT") throw error;
+            });
+          }
+        } catch { continue; }
+      }
+    }
+    await db.run(sql`DELETE FROM author_avatars WHERE origin_url = ${row.origin_url}
+      AND origin_url NOT IN (${shownAvatarUrls})`);
+    removed++;
+  }
+  return removed;
+}
+
+/** A URL is claimed once across items/authors and concurrent passes. Cache is rebuildable. */
+export async function fetchPendingAvatars(db: AnansiDb, source: MediaSource, limit=2, budget=new FetchBudget()) {
+  const result={stored:0,failed:0};
+  await cleanupOrphanedAvatars(db, source);
+  if (!source.put && !source.bucket?.put && !source.dir) return result;
+  if (!budget.canStart()) return result;
+  const count=Math.min(4,Math.max(0,Math.floor(limit)));
+  await db.run(sql`INSERT OR IGNORE INTO author_avatars(origin_url)
+    SELECT url FROM (${shownAvatarUrls}) WHERE url IS NOT NULL
+    AND url NOT IN (SELECT origin_url FROM author_avatars)
+    LIMIT ${count}`);
+  const now=Math.floor(Date.now()/1000);
+  const rows=await db.all<{origin_url:string;attempts:number}>(sql`SELECT origin_url,attempts FROM author_avatars
+    WHERE stored_key IS NULL AND attempts<3 AND next_run_at<=${now} ORDER BY next_run_at,origin_url LIMIT ${count}`);
+  for (const row of rows) {
+    if (!budget.canStart()) break;
+    const token=crypto.randomUUID();
+    const claimed=await db.all(sql`UPDATE author_avatars SET claim_token=${token},attempts=attempts+1,next_run_at=${now+120}
+      WHERE origin_url=${row.origin_url} AND stored_key IS NULL AND attempts=${row.attempts} AND next_run_at<=${now} RETURNING origin_url`);
+    if (!claimed.length) continue;
+    try {
+      const {bytes,contentType}=await fetchThumbnail(row.origin_url,source.runtime ?? (source.bucket ? "worker":"local"),false,budget);
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)), b=>b.toString(16).padStart(2,"0")).join("");
+      const key=`${hash.slice(0,2)}/${hash.slice(2,4)}/${hash}.${TYPES[contentType]}`;
+      // Content-addressing also deduplicates different signed URLs for the same image.
+      const existing=await db.all(sql`SELECT origin_url FROM author_avatars WHERE stored_key=${key} LIMIT 1`);
+      if (!existing.length) await storeImage(source,key,bytes,contentType);
+      await db.run(sql`UPDATE author_avatars SET stored_key=${key},claim_token=NULL WHERE origin_url=${row.origin_url} AND claim_token=${token}`);
+      result.stored++;
+    } catch {
+      await db.run(sql`UPDATE author_avatars SET claim_token=NULL,next_run_at=${now+300*2**row.attempts} WHERE origin_url=${row.origin_url} AND claim_token=${token}`);
+      result.failed++;
+    }
+  }
+  return result;
 }

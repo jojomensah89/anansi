@@ -40,4 +40,5 @@ design/*.html
 
 .superpowers/
 
-/docs
+/docs/*
+!/docs/deploy-acceptance.md

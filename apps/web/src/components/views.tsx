@@ -1,3 +1,7 @@
+import { Button } from "@anansi/ui/components/button";
+import { ToggleGroup, ToggleGroupItem } from "@anansi/ui/components/toggle-group";
+import { CardFooter } from "./card.tsx";
+import { WebPreviewCard } from "./web-preview-card.tsx";
 import { mediaUrl, shortDate, type ItemRow } from "../lib/api.ts";
 import { Avatar } from "./avatar.tsx";
 import { SourceMark } from "./sourcemark.tsx";
@@ -15,32 +19,17 @@ import type { ViewMode } from "../lib/library-search.ts";
 
 /* ---------------------------------------------------------------- Row --- */
 
-export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemRow) => void }) {
+const label = (item: ItemRow) => item.title ?? item.authorName ?? item.author ?? "saved item";
+
+export function RowView({ items, onOpen, onChanged }: { items: ItemRow[]; onChanged?: () => void; onOpen: (i: ItemRow) => void }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
+    <div className="library-rows">
       {items.map((item) => {
         const thumb = item.media?.[0] ?? item.quoted?.media?.[0];
         return (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => onOpen(item)}
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 13,
-              padding: "12px 8px",
-              width: "100%",
-              textAlign: "left",
-              background: "transparent",
-              border: "none",
-              borderBottom: "1px solid var(--line-soft)",
-              cursor: "pointer",
-              font: "inherit",
-              color: "inherit",
-            }}
-          >
-            {thumb ? (
+          <article key={item.id} className="library-row" aria-label={label(item)}>
+            <Button variant="ghost" type="button" className="anansi-card-open" aria-label={`Open ${label(item)}`} onClick={() => onOpen(item)} />
+            {item.source === "web" ? <WebPreviewCard item={item} compact onPreview={onChanged} footer={<CardFooter item={item} onOpen={onOpen} onChanged={()=>onChanged?.()} />} /> : thumb ? (
               <span style={{ position: "relative", flexShrink: 0 }}>
                 <img
                   src={mediaUrl(thumb.key)}
@@ -57,25 +46,25 @@ export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemR
                 )}
               </span>
             ) : (
-              <span style={{ width: 64, height: 64, borderRadius: 6, background: "var(--card)", flexShrink: 0 }} />
+              <span aria-hidden="true" style={{ width: 64, height: 64, borderRadius: 8, background: "var(--raised)", flexShrink: 0, display: "grid", placeItems: "center" }}><SourceMark source={item.source} faviconUrl={item.media?.find(m => m.kind === "favicon")?.key ? mediaUrl(item.media.find(m => m.kind === "favicon")!.key) : undefined} size={24} /></span>
             )}
 
-            <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+            {item.source !== "web" && <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} size={16} />
-                <span style={{ fontSize: 12.5 }}>{item.authorName ?? item.author}</span>
-                <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
-                  @{item.author}
-                </span>
+                <Avatar src={item.authorAvatar} seed={item.author ?? item.authorName} name={item.authorName} size={16} />
+                <span style={{ fontSize: "var(--text-body)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.authorName ?? item.author}</span>
+                {item.author && item.author !== (item.authorName ?? item.author) && <span style={{ fontSize: "var(--text-meta)", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                  {item.source === "reddit" ? "u/" : item.source === "github" ? "" : "@"}{item.author}
+                </span>}
                 {item.quoted && (
-                  <span className="mono" style={{ fontSize: 9.5, color: "var(--faint)", border: "1px solid var(--line)", borderRadius: 3, padding: "1px 5px" }}>
-                    quote
+                  <span style={{ fontSize: "var(--text-meta)", color: "var(--muted)", border: "1px solid var(--line)", borderRadius: 4, padding: "0 6px" }}>
+                    Quote
                   </span>
                 )}
               </span>
               <span
                 style={{
-                  fontSize: 12.5,
+                  fontSize: "var(--text-body)",
                   lineHeight: 1.5,
                   color: "var(--text-dim)",
                   display: "-webkit-box",
@@ -88,13 +77,16 @@ export function RowView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: ItemR
               </span>
             </span>
 
-            <span className="mono" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--faint)", flexShrink: 0, paddingTop: 2 }}>
-              <span>{shortDate(item.postedAt)}</span>
-              <span style={{ color: "var(--fainter)", display: "flex" }}>
-                <SourceMark source={item.source} size={20} />
-              </span>
-            </span>
-          </button>
+            }
+            {item.source !== "web" && <span style={{ display: "flex", alignItems: "center", gap: 10, fontSize: "var(--text-meta)", color: "var(--muted)", fontVariantNumeric: "tabular-nums", flexShrink: 0, paddingTop: 2 }}>
+              <span style={{ whiteSpace: "nowrap" }}>{shortDate(item.postedAt)}</span>
+              {thumb && <span style={{ color: "var(--fainter)", display: "flex" }}>
+                <SourceMark source={item.source} faviconUrl={item.media?.find(m => m.kind === "favicon")?.key ? mediaUrl(item.media.find(m => m.kind === "favicon")!.key) : undefined} size={20} />
+              </span>}
+              {/* The placeholder tile already shows the mark; keep the column so dates still line up. */}
+              {!thumb && <span aria-hidden="true" style={{ width: 20, flexShrink: 0 }} />}
+            </span>}
+          </article>
         );
       })}
     </div>
@@ -146,9 +138,9 @@ export function TimelineView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: 
               zIndex: 1,
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{group.label}</span>
-            <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
-              {group.items.length} posted
+            <span style={{ fontSize: "var(--text-body)", fontWeight: 600 }}>{group.label}</span>
+            <span style={{ fontSize: "var(--text-meta)", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+              {group.items.length}<span className="sr-only"> saves</span>
             </span>
             <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
           </div>
@@ -166,23 +158,13 @@ export function TimelineView({ items, onOpen }: { items: ItemRow[]; onOpen: (i: 
 
 /**
  * Each icon draws what the view does to the same set of items: packed
- * rectangles, stacked lines, and a column against a date. The label stays —
- * an icon alone would be a guess, and these three are close
- * enough in meaning to be worth spelling out.
+ * rectangles, stacked lines, and a column against a date. The label stays
+ * beside it on wide screens; on a phone the icons stand alone and the name
+ * moves to the accessible label.
  */
 function TabIcon({ d }: { d: string }) {
   return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d={d} />
     </svg>
   );
@@ -192,38 +174,26 @@ const MODES: { value: ViewMode; label: string; icon: string }[] = [
   // Four panes, deliberately uneven, the way the masonry packs them.
   { value: "grid", label: "Grid", icon: "M4 4h7v9H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 15h7v5H4z" },
   // A thumbnail and its lines.
-  { value: "row", label: "Row", icon: "M4 6h4v4H4zM10 6h10M10 10h7M4 14h4v4H4zM10 14h10M10 18h7" },
+  { value: "row", label: "Rows", icon: "M4 6h4v4H4zM10 6h10M10 10h7M4 14h4v4H4zM10 14h10M10 18h7" },
   // A spine with events hanging off it.
   { value: "timeline", label: "Timeline", icon: "M7 3v18M7 7h11M7 13h8M7 18h12" },
 ];
 
 export function ViewTabs({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
   return (
-    <div style={{ display: "flex", gap: 2 }}>
+    <ToggleGroup
+      value={[value]}
+      onValueChange={(values) => { if (values[0]) onChange(values[0] as ViewMode); }}
+      aria-label="Library view"
+      className="view-tabs"
+      spacing={0}
+    >
       {MODES.map((m) => (
-        <button
-          key={m.value}
-          type="button"
-          onClick={() => onChange(m.value)}
-          style={{
-            height: 30,
-            padding: "0 11px",
-            borderRadius: 5,
-            border: "1px solid transparent",
-            background: value === m.value ? "var(--raised)" : "transparent",
-            color: value === m.value ? "var(--text)" : "var(--muted)",
-            fontSize: 12.5,
-            cursor: "pointer",
-            font: "inherit",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
+        <ToggleGroupItem key={m.value} value={m.value} aria-label={m.label} className="view-tab">
           <TabIcon d={m.icon} />
-          {m.label}
-        </button>
+          <span className="view-tab-label">{m.label}</span>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
 import type { ItemRow, Page } from "./api.ts";
-import { libraryFreshnessOptions, libraryPageFreshnessOptions, libraryPollInterval, libraryQueryOptions, libraryStatsChanged, libraryStatsFingerprint, mergeUniquePages, type LibraryPageLoader } from "./library-query.ts";
+import { libraryFreshnessOptions, libraryPageFreshnessOptions, libraryPollInterval, expectIncomingSaves, libraryQueryOptions, libraryStatsChanged, libraryStatsFingerprint, mergeUniquePages, type LibraryPageLoader } from "./library-query.ts";
 
 function row(id: string, source = "x"): ItemRow {
   return { id, source, url: `https://example.com/${id}`, author: null, authorName: null, title: id, excerpt: id, postedAt: null, savedAt: 1, savedAtExact: 1, score: 0, saveOrder: null };
@@ -14,8 +14,12 @@ function deferred<T>() {
 }
 
 describe("library query", () => {
-  test("polls every two seconds only while the document is visible", () => {
-    expect(libraryPollInterval("visible")).toBe(2_000);
+  test("polls quickly only after a sync request, slowly otherwise, never while hidden", () => {
+    expect(libraryPollInterval("visible", 0)).toBe(60_000);
+    expectIncomingSaves(1_000);
+    expect(libraryPollInterval("visible", 2_000)).toBe(3_000);
+    expect(libraryPollInterval("hidden", 2_000)).toBe(false);
+    expect(libraryPollInterval("visible", 1_000 + 2 * 60_000)).toBe(60_000);
     expect(libraryPollInterval("hidden")).toBe(false);
     expect(libraryPollInterval(undefined)).toBe(false);
     expect(libraryFreshnessOptions.refetchOnMount).toBe("always");

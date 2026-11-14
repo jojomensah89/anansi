@@ -1,102 +1,29 @@
-import { sourceMarkColor } from "@anansi/ui/lib/source-mark-colors";
+import { Globe } from "lucide-react";
+import { useState } from "react";
 
-/**
- * A small source logo shared by the web app and browser extension.
- */
-export function SourceMark({
-	source,
-	size = 13,
-	/** Inherit the surrounding colour instead — for a dimmed or selected row. */
-	muted,
-	/** Hide the logo from assistive technology when a nearby label names the source. */
-	decorative,
-}: {
-	source: string;
-	size?: number;
-	muted?: boolean;
-	decorative?: boolean;
+// Paths: Simple Icons (CC0-1.0), https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/{x,github,reddit,tiktok}.svg
+// Brand trademarks remain their owners'. See ../../../NOTICE-icons.md.
+const paths = {
+  "x": "M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z",
+  "github": "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12",
+  "reddit": "M12 0C5.373 0 0 5.373 0 12c0 3.314 1.343 6.314 3.515 8.485l-2.286 2.286C.775 23.225 1.097 24 1.738 24H12c6.627 0 12-5.373 12-12S18.627 0 12 0Zm4.388 3.199c1.104 0 1.999.895 1.999 1.999 0 1.105-.895 2-1.999 2-.946 0-1.739-.657-1.947-1.539v.002c-1.147.162-2.032 1.15-2.032 2.341v.007c1.776.067 3.4.567 4.686 1.363.473-.363 1.064-.58 1.707-.58 1.547 0 2.802 1.254 2.802 2.802 0 1.117-.655 2.081-1.601 2.531-.088 3.256-3.637 5.876-7.997 5.876-4.361 0-7.905-2.617-7.998-5.87-.954-.447-1.614-1.415-1.614-2.538 0-1.548 1.255-2.802 2.803-2.802.645 0 1.239.218 1.712.585 1.275-.79 2.881-1.291 4.64-1.365v-.01c0-1.663 1.263-3.034 2.88-3.207.188-.911.993-1.595 1.959-1.595Zm-8.085 8.376c-.784 0-1.459.78-1.506 1.797-.047 1.016.64 1.429 1.426 1.429.786 0 1.371-.369 1.418-1.385.047-1.017-.553-1.841-1.338-1.841Zm7.406 0c-.786 0-1.385.824-1.338 1.841.047 1.017.634 1.385 1.418 1.385.785 0 1.473-.413 1.426-1.429-.046-1.017-.721-1.797-1.506-1.797Zm-3.703 4.013c-.974 0-1.907.048-2.77.135-.147.015-.241.168-.183.305.483 1.154 1.622 1.964 2.953 1.964 1.33 0 2.47-.81 2.953-1.964.057-.137-.037-.29-.184-.305-.863-.087-1.795-.135-2.769-.135Z",
+  "tiktok": "M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"
+};
+
+/** Shared platform identity; favicons are stored item media, never fetched here. */
+export function SourceMark({ source, size = 13, muted, decorative, faviconUrl }: {
+ source: string; size?: number; muted?: boolean; decorative?: boolean; faviconUrl?: string;
 }) {
-	const common = {
-		width: size,
-		height: size,
-		viewBox: "0 0 24 24",
-		style: muted ? undefined : { color: sourceMarkColor(source) },
-	} as const;
-
-	if (source === "github") {
-		return (
-			<svg
-				{...common}
-				fill="currentColor"
-				aria-label={decorative ? undefined : sourceLabel(source)}
-				aria-hidden={decorative ? true : undefined}
-			>
-				<path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49l-.01-1.9c-2.78.62-3.37-1.2-3.37-1.2-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9l-.01 2.82c0 .27.18.6.69.49A10.03 10.03 0 0 0 22 12.25C22 6.58 17.52 2 12 2z" />
-			</svg>
-		);
-	}
-
-	if (source === "reddit") {
-		return (
-			<svg
-				{...common}
-				fill="currentColor"
-				aria-label={decorative ? undefined : sourceLabel(source)}
-				aria-hidden={decorative ? true : undefined}
-			>
-				<path d="M22 12.06c0-1.2-.98-2.17-2.19-2.17-.59 0-1.12.23-1.51.61-1.49-1.03-3.52-1.7-5.78-1.78l.99-4.62 3.23.69a1.56 1.56 0 1 0 .17-.95l-3.6-.77a.47.47 0 0 0-.56.36l-1.1 5.28c-2.3.06-4.37.73-5.88 1.78a2.18 2.18 0 0 0-1.51-.6A2.18 2.18 0 0 0 2 12.06c0 .87.51 1.62 1.25 1.97a3.9 3.9 0 0 0-.05.63c0 3.2 3.83 5.8 8.55 5.8s8.55-2.6 8.55-5.8c0-.21-.02-.42-.05-.62A2.18 2.18 0 0 0 22 12.06zM7.4 13.6a1.56 1.56 0 1 1 3.12 0 1.56 1.56 0 0 1-3.12 0zm8.72 4.12c-1.07 1.07-3.1 1.15-3.7 1.15-.6 0-2.64-.08-3.7-1.15a.4.4 0 0 1 .57-.57c.67.67 2.1.91 3.13.91 1.04 0 2.47-.24 3.14-.91a.4.4 0 1 1 .56.57zm-.19-2.56a1.56 1.56 0 1 1 0-3.12 1.56 1.56 0 0 1 0 3.12z" />
-			</svg>
-		);
-	}
-
-	if (source === "tiktok") {
-		return (
-			<svg
-				{...common}
-				fill="currentColor"
-				aria-label={decorative ? undefined : sourceLabel(source)}
-				aria-hidden={decorative ? true : undefined}
-			>
-				<path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06v-3.1a5.66 5.66 0 0 0-.77-.05A5.66 5.66 0 1 0 15.54 15.4V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3a4.29 4.29 0 0 1-3.24-1.48z" />
-			</svg>
-		);
-	}
-
-	if (source === "web") {
-		return (
-			<svg
-				{...common}
-				fill="none"
-				stroke="currentColor"
-				strokeWidth="1.7"
-				strokeLinecap="round"
-				strokeLinejoin="round"
-				aria-label={decorative ? undefined : sourceLabel(source)}
-				aria-hidden={decorative ? true : undefined}
-			>
-				<circle cx="12" cy="12" r="9" />
-				<path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z" />
-			</svg>
-		);
-	}
-
-	// X, and the fallback. Keep the historical fallback shape for unknown sources.
-	return (
-		<svg
-			{...common}
-			fill="currentColor"
-			aria-label={decorative ? undefined : sourceLabel(source)}
-			aria-hidden={decorative ? true : undefined}
-		>
-			<path d="M13.7 10.62 20.4 3h-1.59l-5.82 6.62L8.34 3H3l7.02 10.01L3 21h1.59l6.14-6.99L15.66 21H21l-7.3-10.38zm-2.17 2.47-.71-1L5.16 4.17h2.44l4.57 6.4.71 1 5.94 8.32h-2.44l-4.85-6.8z" />
-		</svg>
-	);
-}
-
-function sourceLabel(source: string): string {
-	if (source === "github") return "GitHub";
-	if (source === "reddit") return "Reddit";
-	if (source === "tiktok") return "TikTok";
-	if (source === "web") return "Web";
-	return "X";
+ const [failedUrl, setFailedUrl] = useState<string>();
+ const label = ({ github: "GitHub", reddit: "Reddit", tiktok: "TikTok", web: "Web" } as Record<string, string>)[source] ?? "X";
+ const a11y = { "aria-label": decorative ? undefined : label, "aria-hidden": decorative ? true as const : undefined };
+ const style = { flexShrink: 0, display: "inline-block", verticalAlign: "middle", color: muted ? "currentColor" : "var(--source-mark-ink, light-dark(#000, #fff))" } as const;
+ if (source === "web") {
+  if (faviconUrl && failedUrl !== faviconUrl) return <img src={faviconUrl} width={size} height={size} alt={decorative ? "" : label} aria-hidden={decorative || undefined} onError={() => setFailedUrl(faviconUrl)} style={{...style, objectFit: "contain", filter: muted ? "grayscale(1)" : undefined}} />;
+  return <Globe width={size} height={size} strokeWidth={1.5} {...a11y} style={{...style, color: "currentColor"}} />;
+ }
+ const path = paths[source as keyof typeof paths] ?? paths.x;
+ return <svg width={size} height={size} viewBox="-1 -1 26 26" fill="currentColor" role={decorative ? undefined : "img"} {...a11y} style={style}>
+  {source === "reddit" ? <><circle cx="12" cy="12" r="12" fill={muted ? "currentColor" : "#FF4500"}/><path d={"M16.388 3.199" + path.split("Zm4.388 3.199")[1]} fill="white" fillRule="evenodd"/></> : source === "tiktok" && !muted ? <><path d={path} fill="#25F4EE" transform="translate(-.65 -.45)"/><path d={path} fill="#FE2C55" transform="translate(.65 .45)"/><path d={path}/></> : <path d={path}/>}
+ </svg>;
 }

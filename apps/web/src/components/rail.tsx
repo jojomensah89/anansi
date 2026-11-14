@@ -1,5 +1,4 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 import {
 	Sidebar,
 	SidebarContent,
@@ -11,22 +10,32 @@ import {
 	SidebarMenu,
 	SidebarMenuButton,
 	SidebarMenuItem,
-	SidebarTrigger,
 } from "@anansi/ui/components/sidebar";
 import { CountBone, useSlowLoad } from "./skeleton.tsx";
 import { SourceMark } from "./sourcemark.tsx";
-import { ExtensionIcon } from "./extension-icon.tsx";
-import { api, sourceLabel, type ExtensionHealth } from "../lib/api.ts";
-import { extensionLabel } from "../lib/source-state.ts";
+import { LIBRARY_SOURCES, sourceLabel } from "../lib/api.ts";
+import { formatCount } from "../lib/format.ts";
+import { useLibraryStats } from "../lib/library-query.ts";
+import { validateLibrarySearch } from "../lib/library-search.ts";
+import { RailShelves } from "./rail-shelves.tsx";
 import { GITHUB_URL, X_URL } from "../lib/links.ts";
 
-/** The library rail. The shell owns counts so navigation and content agree. */
-export interface RailProps {
-	total: number;
-	authors: number;
-	archived?: number;
-	bySource: Record<string, number>;
-	ready?: boolean;
+/**
+ * The rail's own name for a source, where width is tight. The full label
+ * stays the accessible name and the tooltip; the API's labels are unchanged.
+ */
+export function railSourceLabel(source: string): string {
+	return source === "web" ? "Web pages" : sourceLabel(source);
+}
+
+/** Only one exact source filter lights a source row; any other filter is a library view. */
+function activeSource(path: string, search: Record<string, unknown>): string | null {
+	if (path !== "/") return null;
+	const parsed = validateLibrarySearch(search);
+	if (parsed.shelf || parsed.archived || parsed.q || parsed.source?.length !== 1) return null;
+	const { source: _source, view: _view, item: _item, ...rest } = parsed;
+	if (Object.values(rest).some((value) => value !== undefined)) return null;
+	return parsed.source[0] ?? null;
 }
 
 function NavIcon({ path, active }: { path: string; active: boolean }) {
@@ -43,7 +52,7 @@ function Item({ to, label, count, active, children }: { to: string; label: strin
 			<SidebarMenuButton render={<Link to={to} />} isActive={active} tooltip={label} aria-label={label}>
 				{children}
 				<span className="anansi-sidebar-label">{label}</span>
-				{count !== undefined && <span className="anansi-sidebar-count mono">{count}</span>}
+				{count !== undefined && <span className="anansi-sidebar-count">{count}</span>}
 			</SidebarMenuButton>
 		</SidebarMenuItem>
 	);
@@ -81,23 +90,26 @@ export function RailSocialLinks() {
 	);
 }
 
-export function Rail({ total, authors, archived = 0, bySource, ready: readyProp }: RailProps) {
-	const [extension, setExtension] = useState<ExtensionHealth | null>(null);
-	const [tags, setTags] = useState<{ label: string; color: string; count: number; kind: "topic" | "custom" }[]>([]);
+/**
+ * The rail. Rendered once by the app shell (routes/_app.tsx), so it stays
+ * mounted across pages and its counts come from the shared stats query.
+ */
+export function Rail() {
+	const stats = useLibraryStats();
+	const total = stats.data?.items ?? 0;
+	const authors = stats.data?.authors ?? 0;
+	const archived = stats.data?.archived ?? 0;
+	const bySource = stats.data?.bySource ?? {};
 	const path = useRouterState({ select: (s) => s.location.pathname });
-	const archivedView = useRouterState({ select: (s) => s.location.pathname === "/" && (s.location.search as Record<string, unknown>).archived === true });
-	const ready = readyProp ?? (total > 0 || archived > 0);
+	const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
+	const archivedView = path === "/" && search.archived === true;
+	// A shelf or a source is its own place in the rail, so Library is not also lit while one is open.
+	const shelfView = path === "/" && typeof search.shelf === "string";
+	const sourceView = activeSource(path, search);
+	const libraryActive = !archivedView && !shelfView && !sourceView && (path === "" || path === "/");
+	const ready = stats.isSuccess;
 	const slow = useSlowLoad(!ready);
-	const count = (n: number) => ready ? String(n) : slow ? <CountBone digits={4} height={8} /> : null;
-	useEffect(() => {
-		const controller = new AbortController();
-		api.sources(controller.signal).then((result) => setExtension(result.extension)).catch(() => setExtension(null));
-		api.tags(controller.signal).then((result) => setTags(result.tags)).catch(() => setTags([]));
-		return () => controller.abort();
-	}, []);
-	const topics = tags.filter((tag) => tag.kind === "topic" && tag.count > 0).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-	const extensionText = extension ? extensionLabel(extension) : "Extension status unavailable";
-	const extensionColor = extension?.connection === "connected" ? "var(--ok)" : extension ? "var(--accent-text)" : "var(--faint)";
+	const count = (n: number) => ready ? formatCount(n) : slow ? <CountBone digits={4} height={8} /> : null;
 
 	return (
 		<Sidebar className="anansi-rail" collapsible="icon">
@@ -106,21 +118,20 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 					<img src="/favicon.png" width="20" height="20" alt="" aria-hidden="true" style={{ borderRadius: 6, objectFit: "cover" }} />
 					<span className="anansi-sidebar-label">Anansi</span>
 				</div>
-				<SidebarTrigger />
 			</SidebarHeader>
 
 			<SidebarContent>
 				<SidebarGroup className="anansi-rail-primary">
 					<SidebarGroupContent>
 						<SidebarMenu>
-							<Item to="/" label="Library" count={count(total)} active={!archivedView && (path === "" || path === "/")}>
-								<NavIcon active={!archivedView && (path === "" || path === "/")} path="M6 4h12v17l-6-4-6 4z" />
+							<Item to="/" label="Library" count={count(total)} active={libraryActive}>
+								<NavIcon active={libraryActive} path="M6 4h12v17l-6-4-6 4z" />
 							</Item>
 							<SidebarMenuItem>
 								<SidebarMenuButton render={<Link to="/" search={{ archived: true }} />} isActive={archivedView} tooltip="Archived" aria-label="Archived">
 									<NavIcon active={archivedView} path="M4 7h16v13H4zM3 4h18v3H3zM9 11h6" />
 									<span className="anansi-sidebar-label">Archived</span>
-									<span className="anansi-sidebar-count mono">{count(archived)}</span>
+									<span className="anansi-sidebar-count">{count(archived)}</span>
 								</SidebarMenuButton>
 							</SidebarMenuItem>
 							<Item to="/creators" label="Authors" count={count(authors)} active={path === "/creators"}>
@@ -132,24 +143,24 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 							<Item to="/mcp" label="MCP server" active={path === "/mcp"}>
 								<NavIcon active={path === "/mcp"} path="M4 4h16v6H4zM4 14h16v6H4zM7 7h.01M7 17h.01M11 7h6M11 17h6" />
 							</Item>
-							<Item to="/settings" label="Settings" active={path === "/settings"}>
-								<NavIcon active={path === "/settings"} path="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.9 6.9l1.4 1.4M17.7 8.3l1.4-1.4M12 3v2M12 19v2M3 12h2M19 12h2" />
+							<Item to="/settings" label="Settings" active={path.startsWith("/settings")}>
+								<NavIcon active={path.startsWith("/settings")} path="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.9 6.9l1.4 1.4M17.7 8.3l1.4-1.4M12 3v2M12 19v2M3 12h2M19 12h2" />
 							</Item>
 						</SidebarMenu>
 					</SidebarGroupContent>
 				</SidebarGroup>
 
 				<SidebarGroup className="anansi-rail-sources-group">
-					<SidebarGroupLabel className="anansi-rail-sources mono">Sources</SidebarGroupLabel>
+					<SidebarGroupLabel className="anansi-rail-sources sr-only">Sources</SidebarGroupLabel>
 					<SidebarGroupContent>
 						<SidebarMenu>
-							{(["x", "github", "reddit", "web"] as const).map((source) => {
+							{LIBRARY_SOURCES.map((source) => {
 								return (
 									<SidebarMenuItem key={source}>
-										<SidebarMenuButton render={<Link to="/" search={{ source: [source] }} />} tooltip={sourceLabel(source)} aria-label={sourceLabel(source)}>
+										<SidebarMenuButton render={<Link to="/" search={{ source: [source] }} />} isActive={sourceView === source} tooltip={sourceLabel(source)} aria-label={sourceLabel(source)}>
 											<span className="anansi-source-icon"><SourceMark source={source} size={15} /></span>
-											<span className="anansi-sidebar-label">{sourceLabel(source)}</span>
-											<span className="anansi-sidebar-count mono">{count(bySource[source] ?? 0)}</span>
+											<span className="anansi-sidebar-label">{railSourceLabel(source)}</span>
+											<span className="anansi-sidebar-count">{count(bySource[source] ?? 0)}</span>
 										</SidebarMenuButton>
 									</SidebarMenuItem>
 								);
@@ -158,28 +169,10 @@ export function Rail({ total, authors, archived = 0, bySource, ready: readyProp 
 					</SidebarGroupContent>
 				</SidebarGroup>
 
-				{topics.length > 0 && <SidebarGroup className="anansi-rail-topics-group">
-					<SidebarGroupLabel className="anansi-rail-topics mono">Topics</SidebarGroupLabel>
-					<SidebarGroupContent>
-						<SidebarMenu>
-							{topics.map((topic) => <SidebarMenuItem key={topic.label}>
-								<SidebarMenuButton render={<Link to="/" search={{ tag: [topic.label] }} />} tooltip={topic.label} aria-label={topic.label}>
-									<span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: topic.color || "#6b7280" }} />
-									<span className="anansi-sidebar-label">{topic.label}</span>
-									<span className="anansi-sidebar-count mono">{topic.count}</span>
-								</SidebarMenuButton>
-							</SidebarMenuItem>)}
-						</SidebarMenu>
-					</SidebarGroupContent>
-				</SidebarGroup>}
+				<RailShelves />
 			</SidebarContent>
 
 			<SidebarFooter className="anansi-rail-footer">
-				<div className="anansi-rail-extension" title={extensionText} aria-label={extensionText}>
-					<span className="anansi-rail-extension-icon" style={{ color: extensionColor }}><ExtensionIcon /></span>
-					<span className="anansi-rail-extension-dot" style={{ background: extensionColor }} />
-					<span className="mono anansi-sidebar-label" style={{ fontSize: 10.5, color: extensionColor }}>{extensionText}</span>
-				</div>
 				<RailSocialLinks />
 			</SidebarFooter>
 		</Sidebar>

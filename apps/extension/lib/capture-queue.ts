@@ -28,6 +28,8 @@ export interface OutboxRecord {
 	updatedAt: number;
 	sizeBytes: number;
 	lastError?: QueueError;
+	/** Consecutive HTTP 500s; only this can give up on an import page by itself. */
+	pageServerErrors?: number;
 }
 
 export interface OutboxStore {
@@ -58,6 +60,10 @@ export interface CaptureQueueDependencies {
 export interface CaptureQueueOptions {
 	maxRecordBytes?: number;
 	maxTotalBytes?: number;
+	/** Space only item events may use, so an import backlog cannot refuse live saves. */
+	liveReserveBytes?: number;
+	/** Consecutive HTTP 500s before an import page stops holding up its source. */
+	maxPageServerErrors?: number;
 	maxConcurrency?: number;
 	baseRetryMs?: number;
 	maxRetryMs?: number;
@@ -72,8 +78,10 @@ export interface EnqueueResult {
 
 export interface RetryRequest {
 	eventId?: string;
-	/** Explicit user action: make permanently failed records eligible again. */
+	/** Explicit user action: make failed and backing-off records eligible again. */
 	includeFailed?: boolean;
+	/** The server is reachable again: resume retries caused by an outage. */
+	resetBackoff?: boolean;
 	/** Narrow that to one source, for a retry pressed on one row. */
 	source?: BookmarkCapture["source"];
 }
@@ -81,6 +89,8 @@ export interface RetryRequest {
 export interface CaptureQueue {
 	enqueue(capture: BookmarkCapture): Promise<EnqueueResult>;
 	getStatus(): Promise<CaptureQueueStatus>;
+	/** Whether import pages can be admitted again, so a full-queue error can clear. */
+	hasImportRoom(): Promise<boolean>;
 	/** Drain due work, with optional explicit requeueing of visible failures. */
 	retry(request?: RetryRequest): Promise<CaptureQueueStatus>;
 }
@@ -112,6 +122,10 @@ export class InvalidCaptureError extends Error {
 const DEFAULTS = {
 	maxRecordBytes: 2_000_000,
 	maxTotalBytes: 25_000_000,
+	liveReserveBytes: 5_000_000,
+	// With the default backoff this spans about an hour, so an outage cannot
+	// exhaust it, while a page that crashes the server every time still ends.
+	maxPageServerErrors: 12,
 	maxConcurrency: 2,
 	baseRetryMs: 1_000,
 	maxRetryMs: 60 * 60 * 1_000,
@@ -329,7 +343,16 @@ export function createCaptureQueue(
 		}
 		const normalizedResponse: TransportResult =
 			response.kind === "success" ? { kind: "invalid_receipt" } : response;
-		if (isRetryable(normalizedResponse)) {
+		const pageServerErrors =
+			current.capture.payloadType === "raw_page" &&
+			normalizedResponse.kind === "http" &&
+			normalizedResponse.status === 500
+				? (current.pageServerErrors ?? 0) + 1
+				: 0;
+		if (
+			isRetryable(normalizedResponse) &&
+			pageServerErrors < config.maxPageServerErrors
+		) {
 			const nextAttemptAt =
 				clock.now() + retryDelay(uploading, normalizedResponse);
 			await store.put({
@@ -338,6 +361,7 @@ export function createCaptureQueue(
 				nextAttemptAt,
 				updatedAt: clock.now(),
 				lastError: errorFor(normalizedResponse),
+				...(pageServerErrors ? { pageServerErrors } : { pageServerErrors: undefined }),
 			});
 			await schedule(nextAttemptAt);
 			return;
@@ -375,6 +399,10 @@ export function createCaptureQueue(
 						// Legacy id-only saves depend on their preceding raw page.
 						if (capture.action === "save" && !capture.normalizedItem && firstRaw.has(capture.source)) continue;
 					} else {
+						// A terminal page waits for an explicit retry and must not hold
+						// up the rest of its source; every later page would queue behind
+						// it until the durable queue filled.
+						if (record.state === "failed") continue;
 						if (firstRaw.has(record.source)) continue;
 						firstRaw.add(record.source);
 					}
@@ -411,7 +439,7 @@ export function createCaptureQueue(
 		if (request?.includeFailed) {
 			const failed = (await store.list()).filter(
 				(record) =>
-					record.state === "failed" &&
+					(record.state === "failed" || record.state === "retry_wait") &&
 					(!request.source || record.source === request.source),
 			);
 			await Promise.all(
@@ -422,8 +450,22 @@ export function createCaptureQueue(
 						nextAttemptAt: clock.now(),
 						updatedAt: clock.now(),
 						lastError: undefined,
+						pageServerErrors: undefined,
 					}),
 				),
+			);
+		}
+		if (request?.resetBackoff) {
+			const now = clock.now();
+			await Promise.all(
+				(await store.list())
+					.filter(
+						(record) =>
+							record.state === "retry_wait" &&
+							record.nextAttemptAt > now &&
+							(record.lastError?.code === "network" || (record.lastError?.status ?? 0) >= 500),
+					)
+					.map((record) => store.put({ ...record, nextAttemptAt: now })),
 			);
 		}
 		if (request?.eventId) {
@@ -438,6 +480,7 @@ export function createCaptureQueue(
 					nextAttemptAt: clock.now(),
 					updatedAt: clock.now(),
 					lastError: undefined,
+					pageServerErrors: undefined,
 				});
 			}
 		}
@@ -478,7 +521,10 @@ export function createCaptureQueue(
 							? 0 : record.sizeBytes),
 					0,
 				);
-				if (totalBytes + prepared.sizeBytes > config.maxTotalBytes) {
+				const limit = incomingItem
+					? config.maxTotalBytes
+					: Math.max(0, config.maxTotalBytes - config.liveReserveBytes);
+				if (totalBytes + prepared.sizeBytes > limit) {
 					throw new QueueLimitError(
 						"queue_full",
 						"durable capture queue is full",
@@ -518,6 +564,11 @@ export function createCaptureQueue(
 		async getStatus() {
 			await ensureRecovered();
 			return countStatus(await store.list());
+		},
+		async hasImportRoom() {
+			await ensureRecovered();
+			const total = (await store.list()).reduce((sum, record) => sum + record.sizeBytes, 0);
+			return total < Math.max(0, config.maxTotalBytes - config.liveReserveBytes);
 		},
 		retry,
 	};

@@ -6,6 +6,7 @@ import {
 } from "@anansi/db";
 import {
 	type NormalizedItem,
+	isEmptyHistoryPage,
 	parseBookmarkCapture,
 	parseBookmarksPage,
 	parseItemList,
@@ -247,6 +248,9 @@ async function ingestVersioned(
 			);
 		}
 		if (normalized.length === 0) {
+			if (isEmptyHistoryPage(capture.source, capture.raw)) {
+				return result({ eventId: capture.eventId, itemId: null, outcome: "ignored_stale", parsed: 0 }, 200);
+			}
 			return result(
 				{
 					error: "payload parsed to zero items",

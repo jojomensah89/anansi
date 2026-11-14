@@ -1,5 +1,8 @@
 # Architecture index
 
+> Historical plan/evidence: current product guidance is in [README](../README.md) and the 2026-11-05 overhaul decisions. Earlier local-first, hidden-TikTok, read-only/keyword-only MCP and daily-sync claims are superseded. This document does not establish signed-in or hosted acceptance.
+
+
 This index is the entry point for implementation-oriented architecture notes.
 It records the current durable decisions and the packet evidence that changed
 the baseline. The source of truth for behavior is still the code and tests; the
@@ -68,7 +71,8 @@ local contract checks, not live-provider or authenticated-browser proof.
 - [ADR 0001: shared AI lifecycle and projection adapters](adr/0001-shared-ai-job-lifecycle.md)
 - [ADR 0002: retained versus shipped source subsets](adr/0002-retained-versus-shipped-source-subsets.md)
 - [ADR 0003: database-owned filtering and visibility](adr/0003-database-owned-filtering-and-visibility.md)
-- [ADR 0004: keyword-only MCP](adr/0004-keyword-only-mcp.md)
+- [ADR 0004: keyword-only MCP (superseded)](adr/0004-keyword-only-mcp.md)
+- [ADR 0005: semantic agent search and optional writes](adr/0005-agent-search-and-write-scope.md)
 - [Repository README](../README.md) — user-visible source, AI, MCP, privacy,
   and local/hosted behavior.
 - [Context glossary](../CONTEXT.md) — names and evidence boundary used by the

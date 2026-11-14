@@ -1,11 +1,11 @@
 import {
 	parseBookmarkCapture,
 	type NormalizedItem,
-	EXTENSION_PLATFORM_SOURCES,
 	isExtensionPlatformSource,
 	type ExtensionPlatformSource,
 } from "@anansi/sources";
 import { completeNativeItem } from "./native-snapshot.ts";
+import { captureAdapter, captureSourceFromUrl, isPlatformExternalId, isPlatformSourceUrl } from "./platforms/registry.ts";
 
 /**
  * Pure validation for the extension's three message directions.
@@ -118,7 +118,7 @@ export type PageEventMessage = PageTrafficBase &
 				items: number;
 				state?: "complete" | "limited" | "cancelled";
 			}
-		| { anansi: "page-event"; action: "scanned"; runId: string }
+		| { anansi: "page-event"; action: "scanned"; runId: string; stopReason?: "known" | "page_limit"; hasMore?: boolean }
 		| { anansi: "page-event"; action: "identified"; handle: string; runId: string }
 		| {
 				anansi: "page-event";
@@ -141,13 +141,21 @@ export type PopupCommandMessage = MessageBase &
 				action:
 					| "queue-status"
 					| "import-all"
-					| "reschedule"
 					| "save-page"
 					| "mirror-status"
 					| "mirror-on"
 					| "mirror-off"
 					| "connection-updated"
-					| "adopt-legacy-queue";
+					| "adopt-legacy-queue"
+					| "licence-status"
+					| "licence-check"
+					| "licence-deactivate";
+		  }
+		| {
+				anansi: "popup-command";
+				/** Store build only. The key goes to the worker, which talks to Polar. */
+				action: "licence-activate";
+				licenceKey: string;
 		  }
 		| {
 				anansi: "popup-command";
@@ -159,6 +167,13 @@ export type PopupCommandMessage = MessageBase &
 				anansi: "popup-command";
 				action: "start" | "stop";
 				source: PlatformSource;
+		  }
+		| {
+				anansi: "popup-command";
+				/** The row's capture switch. The worker sends it with the stored key. */
+				action: "set-source";
+				source: PlatformSource;
+				enabled: boolean;
 		  }
 	);
 
@@ -203,27 +218,6 @@ const ERROR_MESSAGES: Record<MessageValidationError["code"], string> = {
 	payload_too_complex: "message exceeds the configured complexity limit",
 	sensitive_field:
 		"message contains a forbidden credential or configuration field",
-};
-
-const SOURCE_HOSTS: Record<PlatformSource, ReadonlySet<string>> = {
-	x: new Set(["x.com", "twitter.com"]),
-	reddit: new Set(["www.reddit.com", "old.reddit.com", "reddit.com"]),
-	github: new Set(["github.com"]),
-	tiktok: new Set(["www.tiktok.com", "tiktok.com"]),
-};
-
-const PAGE_EVENT_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
-	x: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
-	reddit: new Set(["ready", "saved", "bookmark", "page", "done", "error"]),
-	github: new Set(["ready", "saved", "page", "done", "bookmark", "error"]),
-	tiktok: new Set(["ready", "saved", "observed", "identified", "scanned", "bookmark", "error"]),
-};
-
-const PAGE_COMMAND_ACTIONS: Record<PlatformSource, ReadonlySet<string>> = {
-	x: new Set(["configure", "backfill"]),
-	reddit: new Set(["ready", "configure", "backfill"]),
-	github: new Set(["ready", "configure", "backfill"]),
-	tiktok: new Set(["ready", "configure", "identify", "scan"]),
 };
 
 const ERROR_CODES = new Set([
@@ -328,6 +322,11 @@ function inspectPayload(
 			)
 				return "invalid";
 			if (SENSITIVE_KEYS.has(normalizedKey(key))) return "sensitive";
+			// An undefined property means absent. Parsers leave optional fields this
+			// way, postMessage preserves it, and delivery drops it, so rejecting it
+			// here would silently lose real saves. Required fields fail their shape
+			// checks, and undefined inside an array still reaches the check below.
+			if (descriptor.value === undefined) continue;
 			pending.push({ value: descriptor.value, depth: current.depth + 1 });
 		}
 	}
@@ -346,16 +345,7 @@ function serializedBytes(value: unknown): number | null {
 }
 
 function deriveSource(urlValue: string): PlatformSource | null {
-	try {
-		const url = new URL(urlValue);
-		if (url.protocol !== "https:" || url.username || url.password) return null;
-		for (const source of EXTENSION_PLATFORM_SOURCES) {
-			if (SOURCE_HOSTS[source].has(url.hostname.toLowerCase())) return source;
-		}
-	} catch {
-		// A malformed URL is simply not an allowed page origin.
-	}
-	return null;
+	return captureSourceFromUrl(urlValue);
 }
 
 function hasOnlyKeys(
@@ -384,18 +374,7 @@ function isSource(value: unknown): value is PlatformSource {
  * becoming one.
  */
 function isSourceUrl(value: unknown, source: PlatformSource): boolean {
-	if (typeof value !== "string" || value.length > 2_000) return false;
-	try {
-		const url = new URL(value);
-		return (
-			url.protocol === "https:" &&
-			url.username === "" &&
-			url.password === "" &&
-			SOURCE_HOSTS[source].has(url.hostname.toLowerCase())
-		);
-	} catch {
-		return false;
-	}
+	return isPlatformSourceUrl(value, source);
 }
 
 /** A platform handle, which becomes part of a URL the background opens. */
@@ -404,12 +383,7 @@ function isHandle(value: unknown): value is string {
 }
 
 function isExternalId(value: unknown, source: PlatformSource): value is string {
-	if (typeof value !== "string") return false;
-	return source === "github"
-		? /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9._-]{1,100}$/.test(
-				value,
-			)
-		: /^[A-Za-z0-9_-]{1,64}$/.test(value);
+	return isPlatformExternalId(value, source);
 }
 
 function isNonce(value: unknown): value is string {
@@ -436,13 +410,14 @@ function validatePageEventShape(
 	const value = candidate;
 	if (value.anansi !== "page-event" || typeof value.action !== "string")
 		return false;
-	if (!PAGE_EVENT_ACTIONS[source].has(value.action)) return false;
+	const rules = captureAdapter(source).protocol.events;
+	if (!rules.actions.some((action) => action === value.action)) return false;
 
 	const base = ["anansi", "messageVersion", "source", "nonce", "action"];
 	switch (value.action) {
 		case "ready":
 			return (
-				(source === "x" || value.relay === true && value.queryId === null) &&
+				(rules.ready === "query-or-relay" || value.relay === true && value.queryId === null) &&
 				hasOnlyKeys(value, [...base, "queryId", "relay"]) &&
 				(value.queryId === null || typeof value.queryId === "string") &&
 				(value.relay === undefined || value.relay === true)
@@ -450,7 +425,9 @@ function validatePageEventShape(
 		case "saved":
 			return hasOnlyKeys(value, base);
 		case "scanned":
-			return source === "tiktok" && hasOnlyKeys(value, [...base, "runId"]) && isRunId(value.runId);
+			return hasOnlyKeys(value, [...base, "runId", "stopReason", "hasMore"]) && isRunId(value.runId)
+				&& (value.stopReason === undefined || value.stopReason === "known" || value.stopReason === "page_limit")
+				&& (value.hasMore === undefined || typeof value.hasMore === "boolean");
 		case "bookmark":
 			return (
 				hasOnlyKeys(value, [
@@ -479,7 +456,7 @@ function validatePageEventShape(
 		case "page":
 			return (
 				hasOnlyKeys(value, [...base, "runId", "raw", "page", "items", "cursor"]) &&
-				(source !== "x" || isRunId(value.runId)) &&
+				(!rules.pageRequiresRunId || isRunId(value.runId)) &&
 				Object.hasOwn(value, "raw") &&
 				isPositiveInteger(value.page) &&
 				isNonNegativeInteger(value.items) &&
@@ -490,7 +467,7 @@ function validatePageEventShape(
 			);
 		case "observed":
 			return (
-				source === "tiktok" && hasOnlyKeys(value, [...base, "runId", "operation", "raw", "items"]) && isRunId(value.runId) &&
+				hasOnlyKeys(value, [...base, "runId", "operation", "raw", "items"]) && isRunId(value.runId) &&
 				typeof value.operation === "string" &&
 				value.operation.length > 0 &&
 				value.operation.length <= 1_000 &&
@@ -498,11 +475,11 @@ function validatePageEventShape(
 				isNonNegativeInteger(value.items)
 			);
 		case "identified":
-			return source === "tiktok" && hasOnlyKeys(value, [...base, "runId", "handle"]) && isRunId(value.runId) && isHandle(value.handle);
+			return hasOnlyKeys(value, [...base, "runId", "handle"]) && isRunId(value.runId) && isHandle(value.handle);
 		case "done":
 			return (
 				hasOnlyKeys(value, [...base, "runId", "pages", "items", "state"]) &&
-				(source !== "x" || isRunId(value.runId)) &&
+				(!rules.doneRequiresRunId || isRunId(value.runId)) &&
 				isNonNegativeInteger(value.pages) &&
 				isNonNegativeInteger(value.items) &&
 				(value.state === undefined ||
@@ -513,7 +490,7 @@ function validatePageEventShape(
 		case "error":
 			return (
 				hasOnlyKeys(value, [...base, "runId", "errorCode"]) &&
-				(source !== "x" && source !== "tiktok" || isRunId(value.runId)) &&
+				(!rules.errorRequiresRunId || isRunId(value.runId)) &&
 				typeof value.errorCode === "string" &&
 				ERROR_CODES.has(value.errorCode)
 			);
@@ -548,10 +525,11 @@ function validatePageCommandShape(
 ): candidate is PageCommandMessage {
 	if (!isRecord(candidate)) return false;
 	const value = candidate;
+	const rules = captureAdapter(source).protocol.commands;
 	if (
 		value.anansi !== "page-command" ||
 		typeof value.action !== "string" ||
-		!PAGE_COMMAND_ACTIONS[source].has(value.action) ||
+		!rules.actions.some((action) => action === value.action) ||
 		!hasOnlyKeys(value, [
 			"anansi",
 			"messageVersion",
@@ -566,10 +544,9 @@ function validatePageCommandShape(
 	) {
 		return false;
 	}
-	const runIdValid =
-		source === "x" && value.action === "backfill"
-			? isRunId(value.runId)
-			: value.runId === undefined || isRunId(value.runId);
+	const runIdValid = rules.requiredRunIdActions.some((action) => action === value.action)
+		? isRunId(value.runId)
+		: value.runId === undefined || isRunId(value.runId);
 	return (
 		runIdValid &&
 		(value.config.source === undefined || value.config.source === source)
@@ -586,12 +563,15 @@ function validatePopupCommandShape(
 	if (
 		value.action === "queue-status" ||
 		value.action === "import-all" ||
-		value.action === "reschedule" ||
 		value.action === "save-page" ||
 		value.action === "mirror-status" ||
 		value.action === "mirror-on" ||
 		value.action === "mirror-off" ||
-		value.action === "connection-updated"
+		value.action === "connection-updated" ||
+		value.action === "adopt-legacy-queue" ||
+		value.action === "licence-status" ||
+		value.action === "licence-check" ||
+		value.action === "licence-deactivate"
 	) {
 		return hasOnlyKeys(value, ["anansi", "messageVersion", "action"]);
 	}
@@ -605,6 +585,20 @@ function validatePopupCommandShape(
 		return (
 			hasOnlyKeys(value, ["anansi", "messageVersion", "action", "source"]) &&
 			isSource(value.source)
+		);
+	}
+	if (value.action === "licence-activate") {
+		return (
+			hasOnlyKeys(value, ["anansi", "messageVersion", "action", "licenceKey"]) &&
+			typeof value.licenceKey === "string" &&
+			value.licenceKey.length <= 256
+		);
+	}
+	if (value.action === "set-source") {
+		return (
+			hasOnlyKeys(value, ["anansi", "messageVersion", "action", "source", "enabled"]) &&
+			isSource(value.source) &&
+			typeof value.enabled === "boolean"
 		);
 	}
 	return false;
@@ -728,4 +722,19 @@ export function parseExtensionMessage(
 	} catch {
 		return fail("invalid_message");
 	}
+}
+
+/** Library traffic is a separate, deliberately tiny command surface. */
+export function isLibrarySyncCommand(message: unknown, senderUrl: string | undefined, connectedOrigin: string | undefined): boolean {
+  if (!senderUrl || !connectedOrigin || !message || typeof message !== "object") return false;
+  try {
+    const value = message as Record<string, unknown>;
+    return new URL(senderUrl).origin === new URL(connectedOrigin).origin &&
+      Object.keys(value).length === 2 && value.anansi === "library-sync-now" && value.messageVersion === MESSAGE_PROTOCOL_VERSION;
+  } catch { return false; }
+}
+
+export function isLibraryConnectCommand(message: unknown, senderUrl: string | undefined, origin: string | undefined, frameId: number | undefined): message is {anansi:"library-connect";messageVersion:1;code:string} {
+ if(frameId!==0||!senderUrl||!origin||!isRecord(message))return false;
+ try{return new URL(senderUrl).origin===new URL(origin).origin&&hasOnlyKeys(message,["anansi","messageVersion","code"])&&message.anansi==="library-connect"&&message.messageVersion===1&&typeof message.code==="string"&&/^anansi_[A-Za-z0-9_-]{43}$/.test(message.code);}catch{return false;}
 }

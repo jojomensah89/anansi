@@ -15,6 +15,7 @@ export function useDialogFocus(
   container: RefObject<HTMLElement | null>,
   initial: RefObject<HTMLElement | null>,
   onClose: () => void,
+  responsiveInspector = false,
 ) {
   useEffect(() => {
     if (!open) return;
@@ -26,7 +27,7 @@ export function useDialogFocus(
         onClose();
         return;
       }
-      if (event.key !== "Tab" || !container.current) return;
+      if (event.key !== "Tab" || !container.current || (responsiveInspector && !window.matchMedia("(max-width: 767px)").matches)) return;
       const focusable = [...container.current.querySelectorAll<HTMLElement>(FOCUSABLE)]
         .filter((node) => !node.hasAttribute("disabled"));
       if (focusable.length === 0) {
@@ -36,7 +37,7 @@ export function useDialogFocus(
       }
       const first = focusable[0]!;
       const last = focusable.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === container.current)) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -50,5 +51,11 @@ export function useDialogFocus(
       document.removeEventListener("keydown", onKey);
       returnTo?.focus();
     };
-  }, [open, container, initial, onClose]);
+  }, [open, container, initial, onClose, responsiveInspector]);
+}
+
+// Input modality also keeps repeated keyboard inspector navigation immediate.
+if (typeof document !== "undefined") {
+ document.addEventListener("keydown", () => { document.documentElement.dataset.input = "keyboard"; }, true);
+ document.addEventListener("pointerdown", () => { document.documentElement.dataset.input = "pointer"; }, true);
 }

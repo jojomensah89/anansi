@@ -4,7 +4,7 @@ import { handleRestoreRequest } from "./restore.ts";
 
 const origin = "http://localhost:3000";
 const backupId = "a".repeat(64);
-const counts = { items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0 };
+const counts = { items: 0, tags: 0, itemTags: 0, itemTagOverrides: 0, itemSourceLinks: 0, highlights: 0, media: 0, collections: 0, shelfItems: 0, aiTopics: 0 };
 
 function request(path: string, method = "POST", body?: unknown, auth = true) {
   return new Request(`${origin}${path}`, {

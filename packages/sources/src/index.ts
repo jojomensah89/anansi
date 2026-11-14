@@ -79,12 +79,19 @@ export type {
   RawPageCapture,
 } from "./capture.ts";
 export { CAPTURE_SCHEMA_VERSION, parseBookmarkCapture } from "./capture.ts";
+export { isEmptyHistoryPage } from "./empty-page.ts";
 export type { ParseContext } from "./context.ts";
 export { parseBookmarksPage } from "./x/parse.ts";
 export { parseStarredPage, README_CHARS } from "./github/parse.ts";
 export type { StarredRawPage } from "./github/parse.ts";
 export { parseSavedListing, savedListingCursor } from "./reddit/parse.ts";
 export { parseItemList } from "./tiktok/parse.ts";
+export {
+	INSTAGRAM_DOM_SNAPSHOT_SCHEMA_VERSION,
+	parseInstagramDomSnapshot,
+	parseInstagramDomSnapshots,
+} from "./instagram/parse.ts";
+export type { InstagramDomSnapshot } from "./instagram/parse.ts";
 export { canonicalizeWebUrl, webExternalId } from "./web/canonical-url.ts";
 export type {
   ExtensionHeartbeat,

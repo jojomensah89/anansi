@@ -1,0 +1,240 @@
+/* ---------------------------------------------------------------------------
+ * Shelves: the rail section, the shelf dialog, the add-to-shelf picker, the
+ * card menu and the shelf header over the library.
+ *
+ * Graphite chrome. The only colour is the shelf's own (its icon, its swatch)
+ * and topic dots. 4px grid, 32px controls, 12/14px type at 400 and 500.
+ * Motion explains a change and nothing else: rows slide aside while a shelf is
+ * dragged, menus fade and rise a few pixels from where they open.
+ *
+ * Loaded after frame.css (see routes/__root.tsx).
+ * ------------------------------------------------------------------------ */
+
+:root, .dark {
+ /* Ten calm hues, the topic palette's family, a touch lighter for 16px line icons on graphite. */
+ --shelf-slate:#a2aeb9; --shelf-red:#e39494; --shelf-orange:#dc9172; --shelf-amber:#d6b062; --shelf-green:#8fbc9a;
+ --shelf-teal:#6cc0b7; --shelf-sky:#7cbde0; --shelf-blue:#8aa8dc; --shelf-violet:#a89ce6; --shelf-pink:#dd94aa;
+}
+html.light {
+ /* A step darker, so a 1.5px stroke still reads on white. */
+ --shelf-slate:#5c6b7a; --shelf-red:#a83c3c; --shelf-orange:#a8512f; --shelf-amber:#93680f; --shelf-green:#3f7a52;
+ --shelf-teal:#23766f; --shelf-sky:#2a6f96; --shelf-blue:#3f62a0; --shelf-violet:#5b4fb0; --shelf-pink:#a24d68;
+}
+
+/* -------------------------------------------------------------- rail --- */
+
+.rail-shelves{margin-top:16px}
+.rail-shelves-head{display:flex;align-items:center;gap:4px;height:28px;padding-right:4px}
+.rail-shelves-head .rail-shelves-label{flex:1;min-width:0;height:28px}
+.rail-shelves-add{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),transform 150ms var(--ease-out)}
+.rail-shelves-add:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rail-shelves-add:active{transform:scale(.97)}
+
+.rail-shelves-list{position:relative}
+.rail-shelf{position:relative;transition:transform 200ms var(--ease-out)}
+/* The row under the pointer follows it exactly; only the others ease aside. */
+.rail-shelf[data-dragging]{z-index:2;transition:none;cursor:grabbing}
+.rail-shelf[data-dragging] .rail-shelf-link{background:var(--raised);color:var(--text);box-shadow:0 0 0 1px var(--edge),0 8px 20px -10px rgb(0 0 0 / .55)}
+html.light .rail-shelf[data-dragging] .rail-shelf-link{box-shadow:0 0 0 1px var(--edge),0 8px 20px -12px rgb(16 24 32 / .3)}
+.rail-shelves-list[data-dragging] .rail-shelf-link{cursor:grabbing}
+.rail-shelf-link{-webkit-user-drag:none;user-select:none}
+.rail-shelf-link .anansi-sidebar-label{flex:1}
+.rail-shelf-link:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* The count gives way to the row's menu button when you reach for the row. */
+.rail-shelf-count{min-width:24px;text-align:right;transition:opacity 150ms var(--ease-out)}
+.rail-shelf-more{position:absolute;top:4px;right:4px;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;opacity:0;transition:opacity 150ms var(--ease-out),background-color 150ms var(--ease-out),color 150ms var(--ease-out)}
+.rail-shelf:focus-within .rail-shelf-more,.rail-shelf[data-menu-open] .rail-shelf-more{opacity:1}
+.rail-shelf:focus-within .rail-shelf-count,.rail-shelf[data-menu-open] .rail-shelf-count{opacity:0}
+.rail-shelf[data-menu-open] .rail-shelf-more{background:var(--line-soft);color:var(--text)}
+.rail-shelf[data-menu-open] .rail-shelf-link{background:var(--raised);color:var(--text)}
+.rail-shelf-more:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rail-shelves-list[data-dragging] .rail-shelf-more{opacity:0 !important}
+.rail-shelves-list[data-dragging] .rail-shelf-count{opacity:1 !important}
+
+.rail-shelf-rename{display:flex;align-items:center;gap:9px;height:32px;padding:0 4px 0 8px;border-radius:5px;background:var(--raised)}
+.rail-shelf-rename [data-slot=input]{flex:1;min-width:0;height:24px;padding:0 4px;border:0;border-radius:4px;background:transparent;color:var(--text);font-size:13px;box-shadow:0 0 0 1px var(--edge-strong)}
+.rail-shelf-rename [data-slot=input]:focus-visible{box-shadow:0 0 0 1px var(--accent);outline:none}
+
+.rail-shelves-empty{display:flex;flex-direction:column;gap:4px;padding:0 0 4px}
+.rail-shelves-empty p{margin:0;padding:4px 8px;font-size:12px;line-height:16px;color:var(--muted)}
+.rail-shelves-new{display:flex;align-items:center;gap:9px;height:32px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:var(--muted);font:inherit;font-size:13px;text-align:left;cursor:pointer;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out)}
+.rail-shelves-new:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* One suggestion, as quiet as a footnote. It arrives once, with a short rise. */
+.rail-suggestion{display:flex;flex-direction:column;gap:8px;margin:8px 0 0;padding:8px;border:1px solid var(--line-soft);border-radius:6px;animation:shelf-arrive 220ms var(--ease-out) both}
+.rail-suggestion-text{margin:0;font-size:12px;line-height:16px;color:var(--muted);text-wrap:pretty}
+.rail-suggestion-dot{display:inline-block;width:6px;height:6px;margin:0 4px 0 2px;border-radius:50%;vertical-align:1px}
+.rail-suggestion-topic{color:var(--text-dim)}
+.rail-suggestion-count{font-variant-numeric:tabular-nums;white-space:nowrap}
+.rail-suggestion-actions{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rail-suggestion-create{height:24px;padding:0 8px;border:1px solid var(--edge);border-radius:4px;background:var(--card);color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),transform 150ms var(--ease-out)}
+.rail-suggestion-create:active:not(:disabled){transform:scale(.97)}
+.rail-suggestion-create:disabled{opacity:.6;cursor:wait}
+.rail-suggestion-dismiss{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out)}
+.rail-suggestion :is(.rail-suggestion-create,.rail-suggestion-dismiss):focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@keyframes shelf-arrive{from{opacity:0;transform:translateY(4px)}}
+
+/* Icon-only rail: shelves keep their icons; names live in the tooltips. */
+.anansi-sidebar[data-state="collapsed"] :is(.rail-shelves-add,.rail-shelf-more,.rail-shelves-empty,.rail-suggestion){display:none}
+.anansi-sidebar[data-state="collapsed"] .rail-shelves-head{height:0;overflow:hidden}
+.anansi-sidebar[data-state="collapsed"] .rail-shelves{margin-top:8px}
+
+@media (hover:hover) and (pointer:fine){
+ .rail-shelf:hover .rail-shelf-more{opacity:1}
+ .rail-shelf:hover .rail-shelf-count{opacity:0}
+ .rail-shelf-more:hover{background:var(--line-soft);color:var(--text)}
+ .rail-shelves-add:hover,.rail-suggestion-dismiss:hover{background:var(--raised);color:var(--text)}
+ .rail-shelves-new:hover{background:var(--raised);color:var(--text)}
+ .rail-suggestion-create:hover:not(:disabled){background:var(--raised);color:var(--text)}
+}
+
+/* ------------------------------------------------------- breadcrumb --- */
+
+.app-crumb-with-icon{display:inline-flex;align-items:center;gap:8px;min-width:0;vertical-align:top;height:20px}
+
+/* Save as shelf waits for a filter; until then it reads as resting, not broken. */
+.library-toolbar .toolbar-button:disabled{opacity:.5;cursor:default}
+
+/* ----------------------------------------------------- shelf header --- */
+
+.shelf-header{display:flex;align-items:center;gap:8px;min-width:0;min-height:36px;padding:0 20px 12px;font-size:12px;line-height:16px}
+.shelf-header-label{flex:none;color:var(--muted)}
+.shelf-header-rule{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim)}
+.shelf-header-edit[data-slot=button]{flex:none;margin-left:auto;height:28px;gap:6px;padding:0 8px;border:0;border-radius:4px;background:transparent;color:var(--muted);font-size:12px;font-weight:400;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),transform 150ms var(--ease-out)}
+.shelf-header-edit svg{width:14px;height:14px}
+.shelf-header-edit:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.shelf-header-edit:active{transform:scale(.97)}
+
+/* --------------------------------------------------------- dialog --- */
+
+[data-slot].shelf-dialog{width:min(448px,calc(100vw - 32px));max-width:none !important;padding:20px;gap:0;border:1px solid var(--edge);border-radius:12px;background:var(--card);color:var(--text);box-shadow:0 24px 64px -24px rgb(0 0 0 / .7);font-size:14px;line-height:20px;--tw-ring-shadow:0 0 #0000}
+html.light [data-slot].shelf-dialog{box-shadow:0 24px 56px -24px rgb(16 24 32 / .3),0 2px 6px rgb(16 24 32 / .06)}
+.shelf-dialog [data-slot=dialog-header],.shelf-dialog [data-slot=alert-dialog-header]{gap:4px;text-align:left;place-items:start}
+.shelf-dialog [data-slot=dialog-title],.shelf-dialog [data-slot=alert-dialog-title]{font-size:16px;line-height:24px;font-weight:500;color:var(--text)}
+.shelf-dialog [data-slot=alert-dialog-description]{font-size:14px;line-height:20px;color:var(--muted);text-wrap:pretty}
+[data-slot].shelf-confirm{gap:20px}
+
+.shelf-form{display:flex;flex-direction:column;gap:20px}
+.shelf-name-row{display:flex;align-items:center;gap:8px}
+.shelf-name-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;height:32px;border:1px solid var(--line);border-radius:6px;background:var(--raised)}
+.shelf-form .shelf-input[data-slot=input]{height:32px;padding:0 10px;border:1px solid var(--edge);border-radius:6px;background:var(--ink);color:var(--text);font-size:14px;transition:border-color 150ms var(--ease-out),box-shadow 150ms var(--ease-out)}
+html.light .shelf-form .shelf-input[data-slot=input]{background:var(--card)}
+.shelf-form .shelf-input[data-slot=input]:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);outline:none}
+
+.shelf-field{display:flex;flex-direction:column;gap:8px;min-width:0}
+.shelf-field-label{font-size:12px;line-height:16px;color:var(--muted)}
+
+.shelf-swatches{display:flex;flex-wrap:wrap;gap:4px}
+.shelf-swatch{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer;transition:transform 150ms var(--ease-out),box-shadow 150ms var(--ease-out)}
+.shelf-swatch > span{display:block;width:16px;height:16px;border-radius:50%}
+.shelf-swatch[aria-checked=true]{box-shadow:inset 0 0 0 1.5px var(--text-dim)}
+.shelf-swatch:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.shelf-swatch:active{transform:scale(.94)}
+
+.shelf-icon-search{position:relative;display:flex;align-items:center}
+.shelf-icon-search > svg{position:absolute;left:10px;color:var(--muted);pointer-events:none}
+.shelf-form .shelf-icon-search .shelf-input[data-slot=input]{padding-left:34px}
+.shelf-icon-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));grid-auto-rows:36px;align-content:start;gap:4px;height:180px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--edge-strong) transparent;padding:2px;margin:-2px}
+.shelf-icon-option{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),transform 150ms var(--ease-out)}
+.shelf-icon-option[aria-checked=true]{background:var(--raised);box-shadow:inset 0 0 0 1px var(--edge-strong)}
+.shelf-icon-option:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.shelf-icon-option:active{transform:scale(.94)}
+.shelf-icon-empty{grid-column:1 / -1;margin:0;padding:8px 0}
+
+.shelf-rule{display:flex;align-items:baseline;gap:12px;min-width:0}
+.shelf-rule-text{min-width:0;color:var(--text-dim)}
+.shelf-hint{margin:0;color:var(--muted);text-wrap:pretty}
+.shelf-form .shelf-link[data-slot=button]{flex:none;align-self:flex-start;height:auto;padding:0;border:0;background:transparent;color:var(--muted);font-size:14px;font-weight:400;text-decoration:underline;text-decoration-color:var(--edge-strong);text-underline-offset:3px;transition:color 150ms var(--ease-out),text-decoration-color 150ms var(--ease-out)}
+.shelf-form .shelf-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+.shelf-dialog .shelf-footer{display:flex;flex-direction:row;justify-content:flex-end;gap:8px;margin:0;padding:0;border:0;background:transparent}
+.shelf-form .shelf-footer{margin-top:4px}
+.shelf-dialog .shelf-button[data-slot],.shelf-dialog [data-slot].shelf-button{height:32px;gap:8px;padding:0 12px;border:1px solid var(--edge);border-radius:6px;background:var(--card);color:var(--text-dim);font-size:14px;font-weight:400;transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),transform 150ms var(--ease-out)}
+.shelf-dialog [data-slot].shelf-button-primary{border-color:var(--accent);background:var(--accent);color:var(--accent-text-on-accent);font-weight:500}
+.shelf-dialog [data-slot].shelf-button-primary:disabled{opacity:.45}
+.shelf-dialog [data-slot].shelf-button-danger{border-color:var(--danger);background:transparent;color:var(--danger);font-weight:500}
+.shelf-dialog [data-slot].shelf-button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.shelf-dialog [data-slot].shelf-button:active:not(:disabled){transform:scale(.97)}
+
+@media (hover:hover) and (pointer:fine){
+ .shelf-swatch:not([aria-checked=true]):hover{box-shadow:inset 0 0 0 1.5px var(--edge)}
+ .shelf-icon-option:hover{background:var(--raised);color:var(--text)}
+ .shelf-form .shelf-link:hover{color:var(--text);text-decoration-color:var(--text-dim)}
+ .shelf-dialog [data-slot].shelf-button:not(:disabled):hover{background:var(--raised);color:var(--text)}
+ .shelf-dialog [data-slot].shelf-button-primary:not(:disabled):hover{background:var(--accent-hover);border-color:var(--accent-hover);color:var(--accent-text-on-accent)}
+ .shelf-dialog [data-slot].shelf-button-danger:not(:disabled):hover{background:var(--raised);color:var(--danger)}
+ .shelf-header-edit[data-slot=button]:hover{background:var(--raised);color:var(--text)}
+}
+
+/* ------------------------------------------- menus and the picker --- */
+
+[data-slot=dropdown-menu-content].shelf-menu{width:max-content;min-width:176px;max-width:280px;padding:4px;border:1px solid var(--edge);border-radius:8px;background:var(--card);color:var(--text);box-shadow:0 12px 32px -16px rgb(0 0 0 / .55);--tw-ring-shadow:0 0 #0000}
+[data-slot=dropdown-menu-content].shelf-menu [data-slot=dropdown-menu-item]{min-height:32px;gap:8px;padding:6px 8px;border-radius:4px;font-size:14px;line-height:20px;color:var(--text-dim)}
+[data-slot=dropdown-menu-content].shelf-menu [data-slot=dropdown-menu-item]:is(:focus,[data-highlighted]){background:var(--raised);color:var(--text)}
+[data-slot=dropdown-menu-content].shelf-menu [data-slot=dropdown-menu-item][data-variant=destructive]{color:var(--danger)}
+[data-slot=dropdown-menu-content].shelf-menu [data-slot=dropdown-menu-item][data-variant=destructive]:is(:focus,[data-highlighted]){background:var(--raised);color:var(--danger)}
+[data-slot=dropdown-menu-content].shelf-menu [data-slot=dropdown-menu-item] svg{width:16px;height:16px;color:var(--muted)}
+[data-slot=dropdown-menu-content].shelf-menu [data-slot=dropdown-menu-item][data-variant=destructive] svg{color:var(--danger)}
+[data-slot=dropdown-menu-content].shelf-menu [data-slot=dropdown-menu-separator]{margin:4px -4px;background:var(--line)}
+
+[data-slot=popover-content].shelf-popover{width:272px;padding:4px;gap:0;border:1px solid var(--edge);border-radius:8px;background:var(--card);color:var(--text);font-size:14px;line-height:20px;box-shadow:0 12px 32px -16px rgb(0 0 0 / .55);--tw-ring-shadow:0 0 #0000}
+html.light :is([data-slot=dropdown-menu-content].shelf-menu,[data-slot=popover-content].shelf-popover){box-shadow:0 12px 32px -16px rgb(16 24 32 / .28)}
+
+/* Menus and the picker open from their button: a short fade and a 4px rise toward it. */
+@keyframes shelf-from-below{from{opacity:0;transform:translateY(4px)}}
+@keyframes shelf-from-above{from{opacity:0;transform:translateY(-4px)}}
+@keyframes shelf-from-left{from{opacity:0;transform:translateX(-4px)}}
+@keyframes shelf-out{to{opacity:0}}
+:is(.shelf-menu,.shelf-popover)[data-open]{animation:shelf-from-above 180ms var(--ease-out) both}
+:is(.shelf-menu,.shelf-popover)[data-open][data-side=top]{animation-name:shelf-from-below}
+:is(.shelf-menu,.shelf-popover)[data-open]:is([data-side=right],[data-side=inline-end]){animation-name:shelf-from-left}
+:is(.shelf-menu,.shelf-popover)[data-closed]{animation:shelf-out 120ms var(--ease-out) both}
+
+.shelf-picker{display:flex;flex-direction:column}
+.shelf-picker-search{position:relative;display:flex;align-items:center;margin:-4px -4px 4px;border-bottom:1px solid var(--line)}
+.shelf-picker-search > svg{position:absolute;left:12px;color:var(--muted);pointer-events:none}
+.shelf-picker-search [data-slot=input]{height:40px;padding:0 12px 0 36px;border:0;background:transparent;color:var(--text);font-size:14px}
+.shelf-picker-search [data-slot=input]:focus-visible{outline:none;box-shadow:none}
+.shelf-picker-list{display:flex;flex-direction:column;gap:2px;max-height:272px;overflow-y:auto;scrollbar-width:thin;animation:none}
+.shelf-picker-row{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 8px;border-radius:4px;color:var(--text-dim);cursor:pointer;user-select:none}
+.shelf-picker-row[data-active]{background:var(--raised);color:var(--text)}
+.shelf-picker-check{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;color:var(--text)}
+.shelf-picker-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shelf-picker-count{flex:none;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.shelf-picker-plus{flex:none;color:var(--muted)}
+.shelf-picker-row[data-new]{color:var(--muted)}
+.shelf-picker-row[data-new][data-active]{color:var(--text)}
+.shelf-picker-row[data-new]:not(:first-child){position:relative;margin-top:5px}
+.shelf-picker-row[data-new]:not(:first-child)::before{content:"";position:absolute;left:-4px;right:-4px;top:-4px;height:1px;background:var(--line)}
+.shelf-picker-loading{display:flex;flex-direction:column;gap:2px}
+
+/* --------------------------------------------------------- card menu --- */
+
+.card-shelf-menu{display:inline-flex;flex:none}
+.capture-card-footer .capture-card-more[data-slot=button]{display:inline-flex;align-items:center;justify-content:center;width:24px;min-width:24px;height:24px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--muted);transition:background-color 150ms var(--ease-out),color 150ms var(--ease-out),opacity 150ms var(--ease-out),transform 150ms var(--ease-out)}
+.capture-card-footer .capture-card-more svg{width:14px;height:14px}
+.capture-card-footer .capture-card-more:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.capture-card-footer .capture-card-more:active:not(:disabled){transform:scale(.97)}
+.capture-card-footer .capture-card-more[data-open]{background:var(--raised);color:var(--text)}
+.capture-card-footer .capture-card-more:disabled{opacity:0 !important}
+
+@media (hover:hover) and (pointer:fine){
+ .capture-card-footer .capture-card-more:not([data-open]){opacity:0}
+ [role=button]:is(:hover,:focus-within) .capture-card-more{opacity:1}
+ .capture-card-footer .capture-card-more:hover{background:var(--raised);color:var(--text)}
+}
+
+/* ---------------------------------------------------------- phones --- */
+
+@media (max-width:640px){
+ /* The rail is the bottom tab bar here; shelves are a ⌘K search away. */
+ .anansi-rail .rail-shelves{display:none !important}
+ .shelf-header{padding:0 12px 8px}
+ .shelf-icon-grid{grid-template-columns:repeat(8,minmax(0,1fr))}
+}
+
+@media (prefers-reduced-motion:reduce){
+ /* Fades stay, travel goes; index.css also stops every animation here. */
+ .rail-shelf,.rail-suggestion{transition:none;animation:none}
+}
