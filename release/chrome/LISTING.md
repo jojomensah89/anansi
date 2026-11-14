@@ -12,7 +12,7 @@ Anansi connects Chrome to a personal library hosted in your own Cloudflare accou
 
 Capture X bookmarks, Reddit saves, GitHub stars and TikTok favorites from signed-in browser sessions. Save a web page or selection from the toolbar or context menu. Chrome bookmark mirroring is optional. The popup has separate source switches; TikTok is opt-in and imports use a focused window. Platform behavior can change; capture is best effort.
 
-Opening the library requests a check for saves made elsewhere. Browser-based checks need your signed-in desktop browser running. Search and organize your library in the web app. Compatible agents connect through OAuth or named API keys: eight read tools, with four optional owner-granted tools for tags, notes and saving links. Agents cannot delete. AI tagging and semantic search are off by default and use your Cloudflare services only when enabled.
+Opening the library requests a check for saves made elsewhere. Browser-based checks need your signed-in desktop browser running. Search and organize your library in the web app. Compatible agents connect through OAuth or named API keys: nine read tools, with four optional owner-granted tools for tags, notes and saving links. Agents cannot delete. AI tagging and semantic search are off by default and use your Cloudflare services only when enabled.
 
 ## Single purpose
 
