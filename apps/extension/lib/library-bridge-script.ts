@@ -8,8 +8,10 @@
  */
 export function libraryBridgeScript(): void {
 	const marker = "__anansiSyncBridge";
+	// `chrome` is typed here, not taken from @types/chrome, so this file needs no global typings.
 	const state = globalThis as typeof globalThis & {
 		__anansiSyncBridge?: (event: MessageEvent) => void;
+		chrome: { runtime: { sendMessage(message: unknown): Promise<{ ok?: unknown } | undefined> } };
 	};
 	if (state[marker]) window.removeEventListener("message", state[marker]);
 	state[marker] = (event) => {
@@ -43,7 +45,7 @@ export function libraryBridgeScript(): void {
 				: kind === "library-import-request"
 					? { anansi: "library-import", messageVersion: 1, source: data.source }
 					: { anansi: "library-sync-now", messageVersion: 1 };
-		void chrome.runtime
+		void state.chrome.runtime
 			.sendMessage(request)
 			.then((result: { ok?: unknown } | undefined) => reply(result?.ok === true))
 			.catch(() => reply(false));
