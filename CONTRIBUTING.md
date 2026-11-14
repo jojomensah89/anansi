@@ -6,7 +6,7 @@ Local operation is for development and testing. AI is off by default. Agents use
 
 ## Setup
 
-Use Bun 1.4.2+ and Chrome for the current release target. Run `bun install --frozen-lockfile`, copy .dev.vars.example to .dev.vars, set ANANSI_SECRET to a generated random secret, and run `bun run dev`. This builds the Worker and applies local migrations before starting it.
+Use Bun 1.4.2+ and Chrome for the current release target. Run `bun install --frozen-lockfile`, copy .dev.vars.example to .dev.vars, set ANANSI_SECRET to a generated random secret, and run `bun run dev`. This applies local migrations and starts a hot-reloading dev server. Use `bun run dev:prod` to run the compiled Worker exactly like production before releases.
 Optional LIBRARY_TOKEN, INGEST_TOKEN and MCP_TOKEN override their respective roles. Open http://127.0.0.1:8787; API is /api and MCP is /mcp. Follow the README for Cloudflare setup.
 AI is optional and uses Cloudflare bindings. Historical Ollama/CLI commands are not current runtime paths. Never run db:push; canonical SQL migrations in packages/db/drizzle include FTS5 tables and triggers.
 
@@ -34,7 +34,7 @@ Synthetic smoke uses isolated memory data. Automated checks do not prove signed-
 - packages/db: SQLite/D1 schema, migrations and library operations.
 - packages/mcp: nine read tools, four optional writes and shared server.
 - packages/sources: capture contracts, capabilities and parsers.
-- packages/ui and packages/env: shared UI and runtime binding types.
+- packages/ui: shared UI components and styles.
 - wrangler.jsonc: resources, scheduling and request protection.
 - release/chrome: submission materials and acceptance evidence.
 

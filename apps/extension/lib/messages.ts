@@ -146,16 +146,7 @@ export type PopupCommandMessage = MessageBase &
 					| "mirror-on"
 					| "mirror-off"
 					| "connection-updated"
-					| "adopt-legacy-queue"
-					| "licence-status"
-					| "licence-check"
-					| "licence-deactivate";
-		  }
-		| {
-				anansi: "popup-command";
-				/** Store build only. The key goes to the worker, which talks to Polar. */
-				action: "licence-activate";
-				licenceKey: string;
+					| "adopt-legacy-queue";
 		  }
 		| {
 				anansi: "popup-command";
@@ -568,10 +559,7 @@ function validatePopupCommandShape(
 		value.action === "mirror-on" ||
 		value.action === "mirror-off" ||
 		value.action === "connection-updated" ||
-		value.action === "adopt-legacy-queue" ||
-		value.action === "licence-status" ||
-		value.action === "licence-check" ||
-		value.action === "licence-deactivate"
+		value.action === "adopt-legacy-queue"
 	) {
 		return hasOnlyKeys(value, ["anansi", "messageVersion", "action"]);
 	}
@@ -585,13 +573,6 @@ function validatePopupCommandShape(
 		return (
 			hasOnlyKeys(value, ["anansi", "messageVersion", "action", "source"]) &&
 			isSource(value.source)
-		);
-	}
-	if (value.action === "licence-activate") {
-		return (
-			hasOnlyKeys(value, ["anansi", "messageVersion", "action", "licenceKey"]) &&
-			typeof value.licenceKey === "string" &&
-			value.licenceKey.length <= 256
 		);
 	}
 	if (value.action === "set-source") {

@@ -60,7 +60,7 @@ Host your library in your own Cloudflare account. The local path below is for de
 
 ### A. Local development
 
-Requirements: [Bun](https://bun.sh/) 1.4.2+ and a Chromium browser (Chrome, Brave, Edge or Arc). The local Worker uses emulated D1/R2; `bun run dev` builds the app, applies local SQL migrations and starts the compiled Worker.
+Requirements: [Bun](https://bun.sh/) 1.4.2+ and a Chromium browser (Chrome, Brave, Edge or Arc). The local Worker uses emulated D1/R2; `bun run dev` applies local SQL migrations and starts the Vite dev server with hot reload.
 
 ```bash
 bun install
@@ -72,7 +72,7 @@ bun run dev
 
 Open `http://127.0.0.1:8787`. This is the one public local origin: the library is at `/`, JSON endpoints are under `/api`, and MCP is at `/mcp`.
 
-`bun dev` first applies the SQL migrations, then starts Vite with the Cloudflare and TanStack plugins. Local D1 and R2 use `.wrangler/state` at the repository root. This Worker development path does not read the older `data/anansi.db` SQLite library. To apply local migrations separately, run `bun run db:migrate:local`.
+`bun run dev` first applies the SQL migrations, then starts Vite with the Cloudflare and TanStack plugins, so edits hot-reload. Local D1 and R2 use `.wrangler/state` at the repository root. This Worker development path does not read the older `data/anansi.db` SQLite library. To apply local migrations separately, run `bun run db:migrate:local`. `bun run dev:prod` builds the app and runs the compiled Worker exactly like production; use it before releases.
 
 Use `.env` for this local setup. If `.dev.vars` exists, Wrangler uses it instead of `.env`; keep its secret aligned or remove that duplicate secrets file.
 
@@ -184,7 +184,7 @@ bun run deploy
 ```
 
 `bun run deploy` applies remote D1 migrations and publishes the Worker output created by `bun run build`.
-Local development runs through `bun run dev` (Vite with the Cloudflare plugin, local D1 migrations, and a fixed `http://127.0.0.1:8787` origin).
+Local development runs through `bun run dev` (hot-reloading Vite with the Cloudflare plugin, local D1 migrations, and a fixed `http://127.0.0.1:8787` origin).
 
 ## 🧠 Ask it from your agent (MCP)
 
@@ -255,7 +255,6 @@ packages/db/       D1/SQLite schema, migrations, search, and item operations
 packages/mcp/      Transport-independent MCP server and tool definitions
 packages/sources/  Shared capture contracts and source parsers
 packages/ui/       Shared UI components and styles
-packages/env/      Typed runtime environment bindings
 wrangler.jsonc    Cloudflare Worker bindings and deployment configuration
 ```
 
