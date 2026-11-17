@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300" role="img" aria-labelledby="title desc">
+<title id="title">Six available Anansi sponsor slots</title>
+<desc id="desc">A three-column, two-row grid of dashed boxes, each labelled Your logo here and Sponsor slot available.</desc>
+<style>rect{fill:none;stroke:#94a3b8;stroke-width:1;stroke-dasharray:4 4}text{fill:#344252;font-family:Arial,Helvetica,sans-serif;text-anchor:middle}.name{font-size:18px;font-weight:600}.detail{font-size:14px}@media(prefers-color-scheme:dark){rect{stroke:#59636e}text{fill:#c4cbd4}}</style>
+<rect x="1" y="1" width="286" height="142" rx="10"/>
+<text class="name" x="144" y="65">Your logo here</text>
+<text class="detail" x="144" y="92">Sponsor slot available</text>
+<rect x="307" y="1" width="286" height="142" rx="10"/>
+<text class="name" x="450" y="65">Your logo here</text>
+<text class="detail" x="450" y="92">Sponsor slot available</text>
+<rect x="613" y="1" width="286" height="142" rx="10"/>
+<text class="name" x="756" y="65">Your logo here</text>
+<text class="detail" x="756" y="92">Sponsor slot available</text>
+<rect x="1" y="157" width="286" height="142" rx="10"/>
+<text class="name" x="144" y="221">Your logo here</text>
+<text class="detail" x="144" y="248">Sponsor slot available</text>
+<rect x="307" y="157" width="286" height="142" rx="10"/>
+<text class="name" x="450" y="221">Your logo here</text>
+<text class="detail" x="450" y="248">Sponsor slot available</text>
+<rect x="613" y="157" width="286" height="142" rx="10"/>
+<text class="name" x="756" y="221">Your logo here</text>
+<text class="detail" x="756" y="248">Sponsor slot available</text>
+</svg>
