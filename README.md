@@ -10,9 +10,8 @@ Anansi captures X bookmarks, Reddit saves, GitHub stars, TikTok favorites, and w
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple)](https://modelcontextprotocol.io)
 [![Repo](https://img.shields.io/badge/GitHub-jojomensah89%2Fanansi-black?logo=github)](https://github.com/jojomensah89/anansi)
 [![Stars](https://img.shields.io/github/stars/jojomensah89/anansi?style=social)](https://github.com/jojomensah89/anansi)
-[![Issues](https://img.shields.io/github/issues/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/issues)
-[![Last commit](https://img.shields.io/github/last-commit/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/commits)
-[![CI](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml/badge.svg)](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml)
+[![Follow on X](https://img.shields.io/badge/Follow-jojomensah89-black?logo=x&logoColor=white)](https://x.com/jojomensah89)
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/jojomensah89)
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fjojomensah89%2Fanansi)
 
@@ -21,6 +20,27 @@ Anansi captures X bookmarks, Reddit saves, GitHub stars, TikTok favorites, and w
 <img src="./apps/web/public/anansi-logo.png" width="420" alt="Anansi logo showing a spider organizing saved web references" />
 
 </div>
+
+## Sponsors
+
+Your logo, project name, link, and short description in the README and on the website.
+
+<table border="1" rules="all" width="100%" style="width: 100%; border-collapse: collapse; border: 1px solid #3d444d;">
+  <tr>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <a href="https://github.com/sponsors/jojomensah89"><img src="https://img.shields.io/badge/Become_a_sponsor-%2419%2Fmonth-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Become a sponsor - $19/month" /></a>
+</p>
 
 ## ✨ What Anansi does
 
@@ -60,7 +80,7 @@ Host your library in your own Cloudflare account. The local path below is for de
 
 ### A. Local development
 
-Requirements: [Bun](https://bun.sh/) 1.4.2+ and a Chromium browser (Chrome, Brave, Edge or Arc). The local Worker uses emulated D1/R2; `bun run dev` builds the app, applies local SQL migrations and starts the compiled Worker.
+Requirements: [Bun](https://bun.sh/) 1.4.2+ and a Chromium browser (Chrome, Brave, Edge or Arc). The local Worker uses emulated D1/R2; `bun run dev` applies local SQL migrations and starts the Vite dev server with hot reload.
 
 ```bash
 bun install
@@ -72,7 +92,7 @@ bun run dev
 
 Open `http://127.0.0.1:8787`. This is the one public local origin: the library is at `/`, JSON endpoints are under `/api`, and MCP is at `/mcp`.
 
-`bun dev` first applies the SQL migrations, then starts Vite with the Cloudflare and TanStack plugins. Local D1 and R2 use `.wrangler/state` at the repository root. This Worker development path does not read the older `data/anansi.db` SQLite library. To apply local migrations separately, run `bun run db:migrate:local`.
+`bun run dev` first applies the SQL migrations, then starts Vite with the Cloudflare and TanStack plugins, so edits hot-reload. Local D1 and R2 use `.wrangler/state` at the repository root. This Worker development path does not read the older `data/anansi.db` SQLite library. To apply local migrations separately, run `bun run db:migrate:local`. `bun run dev:prod` builds the app and runs the compiled Worker exactly like production; use it before releases.
 
 Use `.env` for this local setup. If `.dev.vars` exists, Wrangler uses it instead of `.env`; keep its secret aligned or remove that duplicate secrets file.
 
@@ -184,7 +204,7 @@ bun run deploy
 ```
 
 `bun run deploy` applies remote D1 migrations and publishes the Worker output created by `bun run build`.
-Local development runs through `bun run dev` (Vite with the Cloudflare plugin, local D1 migrations, and a fixed `http://127.0.0.1:8787` origin).
+Local development runs through `bun run dev` (hot-reloading Vite with the Cloudflare plugin, local D1 migrations, and a fixed `http://127.0.0.1:8787` origin).
 
 ## 🧠 Ask it from your agent (MCP)
 
@@ -255,7 +275,6 @@ packages/db/       D1/SQLite schema, migrations, search, and item operations
 packages/mcp/      Transport-independent MCP server and tool definitions
 packages/sources/  Shared capture contracts and source parsers
 packages/ui/       Shared UI components and styles
-packages/env/      Typed runtime environment bindings
 wrangler.jsonc    Cloudflare Worker bindings and deployment configuration
 ```
 
@@ -311,10 +330,6 @@ PRs welcome — small and focused wins. Read [CONTRIBUTING.md](./CONTRIBUTING.md
 
 Useful early contributions include clearer setup docs, scrubbed source fixtures, parser and import fixes, MCP client examples, accessibility improvements, and focused library UX changes. If you are unsure where to begin, open a small issue describing the user problem before starting a large change.
 
-## 💛 Support
-
-Anansi is free, including the extension. If it is useful to you, you can pay what you want through [Polar](https://buy.polar.sh/polar_cl_23HStXNgQMfXFavpX5s33s4PzRtZuNxJU1WWl0cIfgF), or star the repository. Both are optional.
-
 ## 📄 License
 
 MIT © 2026 Jojo Mensah — see [LICENSE](./LICENSE). The Anansi name and logo are trademarks and are not covered by the MIT licence.
@@ -323,4 +338,4 @@ MIT © 2026 Jojo Mensah — see [LICENSE](./LICENSE). The Anansi name and logo a
 
 Built by Jojo Mensah · Follow along for demos and changelogs
 
-<a href="https://buy.polar.sh/polar_cl_23HStXNgQMfXFavpX5s33s4PzRtZuNxJU1WWl0cIfgF">Support Anansi</a> · <a href="https://x.com/jojomensah89"><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" height="20" align="middle" /></a>
+<a href="https://github.com/sponsors/jojomensah89">Sponsor on GitHub</a> · <a href="https://x.com/jojomensah89"><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" height="20" align="middle" /></a>

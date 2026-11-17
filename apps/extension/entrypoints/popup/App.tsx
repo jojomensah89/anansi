@@ -37,8 +37,6 @@ import {
 import { IMPORT_ALL, permissionPromptLine, sourceRowView, type SourceRowView } from "../../lib/popup-view.ts";
 import type { Status } from "../background.ts";
 import { Icon } from "./icons.tsx";
-import { type LicenceGate, licenceAllowsCapture } from "../../lib/licence.ts";
-import { LicenceRow, LicenceScreen, readLicence } from "./Licence.tsx";
 import "./App.css";
 
 /** Pay-what-you-want checkout on Polar ("Support Anansi", from $0). */
@@ -206,22 +204,12 @@ export default function App() {
   const [switches, setSwitches] = useState<Record<string, SwitchOverride>>({});
   const [switchErrors, setSwitchErrors] = useState<Set<string>>(() => new Set());
   const [reloadNonce, setReloadNonce] = useState(0);
-  // Store build only; every other build starts, and stays, not applicable.
-  const [licence, setLicence] = useState<LicenceGate | null>(
-    __ANANSI_REQUIRE_LICENCE__ ? null : { state: "not-applicable" },
-  );
-  const licenceLocked = __ANANSI_REQUIRE_LICENCE__ && (licence === null || !licenceAllowsCapture(licence));
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const errorTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     const timers = errorTimers.current;
     return () => timers.forEach((timer) => clearTimeout(timer));
-  }, []);
-
-  useEffect(() => {
-    if (!__ANANSI_REQUIRE_LICENCE__) return;
-    void readLicence().then((reply) => setLicence(reply?.licence ?? { state: "required" }));
   }, []);
 
   useEffect(() => {
@@ -337,8 +325,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Without a licence the library is not read either; the worker has stopped too.
-    if (licenceLocked) return;
     if (!connection) {
       if (connectionLoaded) {
         setConnectionState((prev) =>
@@ -427,7 +413,7 @@ export default function App() {
       if (timer !== undefined) clearTimeout(timer);
       requestController?.abort();
     };
-  }, [connection, connectionLoaded, refresh, reloadNonce, licenceLocked]);
+  }, [connection, connectionLoaded, refresh, reloadNonce]);
 
   const handleConnect = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -805,21 +791,6 @@ export default function App() {
     </header>
   );
 
-  if (__ANANSI_REQUIRE_LICENCE__ && licenceLocked) {
-    if (licence === null) {
-      return (
-        <div className="anansi-popup">
-          <header className="pop-head">
-            <img className="logo" src="/icon/48.png" width="20" height="20" alt="" aria-hidden="true" />
-            <span className="name">Anansi</span>
-          </header>
-          <div className="loading meta">Checking licence…</div>
-        </div>
-      );
-    }
-    return <LicenceScreen gate={licence} onGate={setLicence} />;
-  }
-
   if (!connectionLoaded) {
     return (
       <div className="anansi-popup">
@@ -1179,10 +1150,6 @@ export default function App() {
           <p className="opt-note meta" style={{ margin: 0 }}>
             Opening your library checks X, Reddit and GitHub for new saves
           </p>
-
-          {__ANANSI_REQUIRE_LICENCE__ && licence && (licence.state === "active" || licence.state === "grace") && (
-            <LicenceRow gate={licence} onGate={setLicence} />
-          )}
         </div>
       )}
 

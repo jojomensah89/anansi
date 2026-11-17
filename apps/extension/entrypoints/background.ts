@@ -38,14 +38,6 @@ import {
 import { cachedForServer, createPersistedConfigCache, type ServerCache } from "../lib/config-cache.ts";
 import { saveExtensionConnection, getExtensionConnection } from "../lib/connection.ts";
 import {
-	activationLabel,
-	createLicence,
-	type Licence,
-	type LicenceError,
-	type LicenceGate,
-	licenceAllowsCapture,
-} from "../lib/licence.ts";
-import {
 	createHeartbeatClient,
 	type HeartbeatClient,
 } from "../lib/heartbeat.ts";
@@ -197,77 +189,8 @@ function persistentState(): { outbox: IndexedDbOutbox; runs: SourceRuns } {
 	return persistent;
 }
 
-/* ------------------------------------------------------- licence --- */
-
-/**
- * Store build only. Every use sits behind the build-time constant, so public
- * and private bundles contain none of it and never check anything.
- */
-const LICENCE_ALARM = "anansi-licence";
-let licenceClient: Licence | null = null;
-
-function licence(): Licence {
-	licenceClient ??= createLicence({
-		required: __ANANSI_REQUIRE_LICENCE__,
-		fetch: (url, init) => fetch(url, init),
-		now: Date.now,
-		storage: {
-			get: (key) => browser.storage.local.get(key),
-			set: (values) => browser.storage.local.set(values),
-			remove: (key) => browser.storage.local.remove(key),
-		},
-		label: () => activationLabel(navigator.userAgent, Date.now()),
-	});
-	return licenceClient;
-}
-
-/**
- * True while the store build has no usable licence.
- *
- * Locked, the worker behaves as if it were not connected: nothing is
- * captured, uploaded or synced, and nothing queued is touched, so it all
- * resumes once a key is active again.
- */
-async function licenceLocked(): Promise<boolean> {
-	if (!__ANANSI_REQUIRE_LICENCE__) return false;
-	try {
-		return !licenceAllowsCapture(await licence().licenceGate());
-	} catch {
-		return true;
-	}
-}
-
-/** Wake everything that waited while the licence was missing. */
-async function licenceUnlocked(): Promise<void> {
-	await wakeDurableQueue().catch(() => {});
-	requestHeartbeat();
-	void armLibraryTabs().catch(() => {});
-}
-
-/** Revalidate when due (or now, when forced) and resume work if that unlocked it. */
-async function refreshLicence(force = false): Promise<LicenceGate> {
-	if (!__ANANSI_REQUIRE_LICENCE__) return { state: "not-applicable" };
-	const wasLocked = await licenceLocked();
-	const gate = force ? await licence().revalidate() : await licence().revalidateIfDue();
-	if (wasLocked && licenceAllowsCapture(gate)) await licenceUnlocked();
-	return gate;
-}
-
-/** A daily look; revalidateIfDue only calls Polar once the 7 days are up. */
-async function armLicenceAlarm(): Promise<void> {
-	if (!__ANANSI_REQUIRE_LICENCE__) return;
-	// Recreating an alarm resets it, and the worker starts many times a day.
-	if (await browser.alarms.get(LICENCE_ALARM)) return;
-	browser.alarms.create(LICENCE_ALARM, { delayInMinutes: 1, periodInMinutes: 24 * 60 });
-}
-
-/**
- * The connection the worker may use right now. In the store build without an
- * active licence there is none, which is what stops capture, delivery,
- * heartbeats and sync at the one place they all ask.
- */
+/** The connection the worker may use right now, or null when not connected. */
 async function settings(): Promise<Settings | null> {
-	if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) return null;
 	const conn = await getExtensionConnection();
 	if (!conn) return null;
 	return { server: conn.origin, token: conn.token };
@@ -876,9 +799,6 @@ async function capturePage(
 ): Promise<
 	{ ok: true; delivery: "queued" | "uploaded" } | { ok: false; error: string }
 > {
-	if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) {
-		return { ok: false, error: "activate your licence to keep saving" };
-	}
 	const tab = await browser.tabs.get(tabId).catch(() => null);
 	const supported = capturablePage(tab?.url);
 	if (!supported.ok) {
@@ -1273,7 +1193,6 @@ async function startCapture(
 	live = false,
 ): Promise<void> {
 	if (!isExtensionPlatformSource(source)) return;
-	if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) return;
 	if (
 		isSessionCaptureSource(source) &&
 		sessionImports.has(source)
@@ -1568,7 +1487,6 @@ async function startCapture(
 async function startAllCaptures(
 	options: { skip?: readonly string[] } = {},
 ): Promise<BackgroundResult> {
-	if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) return { ok: false, error: "licence required" };
 	const config = await loadConfig(true);
 	if (!config?.enabled) {
 		return { ok: false, error: "capture disabled on server" };
@@ -1883,10 +1801,8 @@ type BackgroundResult =
 			confirm?: boolean;
 			/** A source's capture switch, as the library recorded it. */
 			enabled?: boolean;
-			/** Store build: where the licence stands after this command. */
-			licence?: LicenceGate;
 	  }
-	| { ok: false; error: string; licenceError?: LicenceError; licence?: LicenceGate };
+	| { ok: false; error: string };
 
 interface RuntimeMessageSender {
   frameId?: number;
@@ -1980,37 +1896,7 @@ async function handlePopupCommand(
 			await wakeDurableQueue();
 			return { ok: true };
 		}
-		case "licence-status": {
-			if (!__ANANSI_REQUIRE_LICENCE__) return { ok: true, licence: { state: "not-applicable" } };
-			return { ok: true, licence: await refreshLicence() };
-		}
-		case "licence-check": {
-			if (!__ANANSI_REQUIRE_LICENCE__) return { ok: true, licence: { state: "not-applicable" } };
-			return { ok: true, licence: await refreshLicence(true) };
-		}
-		case "licence-activate": {
-			if (!__ANANSI_REQUIRE_LICENCE__) return { ok: true, licence: { state: "not-applicable" } };
-			const wasLocked = await licenceLocked();
-			const result = await licence().activateLicence(msg.licenceKey);
-			if (!result.ok) {
-				return { ok: false, error: result.error, licenceError: result.error, licence: result.gate };
-			}
-			await armLicenceAlarm();
-			if (wasLocked) await licenceUnlocked();
-			return { ok: true, licence: result.gate };
-		}
-		case "licence-deactivate": {
-			if (!__ANANSI_REQUIRE_LICENCE__) return { ok: true, licence: { state: "not-applicable" } };
-			const result = await licence().deactivate();
-			if (!result.ok) {
-				return { ok: false, error: result.error, licenceError: result.error, licence: result.gate };
-			}
-			return { ok: true, licence: result.gate };
-		}
 		case "connection-updated": {
-			// Locked, the worker cannot see the connection and would read this as a
-			// disconnect, handing back the library's host permission. Refuse instead.
-			if (__ANANSI_REQUIRE_LICENCE__ && (await licenceLocked())) return { ok: false, error: "Activate your licence first" };
 			const originState = await browser.storage.local.get(["anansiConnectionPreviousOrigin", "anansiAuthorizedOrigin", "anansiConnectionAttemptOrigin"]);
 			const prior = typeof originState.anansiConnectionPreviousOrigin === "string"
 				? originState.anansiConnectionPreviousOrigin
@@ -2340,14 +2226,6 @@ async function handleRuntimeMessage(
 		if (held && tabId !== undefined) await closeOwnedTab(held.source, held.runId, tabId);
 		return { ok: true };
 	}
-  // Store build without a licence: pages may not hand over captures.
-  if (
-    __ANANSI_REQUIRE_LICENCE__ &&
-    (message as { anansi?: string })?.anansi !== "popup-command" &&
-    (await licenceLocked())
-  ) {
-    return { ok: false, error: "licence required" };
-  }
   const handoff = parseNativeHandoffStoreRequest(message);
 	if (handoff) return handleNativeHandoffStore(handoff, sender);
 	const parsed = validateRuntimeMessage(message, sender);
@@ -2419,10 +2297,6 @@ export default defineBackground(() => {
 				await startCapture(source, true, interrupted.runMode === "live");
 				return;
 			}
-			if (__ANANSI_REQUIRE_LICENCE__ && alarm.name === LICENCE_ALARM) {
-				await refreshLicence();
-				return;
-			}
 			if (alarm.name === HEARTBEAT_ALARM) {
 				requestHeartbeat();
 				return;
@@ -2437,10 +2311,6 @@ export default defineBackground(() => {
 
 	// Earlier versions kept a daily catch-up alarm. Sync now follows the library.
 	void browser.alarms.clear(SYNC_ALARM);
-	if (__ANANSI_REQUIRE_LICENCE__) {
-		void armLicenceAlarm();
-		void refreshLicence().catch(() => {});
-	}
 	void armLibraryTabs().catch(() => {});
 	void rescheduleHeartbeat();
 	void wakeDurableQueue().then(processPendingRefreshes);

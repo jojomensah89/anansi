@@ -627,38 +627,8 @@
   text-align: center;
 }
 
-/* Licence (store build only) */
-
 a.btn {
   text-decoration: none;
-}
-
-.licence-key {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-.licence-row {
-  flex-wrap: wrap;
-  margin-top: 4px;
-  border-top: 1px solid var(--line-soft);
-  padding-top: 12px;
-}
-
-.licence-row .btn {
-  flex: none;
-}
-
-.licence-note {
-  flex-basis: 100%;
-  margin-top: -4px;
-  /* Clear the sticky footer when scrolled into view. */
-  scroll-margin-bottom: 64px;
-}
-
-.opt .licence-note.warn {
-  color: var(--warn);
 }
 
 /* The second, deliberate press on Remove reads as the warning it is. */
