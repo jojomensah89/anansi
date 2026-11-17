@@ -10,9 +10,8 @@ Anansi captures X bookmarks, Reddit saves, GitHub stars, TikTok favorites, and w
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple)](https://modelcontextprotocol.io)
 [![Repo](https://img.shields.io/badge/GitHub-jojomensah89%2Fanansi-black?logo=github)](https://github.com/jojomensah89/anansi)
 [![Stars](https://img.shields.io/github/stars/jojomensah89/anansi?style=social)](https://github.com/jojomensah89/anansi)
-[![Issues](https://img.shields.io/github/issues/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/issues)
-[![Last commit](https://img.shields.io/github/last-commit/jojomensah89/anansi)](https://github.com/jojomensah89/anansi/commits)
-[![CI](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml/badge.svg)](https://github.com/jojomensah89/anansi/actions/workflows/ci.yml)
+[![Follow on X](https://img.shields.io/badge/Follow-jojomensah89-black?logo=x&logoColor=white)](https://x.com/jojomensah89)
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/jojomensah89)
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fjojomensah89%2Fanansi)
 
@@ -310,9 +309,23 @@ PRs welcome — small and focused wins. Read [CONTRIBUTING.md](./CONTRIBUTING.md
 
 Useful early contributions include clearer setup docs, scrubbed source fixtures, parser and import fixes, MCP client examples, accessibility improvements, and focused library UX changes. If you are unsure where to begin, open a small issue describing the user problem before starting a large change.
 
-## 💛 Support
+## Sponsors
 
-Anansi is free, including the extension. If it is useful to you, you can pay what you want through [Polar](https://buy.polar.sh/polar_cl_23HStXNgQMfXFavpX5s33s4PzRtZuNxJU1WWl0cIfgF), or star the repository. Both are optional.
+Anansi is free, including the extension. Support its development through [GitHub Sponsors](https://github.com/sponsors/jojomensah89), or [follow me on X](https://x.com/jojomensah89) for demos and updates.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/sponsors/jojomensah89"><strong>Your logo here</strong></a><br />
+      Support open-source web memory for people and AI agents.<br /><br />
+      <a href="https://github.com/sponsors/jojomensah89">Become a sponsor &rarr;</a>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <a href="https://github.com/sponsors/jojomensah89"><img src="https://img.shields.io/badge/Become_a_sponsor-GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Become a sponsor on GitHub" /></a>
+</p>
 
 ## 📄 License
 
@@ -322,4 +335,4 @@ MIT © 2026 Jojo Mensah — see [LICENSE](./LICENSE). The Anansi name and logo a
 
 Built by Jojo Mensah · Follow along for demos and changelogs
 
-<a href="https://buy.polar.sh/polar_cl_23HStXNgQMfXFavpX5s33s4PzRtZuNxJU1WWl0cIfgF">Support Anansi</a> · <a href="https://x.com/jojomensah89"><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" height="20" align="middle" /></a>
+<a href="https://github.com/sponsors/jojomensah89">Sponsor on GitHub</a> · <a href="https://x.com/jojomensah89"><img src="https://shieldcn.dev/x/follow/jojomensah89.svg?variant=branded&size=xs&theme=zinc" alt="X Follow" height="20" align="middle" /></a>
