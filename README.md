@@ -23,20 +23,9 @@ Anansi captures X bookmarks, Reddit saves, GitHub stars, TikTok favorites, and w
 
 ## Sponsors
 
-Your logo, project name, link, and short description in the README and on the website.
-
-<table border="1" rules="all" width="100%" style="width: 100%; border-collapse: collapse; border: 1px solid #3d444d;">
-  <tr>
-    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
-    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
-    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
-  </tr>
-  <tr>
-    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
-    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
-    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
-  </tr>
-</table>
+<a href="https://github.com/sponsors/jojomensah89">
+  <img src="./docs/assets/sponsor-placeholders.svg" width="900" height="300" alt="Six available sponsor slots in a three-column, two-row grid. Sponsor Anansi on GitHub." />
+</a>
 
 <p align="center">
   <a href="https://github.com/sponsors/jojomensah89"><img src="https://img.shields.io/badge/Become_a_sponsor-%2419%2Fmonth-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Become a sponsor - $19/month" /></a>
