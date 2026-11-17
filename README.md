@@ -21,6 +21,27 @@ Anansi captures X bookmarks, Reddit saves, GitHub stars, TikTok favorites, and w
 
 </div>
 
+## Sponsors
+
+Your logo, project name, link, and short description in the README and on the website.
+
+<table border="1" rules="all" width="100%" style="width: 100%; border-collapse: collapse; border: 1px solid #3d444d;">
+  <tr>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+    <td align="center" width="33%" height="130" style="border: 1px solid #3d444d; padding: 24px 16px;"><strong>Your logo here</strong><br /><br /><sub>Sponsor slot available</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <a href="https://github.com/sponsors/jojomensah89"><img src="https://img.shields.io/badge/Become_a_sponsor-%2419%2Fmonth-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Become a sponsor - $19/month" /></a>
+</p>
+
 ## ✨ What Anansi does
 
 Anansi does the following:
@@ -308,24 +329,6 @@ Have an idea? [Open a feature request](https://github.com/jojomensah89/anansi/is
 PRs welcome — small and focused wins. Read [CONTRIBUTING.md](./CONTRIBUTING.md), follow the privacy rules, run the checks above. Report vulnerabilities privately per [SECURITY.md](./SECURITY.md). Be kind per [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
 Useful early contributions include clearer setup docs, scrubbed source fixtures, parser and import fixes, MCP client examples, accessibility improvements, and focused library UX changes. If you are unsure where to begin, open a small issue describing the user problem before starting a large change.
-
-## Sponsors
-
-Anansi is free, including the extension. Support its development through [GitHub Sponsors](https://github.com/sponsors/jojomensah89), or [follow me on X](https://x.com/jojomensah89) for demos and updates.
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://github.com/sponsors/jojomensah89"><strong>Your logo here</strong></a><br />
-      Support open-source web memory for people and AI agents.<br /><br />
-      <a href="https://github.com/sponsors/jojomensah89">Become a sponsor &rarr;</a>
-    </td>
-  </tr>
-</table>
-
-<p align="center">
-  <a href="https://github.com/sponsors/jojomensah89"><img src="https://img.shields.io/badge/Become_a_sponsor-GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Become a sponsor on GitHub" /></a>
-</p>
 
 ## 📄 License
 
