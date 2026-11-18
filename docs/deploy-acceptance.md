@@ -1,6 +1,18 @@
-# Fresh-account deploy acceptance
+# Cloudflare deployment verification
 
-Owner-run proof, not yet performed. Target: under 10 minutes from clicking the
+## Current status
+
+**Deployment verified by the project owner.** Jojo confirmed on 2026-11-18
+that they have verified Anansi deployment. This owner confirmation supersedes
+the earlier pending status and is recorded as complete in the README.
+
+## Detailed regression checklist
+
+The checklist below is retained for future runs. Its individual results and
+timing measurements have not been recorded here; unchecked boxes do not change
+the owner-verified deployment status.
+
+For a timed fresh-account run, target under 10 minutes from clicking the
 button to the first captured save visible in the hosted library. Record click,
 deploy and first-capture timestamps, total elapsed time and any failures.
 
@@ -44,5 +56,7 @@ deploy and first-capture timestamps, total elapsed time and any failures.
   root packageManager selects the exact Bun version. No .bun-version or engines
   workaround is needed.
 
-Exact dashboard prompts, provisioning, live OAuth and timing need this real
-account check. Automated tests/builds do not establish these outcomes.
+For future detailed runs, record exact dashboard prompts, provisioning, live
+OAuth and timing results against the checklist above. Automated tests/builds
+alone do not establish these outcomes; the deployment status above is based
+on owner confirmation.

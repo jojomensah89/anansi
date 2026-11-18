@@ -165,7 +165,8 @@ change the cap in Settings.
 Workers Builds honors the root `packageManager: bun@1.4.2`; no manual
 `BUN_VERSION` is needed. Accept the detected `bun run build` and `bun run deploy`
 commands. Deploy applies pending D1 SQL migrations before publishing.
-See [fresh-account acceptance](docs/deploy-acceptance.md) for the timed checklist.
+Cloudflare deployment has been verified by the project owner (confirmed 2026-11-18).
+See the [deployment verification record](docs/deploy-acceptance.md) for the confirmation and detailed regression checklist.
 
 After deployment returns `https://<worker>.workers.dev`:
 
@@ -305,7 +306,7 @@ Covers queue recovery, retries, parser fixtures, authenticated ingest, GitHub im
 ## 🗺️ Roadmap
 
 - [ ] 🔍 Cloudflare AI-enrichment acceptance — Workers AI Clef tagging and Vectorize semantic search clean-account acceptance
-- [ ] First clean-account deploy: install → migrate → first capture → search → export → restore against Cloudflare
+- [x] Cloudflare deployment verified by the project owner (confirmed 2026-11-18; see [verification record](docs/deploy-acceptance.md))
 - [ ] Measured free-tier usage + media-host allowlist published here
 - [ ] Synthetic demo library
 - [ ] Pinterest capture — add a browser-session importer and live-save path
